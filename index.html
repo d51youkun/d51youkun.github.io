@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1a6fd4">
+  <title>BlueChat</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- オンボーディング -->
+  <div id="screen-onboarding" class="screen hidden">
+    <div class="onboarding-container">
+      <div class="logo-large">
+        <div class="logo-icon">💬</div>
+        <h1>BlueChat</h1>
+        <p class="tagline">シンプルなチャットアプリ</p>
+      </div>
+      <div class="onboarding-form">
+        <p class="form-desc">お名前を入力してください。<br>アカウント情報はこのデバイスにのみ保存されます。</p>
+        <input type="text" id="input-name" placeholder="名前を入力" maxlength="20" autocomplete="off">
+        <button id="btn-start" class="btn-primary">はじめる</button>
+      </div>
+      <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
+    </div>
+  </div>
+
+  <!-- メインアプリ -->
+  <div id="screen-main" class="screen hidden">
+    <header class="app-header">
+      <h1 id="header-title">BlueChat</h1>
+      <button id="btn-menu" class="icon-btn" aria-label="メニュー">☰</button>
+    </header>
+
+    <!-- タブナビ -->
+    <nav class="tab-nav">
+      <button class="tab active" data-tab="chats">トーク</button>
+      <button class="tab" data-tab="friends">友だち</button>
+      <button class="tab" data-tab="profile">マイページ</button>
+    </nav>
+
+    <!-- トーク一覧 -->
+    <div id="tab-chats" class="tab-content active">
+      <div class="action-bar">
+        <button id="btn-new-group" class="btn-secondary btn-sm">＋ グループ作成</button>
+      </div>
+      <div id="chat-list" class="list"></div>
+      <div id="chat-list-empty" class="empty-state hidden">
+        <p>トークがありません</p>
+        <p class="sub">友だちを追加してメッセージを送りましょう</p>
+      </div>
+    </div>
+
+    <!-- 友だち一覧 -->
+    <div id="tab-friends" class="tab-content hidden">
+      <div class="action-bar">
+        <button id="btn-add-friend" class="btn-primary btn-sm">友だち追加</button>
+      </div>
+      <div id="friend-list" class="list"></div>
+      <div id="friend-list-empty" class="empty-state hidden">
+        <p>友だちがいません</p>
+        <p class="sub">パスワードを発行・入力して友だちを追加しましょう</p>
+      </div>
+    </div>
+
+    <!-- マイページ -->
+    <div id="tab-profile" class="tab-content hidden">
+      <div class="profile-card">
+        <div class="profile-avatar-wrap">
+          <div class="profile-avatar" id="profile-avatar">?</div>
+          <button type="button" id="btn-change-avatar" class="avatar-edit-btn" aria-label="プロフィール画像を変更">📷</button>
+          <input type="file" id="input-avatar" accept="image/*" hidden>
+        </div>
+        <button type="button" id="btn-remove-avatar" class="btn-text-link hidden">プロフィール画像を削除</button>
+        <h2 id="profile-name">名前</h2>
+        <p class="profile-id" id="profile-id"></p>
+      </div>
+      <div class="profile-menu">
+        <button id="btn-generate-code" class="menu-item">
+          <span class="menu-icon">🔑</span>
+          <span>友だち追加用パスワードを発行</span>
+        </button>
+        <button id="btn-reset-data" class="menu-item danger">
+          <span class="menu-icon">🗑️</span>
+          <span>このデバイスのデータをリセット</span>
+        </button>
+      </div>
+      <a href="#" id="link-admin-main" class="admin-link">管理者の方はこちら</a>
+    </div>
+  </div>
+
+  <!-- チャット画面 -->
+  <div id="screen-chat" class="screen hidden">
+    <header class="chat-header">
+      <button id="btn-back-chat" class="icon-btn">←</button>
+      <div class="chat-header-info">
+        <h2 id="chat-title">トーク</h2>
+        <p id="chat-subtitle" class="hidden"></p>
+      </div>
+      <button id="btn-chat-info" class="icon-btn hidden" aria-label="情報">ℹ️</button>
+    </header>
+    <div id="messages-container" class="messages-container"></div>
+    <div class="message-input-bar">
+      <input type="text" id="input-message" placeholder="メッセージを入力" maxlength="1000" autocomplete="off">
+      <button id="btn-send" class="btn-send" disabled>送信</button>
+    </div>
+  </div>
+
+  <!-- 友だち追加モーダル -->
+  <div id="modal-add-friend" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3>友だち追加</h3>
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-modal-tab="enter">パスワードを入力</button>
+        <button class="modal-tab" data-modal-tab="generate">パスワードを発行</button>
+      </div>
+      <div id="modal-tab-enter" class="modal-tab-content">
+        <p>友だちから受け取ったパスワードを入力してください</p>
+        <input type="text" id="input-friend-code" placeholder="パスワード（例: ABC123）" maxlength="8" autocomplete="off" style="text-transform:uppercase">
+        <button id="btn-submit-code" class="btn-primary">友だち追加</button>
+      </div>
+      <div id="modal-tab-generate" class="modal-tab-content hidden">
+        <p>発行したパスワードを友だちに伝えてください。<br>有効期限は30分です。</p>
+        <div id="generated-code-display" class="code-display hidden">
+          <span id="generated-code-text"></span>
+          <button id="btn-copy-code" class="btn-secondary btn-sm">コピー</button>
+        </div>
+        <button id="btn-generate-new-code" class="btn-primary">パスワードを発行する</button>
+      </div>
+      <button class="btn-close-modal">閉じる</button>
+    </div>
+  </div>
+
+  <!-- グループ作成モーダル -->
+  <div id="modal-create-group" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3>グループ作成</h3>
+      <input type="text" id="input-group-name" placeholder="グループ名" maxlength="30">
+      <p class="form-label">メンバーを選択</p>
+      <div id="group-member-select" class="member-select"></div>
+      <button id="btn-create-group" class="btn-primary" disabled>グループを作成</button>
+      <button class="btn-close-modal">閉じる</button>
+    </div>
+  </div>
+
+  <!-- グループ情報モーダル -->
+  <div id="modal-group-info" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3 id="group-info-title">グループ情報</h3>
+      <p class="form-label">メンバー</p>
+      <div id="group-info-members" class="member-list"></div>
+      <button id="btn-leave-group" class="btn-danger">グループを退出</button>
+      <button class="btn-close-modal">閉じる</button>
+    </div>
+  </div>
+
+  <!-- 管理者ログイン -->
+  <div id="screen-admin-login" class="screen hidden">
+    <div class="onboarding-container">
+      <div class="logo-large">
+        <div class="logo-icon">🔐</div>
+        <h1>管理者ログイン</h1>
+      </div>
+      <div class="onboarding-form">
+        <input type="email" id="input-admin-email" placeholder="メールアドレス" autocomplete="off">
+        <input type="password" id="input-admin-password" placeholder="パスワード">
+        <button id="btn-admin-login" class="btn-primary">ログイン</button>
+        <button id="btn-admin-back" class="btn-secondary">戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 管理者ダッシュボード -->
+  <div id="screen-admin" class="screen hidden">
+    <header class="app-header admin-header">
+      <button id="btn-admin-exit" class="icon-btn">←</button>
+      <h1>管理者メニュー</h1>
+      <span></span>
+    </header>
+    <nav class="tab-nav">
+      <button class="tab active" data-admin-tab="users">ユーザー管理</button>
+      <button class="tab" data-admin-tab="conversations">会話監視</button>
+    </nav>
+
+    <div id="admin-tab-users" class="tab-content active">
+      <div id="admin-user-list" class="list"></div>
+      <div id="admin-user-empty" class="empty-state hidden">
+        <p>登録ユーザーがいません</p>
+      </div>
+    </div>
+
+    <div id="admin-tab-conversations" class="tab-content hidden">
+      <div id="admin-conv-list" class="list"></div>
+      <div id="admin-conv-empty" class="empty-state hidden">
+        <p>会話がありません</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 管理者：会話詳細 -->
+  <div id="screen-admin-chat" class="screen hidden">
+    <header class="chat-header admin-header">
+      <button id="btn-admin-chat-back" class="icon-btn">←</button>
+      <div class="chat-header-info">
+        <h2 id="admin-chat-title">会話詳細</h2>
+        <p id="admin-chat-subtitle"></p>
+      </div>
+      <span></span>
+    </header>
+    <div id="admin-messages-container" class="messages-container"></div>
+  </div>
+
+  <!-- トースト -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
