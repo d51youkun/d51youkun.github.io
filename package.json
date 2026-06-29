@@ -1,0 +1,12 @@
+{
+  "name": "bluechat-sync",
+  "version": "1.0.0",
+  "description": "BlueChat message sync server",
+  "main": "sync-server.js",
+  "scripts": {
+    "start": "node sync-server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
