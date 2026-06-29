@@ -79,7 +79,7 @@
       <div class="profile-menu">
         <div class="sync-settings">
           <p class="form-label">他の端末と同期</p>
-          <input type="url" id="input-sync-url" placeholder="http://192.168.x.x:8766" autocomplete="off">
+          <input type="url" id="input-sync-url" placeholder="http://192.168.179.18:8766" autocomplete="off">
           <button type="button" id="btn-save-sync" class="btn-secondary btn-sm">同期サーバーを保存</button>
           <p class="qr-hint" id="sync-status"></p>
         </div>
@@ -273,6 +273,7 @@ const ADMIN_PASSWORD = 'D51498Go';
 const CODE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 const INVITE_PREFIX = 'bluechat:';
 const SYNC_URL_KEY = 'bluechat_sync_url';
+const DEFAULT_SYNC_URL = 'https://bluechat-sync.onrender.com';
 
 // ─── State ───────────────────────────────────────────────
 let currentScreen = 'onboarding';
@@ -799,7 +800,13 @@ function setSyncUrl(url) {
 function initSyncFromQuery() {
   const params = new URLSearchParams(window.location.search);
   const sync = params.get('sync');
-  if (sync) setSyncUrl(sync);
+  if (sync) {
+    setSyncUrl(sync);
+    return;
+  }
+  if (DEFAULT_SYNC_URL && !getSyncUrl()) {
+    setSyncUrl(DEFAULT_SYNC_URL);
+  }
 }
 
 async function cloudRequest(path, options = {}) {
