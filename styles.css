@@ -1039,3 +1039,95 @@ input:focus {
   .modal-content { border-radius: var(--radius); margin: 24px; }
   body { max-width: 480px; margin: 0 auto; border-left: 1px solid var(--gray-200); border-right: 1px solid var(--gray-200); }
 }
+
+/* Extended features */
+.sub-tab-nav { border-top: none; }
+.sub-tab-nav .tab { font-size: 13px; }
+
+.chat-call-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--white);
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.btn-call {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--blue-primary);
+  background: var(--blue-pale);
+  color: var(--blue-primary);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.message-sticker { font-size: 64px; line-height: 1; }
+.message-video {
+  max-width: min(240px, 75vw);
+  max-height: 200px;
+  border-radius: 12px;
+}
+.message-file-link {
+  color: var(--blue-primary);
+  font-weight: 600;
+  text-decoration: none;
+  word-break: break-all;
+}
+.message.sent .message-file-link { color: #fff; }
+
+.read-badge {
+  font-size: 10px;
+  color: var(--gray-500);
+  margin-bottom: 2px;
+}
+.message.sent .read-badge { color: rgba(255,255,255,0.85); }
+
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+.sticker-btn {
+  font-size: 28px;
+  padding: 8px;
+  border: none;
+  background: var(--gray-100);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sticker-btn:hover { background: var(--blue-pale); }
+
+.call-overlay.modal {
+  align-items: center;
+  justify-content: center;
+}
+.call-overlay.modal .call-overlay-inner {
+  background: rgba(13, 74, 143, 0.95);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.call-video {
+  width: 100%;
+  max-height: 40vh;
+  border-radius: 12px;
+  background: #000;
+  margin: 16px 0;
+}
+.call-video-local {
+  max-height: 120px;
+  width: auto;
+  position: absolute;
+  bottom: 100px;
+  right: 16px;
+  border: 2px solid #fff;
+}
+
+.admin-panel { flex: 1; overflow-y: auto; }
+
+#qr-reader-transfer { width: 100%; min-height: 200px; }
