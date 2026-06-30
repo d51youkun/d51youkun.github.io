@@ -85,6 +85,10 @@
           <button type="button" id="btn-save-sync" class="btn-secondary btn-sm">同期サーバーを保存</button>
           <p class="qr-hint" id="sync-status"></p>
         </div>
+        <button type="button" id="btn-enable-notify" class="menu-item">
+          <span class="menu-icon">🔔</span>
+          <span>通知を許可する</span>
+        </button>
         <button id="btn-show-qr" class="menu-item">
           <span class="menu-icon">📱</span>
           <span>友だち追加用QRコードを表示</span>
@@ -137,10 +141,12 @@
     </div>
     <div id="messages-container" class="messages-container"></div>
     <div class="message-input-bar">
-      <button type="button" id="btn-attach-image" class="btn-attach" aria-label="写真">📷</button>
-      <button type="button" id="btn-attach-video" class="btn-attach" aria-label="動画">🎬</button>
-      <button type="button" id="btn-attach-file" class="btn-attach" aria-label="ファイル">📎</button>
-      <button type="button" id="btn-stickers" class="btn-attach" aria-label="スタンプ">🎨</button>
+      <div class="attach-toolbar">
+        <button type="button" id="btn-attach-image" class="btn-attach" aria-label="写真" title="写真">📷</button>
+        <button type="button" id="btn-attach-video" class="btn-attach" aria-label="動画" title="動画">🎬</button>
+        <button type="button" id="btn-attach-file" class="btn-attach" aria-label="ファイル" title="ファイル">📎</button>
+        <button type="button" id="btn-stickers" class="btn-attach" aria-label="スタンプ" title="スタンプ">🎨</button>
+      </div>
       <input type="file" id="input-chat-image" accept="image/*" hidden>
       <input type="file" id="input-chat-video" accept="video/*" hidden>
       <input type="file" id="input-chat-file" hidden>
@@ -325,6 +331,20 @@
       <button type="button" id="btn-start-transfer-camera" class="btn-primary">カメラを起動</button>
       <button type="button" id="btn-stop-transfer-camera" class="btn-secondary btn-sm">停止</button>
       <button class="btn-close-modal">閉じる</button>
+    </div>
+  </div>
+
+  <!-- 着信 -->
+  <div id="modal-incoming-call" class="modal hidden incoming-call-modal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content incoming-call-content">
+      <div class="incoming-call-icon">📞</div>
+      <h3 id="incoming-call-title">着信中</h3>
+      <p id="incoming-call-sub"></p>
+      <div class="incoming-call-actions">
+        <button type="button" id="btn-decline-call" class="btn-danger btn-call-action">拒否</button>
+        <button type="button" id="btn-answer-call" class="btn-primary btn-call-action">応答</button>
+      </div>
     </div>
   </div>
 
@@ -896,7 +916,12 @@ function getDirectConvId(id1, id2) {
 
 // ─── Cloud Sync ────────────────────────────────────────────
 function getSyncUrl() {
-  return (localStorage.getItem(SYNC_URL_KEY) || '').replace(/\/$/, '');
+  const stored = (localStorage.getItem(SYNC_URL_KEY) || '').replace(/\/$/, '');
+  if (stored) return stored;
+  if (typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+    return DEFAULT_SYNC_URL;
+  }
+  return '';
 }
 
 function setSyncUrl(url) {
@@ -2283,6 +2308,159 @@ let peerConnection = null;
 let localStream = null;
 let callState = { active: false, type: null, remoteUserId: null, convId: null };
 let transferScanner = null;
+let pendingIncomingCall = null;
+let ringToneTimer = null;
+let audioCtx = null;
+
+// ─── Notifications ───────────────────────────────────────
+function notificationsSupported() {
+  return typeof Notification !== 'undefined';
+}
+
+async function requestNotificationPermission() {
+  if (!notificationsSupported()) {
+    showToast('このブラウザは通知に対応していません');
+    return false;
+  }
+  if (Notification.permission === 'granted') {
+    showToast('通知はすでに許可されています');
+    updateNotifyButtonLabel();
+    return true;
+  }
+  if (Notification.permission === 'denied') {
+    showToast('通知がブロックされています。ブラウザの設定から許可してください');
+    return false;
+  }
+  const result = await Notification.requestPermission();
+  updateNotifyButtonLabel();
+  if (result === 'granted') {
+    showToast('通知を許可しました');
+    registerServiceWorker();
+    return true;
+  }
+  showToast('通知が許可されませんでした');
+  return false;
+}
+
+function updateNotifyButtonLabel() {
+  const btn = document.getElementById('btn-enable-notify');
+  if (!btn) return;
+  const label = btn.querySelector('span:last-child');
+  if (!label) return;
+  if (!notificationsSupported()) {
+    label.textContent = '通知非対応';
+    btn.disabled = true;
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    label.textContent = '通知：許可済み ✓';
+  } else if (Notification.permission === 'denied') {
+    label.textContent = '通知：ブロック中';
+  } else {
+    label.textContent = '通知を許可する';
+  }
+}
+
+function showAppNotification(title, body, options = {}) {
+  if (!notificationsSupported() || Notification.permission !== 'granted') return;
+  const { tag, onClick, convId } = options;
+  const n = new Notification(title, {
+    body,
+    tag: tag || 'bluechat',
+    icon: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="#4a90d9" width="100" height="100" rx="20"/><text x="50" y="68" font-size="50" text-anchor="middle" fill="white">💬</text></svg>'),
+    data: { convId, url: location.href }
+  });
+  n.onclick = () => {
+    window.focus();
+    n.close();
+    if (typeof onClick === 'function') onClick();
+  };
+}
+
+function getAudioContext() {
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (Ctx) audioCtx = new Ctx();
+  }
+  return audioCtx;
+}
+
+function playTone(freq, durationSec) {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') ctx.resume();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.15, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durationSec);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + durationSec);
+}
+
+function playMessageSound() {
+  playTone(880, 0.08);
+  setTimeout(() => playTone(1100, 0.1), 90);
+}
+
+function startRingtone() {
+  stopRingtone();
+  const ring = () => {
+    playTone(800, 0.2);
+    setTimeout(() => playTone(1000, 0.2), 220);
+    if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+  };
+  ring();
+  ringToneTimer = setInterval(ring, 2200);
+}
+
+function stopRingtone() {
+  if (ringToneTimer) {
+    clearInterval(ringToneTimer);
+    ringToneTimer = null;
+  }
+  if (navigator.vibrate) navigator.vibrate(0);
+}
+
+function shouldNotifyForConv(convId) {
+  const chatScreen = document.getElementById('screen-chat');
+  const onChat = chatScreen && !chatScreen.classList.contains('hidden') && currentConvId === convId;
+  return document.hidden || !onChat;
+}
+
+function onNewMessageReceived(convId, msg) {
+  const user = getCurrentUser();
+  if (!user || String(msg.senderId) === String(user.id)) return;
+  if (!shouldNotifyForConv(convId)) return;
+  const conv = getData().conversations[convId];
+  if (!conv) return;
+  const name = getConvDisplayName(conv, user.id);
+  const preview = getMessagePreview(msg);
+  playMessageSound();
+  showAppNotification(name, preview, {
+    tag: 'msg-' + convId,
+    convId,
+    onClick: () => openChat(convId)
+  });
+}
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    await navigator.serviceWorker.register('./sw.js');
+  } catch (e) { /* ignore */ }
+}
+
+function setupNotificationClickHandler() {
+  if (!navigator.serviceWorker) return;
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'notification-click' && e.data.convId) {
+      openChat(e.data.convId);
+    }
+  });
+}
 
 function getEffectiveSyncUrl() {
   const u = getSyncUrl();
@@ -2472,6 +2650,13 @@ function createMessageElementExt(msg, convId, user) {
 
 createMessageElement = createMessageElementExt;
 getMessageContentHtml = getMessageContentHtmlExt;
+
+const _mergeRemoteMessageOrig = mergeRemoteMessage;
+mergeRemoteMessage = function (convId, remoteMsg) {
+  const added = _mergeRemoteMessageOrig(convId, remoteMsg);
+  if (added) onNewMessageReceived(convId, remoteMsg);
+  return added;
+};
 
 const _openChatOrig = openChat;
 openChat = function (convId) {
@@ -2710,7 +2895,7 @@ function updateCallButtons(convId) {
 
 async function sendCallSignal(toUserId, type, payload) {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return;
+  if (!user || !getEffectiveSyncUrl()) return;
   await cloudRequest('/api/call/signal', {
     method: 'POST',
     body: JSON.stringify({ from: user.id, to: toUserId, type, payload, timestamp: Date.now() })
@@ -2742,6 +2927,9 @@ async function endCall() {
   if (callState.remoteUserId) {
     await sendCallSignal(callState.remoteUserId, 'hangup', {});
   }
+  pendingIncomingCall = null;
+  stopRingtone();
+  hideIncomingCallUI();
   if (localStream) {
     localStream.getTracks().forEach(t => t.stop());
     localStream = null;
@@ -2755,8 +2943,105 @@ async function endCall() {
   stopCallPolling();
 }
 
+function hideIncomingCallUI() {
+  const modal = document.getElementById('modal-incoming-call');
+  if (modal) modal.classList.add('hidden');
+}
+
+function showIncomingCallUI(sig) {
+  const caller = getUser(sig.from);
+  const name = caller?.name || '不明';
+  const callType = sig.payload?.callType || 'audio';
+  const titleEl = document.getElementById('incoming-call-title');
+  const subEl = document.getElementById('incoming-call-sub');
+  const iconEl = document.querySelector('.incoming-call-icon');
+  if (titleEl) titleEl.textContent = callType === 'video' ? 'ビデオ通話の着信' : '音声通話の着信';
+  if (subEl) subEl.textContent = `${name} さんから`;
+  if (iconEl) iconEl.textContent = callType === 'video' ? '📹' : '📞';
+  document.getElementById('modal-incoming-call')?.classList.remove('hidden');
+  startRingtone();
+  showAppNotification(
+    `${name}から着信`,
+    callType === 'video' ? 'ビデオ通話' : '音声通話',
+    { tag: 'incoming-call' }
+  );
+}
+
+async function acceptIncomingOffer(sig) {
+  const callType = sig.payload?.callType || 'audio';
+  const user = getCurrentUser();
+  const convId = user ? getDirectConvId(user.id, sig.from) : null;
+  if (convId) openChat(convId);
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: callType === 'video'
+    });
+  } catch (e) {
+    await sendCallSignal(sig.from, 'hangup', {});
+    showToast('マイク/カメラの許可が必要です');
+    return;
+  }
+
+  callState = {
+    active: true,
+    type: callType,
+    remoteUserId: sig.from,
+    convId: convId || currentConvId
+  };
+  peerConnection = new RTCPeerConnection(RTC_CONFIG);
+  localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+
+  const localV = document.getElementById('call-local-video');
+  if (localV) {
+    if (callType === 'video') {
+      localV.srcObject = localStream;
+      localV.classList.remove('hidden');
+    } else {
+      localV.classList.add('hidden');
+    }
+  }
+
+  peerConnection.ontrack = (e) => {
+    const remoteV = document.getElementById('call-remote-video');
+    if (remoteV) {
+      remoteV.srcObject = e.streams[0];
+      remoteV.classList.toggle('hidden', callType !== 'video');
+    }
+  };
+  peerConnection.onicecandidate = (e) => {
+    if (e.candidate) sendCallSignal(sig.from, 'ice', { candidate: e.candidate });
+  };
+
+  await peerConnection.setRemoteDescription(sig.payload.sdp);
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+  await sendCallSignal(sig.from, 'answer', { sdp: answer });
+  showCallOverlay(callType === 'video' ? 'ビデオ通話中' : '音声通話中', '');
+  startCallPolling();
+}
+
+async function declineIncomingCall() {
+  stopRingtone();
+  hideIncomingCallUI();
+  if (pendingIncomingCall) {
+    await sendCallSignal(pendingIncomingCall.from, 'hangup', {});
+    pendingIncomingCall = null;
+  }
+}
+
+async function answerIncomingCall() {
+  if (!pendingIncomingCall) return;
+  const sig = pendingIncomingCall;
+  pendingIncomingCall = null;
+  stopRingtone();
+  hideIncomingCallUI();
+  await acceptIncomingOffer(sig);
+}
+
 async function startCall(type) {
-  if (!currentConvId || !getSyncUrl()) {
+  if (!currentConvId || !getEffectiveSyncUrl()) {
     showToast('通話には同期サーバーが必要です');
     return;
   }
@@ -2804,43 +3089,22 @@ async function handleCallSignal(sig) {
   if (!user || !sig || String(sig.to) !== String(user.id)) return;
 
   if (sig.type === 'hangup') {
+    if (pendingIncomingCall && String(pendingIncomingCall.from) === String(sig.from)) {
+      pendingIncomingCall = null;
+      stopRingtone();
+      hideIncomingCallUI();
+    }
     if (callState.active) endCall();
     return;
   }
 
-  if (sig.type === 'offer' && !callState.active) {
-    const accept = confirm(`${getUser(sig.from)?.name || '相手'}から${sig.payload.callType === 'video' ? 'ビデオ' : '音声'}通話が来ています。応答しますか？`);
-    if (!accept) {
-      await sendCallSignal(sig.from, 'hangup', {});
-      return;
-    }
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: sig.payload.callType === 'video'
-      });
-    } catch (e) {
-      await sendCallSignal(sig.from, 'hangup', {});
-      showToast('マイク/カメラの許可が必要です');
-      return;
-    }
-    callState = { active: true, type: sig.payload.callType, remoteUserId: sig.from, convId: currentConvId };
-    peerConnection = new RTCPeerConnection(RTC_CONFIG);
-    localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
-    peerConnection.ontrack = (e) => {
-      const remoteV = document.getElementById('call-remote-video');
-      if (remoteV) remoteV.srcObject = e.streams[0];
-    };
-    peerConnection.onicecandidate = (e) => {
-      if (e.candidate) sendCallSignal(sig.from, 'ice', { candidate: e.candidate });
-    };
-    await peerConnection.setRemoteDescription(sig.payload.sdp);
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    await sendCallSignal(sig.from, 'answer', { sdp: answer });
-    showCallOverlay(sig.payload.callType === 'video' ? 'ビデオ通話中' : '音声通話中', '');
-    startCallPolling();
-  } else if (sig.type === 'answer' && peerConnection) {
+  if (sig.type === 'offer' && !callState.active && !pendingIncomingCall) {
+    pendingIncomingCall = sig;
+    showIncomingCallUI(sig);
+    return;
+  }
+
+  if (sig.type === 'answer' && peerConnection) {
     await peerConnection.setRemoteDescription(sig.payload.sdp);
   } else if (sig.type === 'ice' && peerConnection && sig.payload.candidate) {
     try {
@@ -2878,18 +3142,25 @@ function stopCallPolling() {
 function startGlobalCallPolling() {
   setInterval(async () => {
     const user = getCurrentUser();
-    if (!user || !getSyncUrl() || callState.active) return;
+    if (!user || !getEffectiveSyncUrl()) return;
+    if (callState.active && !pendingIncomingCall) return;
     const signals = await cloudRequest(`/api/call/signals/${user.id}?since=${lastSignalTs}`);
-    if (Array.isArray(signals)) {
-      for (const sig of signals) {
-        lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
-        if (sig.type === 'offer' && !callState.active) {
-          currentConvId = getDirectConvId(user.id, sig.from);
-          await handleCallSignal(sig);
+    if (!Array.isArray(signals)) return;
+    for (const sig of signals) {
+      lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
+      if (sig.type === 'offer' && !callState.active) {
+        if (!pendingIncomingCall) {
+          const convId = getDirectConvId(user.id, sig.from);
+          if (convId && currentConvId !== convId) currentConvId = convId;
         }
+        await handleCallSignal(sig);
+      } else if (callState.active) {
+        await handleCallSignal(sig);
+      } else if (sig.type === 'hangup' && pendingIncomingCall) {
+        await handleCallSignal(sig);
       }
     }
-  }, 3000);
+  }, 2000);
 }
 
 // ─── Feature init ────────────────────────────────────────
@@ -2939,6 +3210,13 @@ function initExtendedFeatures() {
   bindClick('btn-voice-call', () => startCall('audio'));
   bindClick('btn-video-call', () => startCall('video'));
   bindClick('btn-end-call', () => endCall());
+  bindClick('btn-answer-call', () => answerIncomingCall());
+  bindClick('btn-decline-call', () => declineIncomingCall());
+  bindClick('btn-enable-notify', () => requestNotificationPermission());
+
+  updateNotifyButtonLabel();
+  setupNotificationClickHandler();
+  if (Notification.permission === 'granted') registerServiceWorker();
 
   const fileInput = document.getElementById('input-chat-file');
   if (fileInput) {
