@@ -394,6 +394,11 @@ let qrScanner = null;
 let qrScanHandled = false;
 let globalSyncTimer = null;
 let chatSyncTimer = null;
+const _afterInitCallbacks = [];
+
+function onAppInit(fn) {
+  if (typeof fn === 'function') _afterInitCallbacks.push(fn);
+}
 
 // ─── Data Layer ──────────────────────────────────────────
 function loadData() {
@@ -2287,12 +2292,19 @@ function init() {
     document.getElementById('input-name').value = '';
     showToast('データをリセットしました');
   });
+
+  _afterInitCallbacks.forEach(fn => {
+    try { fn(); } catch (err) { console.error('BlueChat init extension error:', err); }
+  });
 }
 
-document.addEventListener('DOMContentLoaded', init);
+function bootBlueChat() {
+  init();
+}
 
-  </script>
-  <script>
+document.addEventListener('DOMContentLoaded', bootBlueChat);
+
+
 /**
  * BlueChat extended features
  */
@@ -3171,52 +3183,11 @@ function initExtendedFeatures() {
     setTimeout(showMainAdminTab, 100);
   }
 
-  bindClick('btn-transfer-onboarding', () => {
-    if (!getEffectiveSyncUrl()) {
-      showToast('同期サーバーが未設定です。引き継ぎ後にマイページで設定できます');
-    }
-    showModal('modal-transfer-scan');
-  });
-
-  bindClick('btn-transfer-qr', () => {
-    if (!getEffectiveSyncUrl()) {
-      showToast('同期サーバーURLを設定してください');
-      return;
-    }
-    renderTransferQR();
-    showModal('modal-transfer-qr');
-  });
-
-  bindClick('btn-start-transfer-camera', () => startQrScannerForTransfer());
-  bindClick('btn-stop-transfer-camera', () => stopTransferScanner());
-
-  bindClick('btn-stickers', () => {
-    renderStickerPicker();
-    showModal('modal-stickers');
-  });
-
-  bindClick('btn-line-sticker-shop', () => {
-    window.open(LINE_STICKER_SHOP_URL, '_blank');
-  });
-
-  bindClick('btn-attach-file', () => {
-    document.getElementById('input-chat-file').click();
-  });
-
-  bindClick('btn-attach-video', () => {
-    document.getElementById('input-chat-video').click();
-  });
-
-  bindClick('btn-voice-call', () => startCall('audio'));
-  bindClick('btn-video-call', () => startCall('video'));
-  bindClick('btn-end-call', () => endCall());
-  bindClick('btn-answer-call', () => answerIncomingCall());
-  bindClick('btn-decline-call', () => declineIncomingCall());
-  bindClick('btn-enable-notify', () => requestNotificationPermission());
-
   updateNotifyButtonLabel();
   setupNotificationClickHandler();
-  if (Notification.permission === 'granted') registerServiceWorker();
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    registerServiceWorker();
+  }
 
   const fileInput = document.getElementById('input-chat-file');
   if (fileInput) {
@@ -3297,13 +3268,7 @@ function initExtendedFeatures() {
     });
   });
 
-  bindClick('btn-admin-logout', () => {
-    adminLoggedIn = false;
-    saveAdminSession();
-    updateAdminTabVisibility();
-    document.querySelector('.tab[data-tab="chats"]').click();
-    showToast('管理者ログアウトしました');
-  });
+  // 管理者タブ・通話・添付ボタンは setupGlobalClickDelegation で処理
 
   // Override admin exit to persist
   const exitBtn = document.getElementById('btn-admin-exit');
@@ -3419,11 +3384,53 @@ hideAllModals = function () {
   stopTransferScanner();
 };
 
-const _initOrig = init;
-init = function () {
-  _initOrig();
+// ─── グローバルクリック委譲（ボタンが確実に反応する） ───
+function setupGlobalClickDelegation() {
+  const actions = {
+    'btn-attach-video': () => document.getElementById('input-chat-video')?.click(),
+    'btn-attach-file': () => document.getElementById('input-chat-file')?.click(),
+    'btn-attach-image': () => document.getElementById('input-chat-image')?.click(),
+    'btn-stickers': () => { renderStickerPicker(); showModal('modal-stickers'); },
+    'btn-voice-call': () => startCall('audio'),
+    'btn-video-call': () => startCall('video'),
+    'btn-end-call': () => endCall(),
+    'btn-answer-call': () => answerIncomingCall(),
+    'btn-decline-call': () => declineIncomingCall(),
+    'btn-enable-notify': () => requestNotificationPermission(),
+    'btn-transfer-qr': () => {
+      if (!getEffectiveSyncUrl()) { showToast('同期サーバーURLを設定してください'); return; }
+      renderTransferQR();
+      showModal('modal-transfer-qr');
+    },
+    'btn-transfer-onboarding': () => {
+      if (!getEffectiveSyncUrl()) showToast('同期サーバーが未設定です。引き継ぎ後にマイページで設定できます');
+      showModal('modal-transfer-scan');
+    },
+    'btn-start-transfer-camera': () => startQrScannerForTransfer(),
+    'btn-stop-transfer-camera': () => stopTransferScanner(),
+    'btn-line-sticker-shop': () => window.open(LINE_STICKER_SHOP_URL, '_blank'),
+    'btn-admin-logout': () => {
+      adminLoggedIn = false;
+      saveAdminSession();
+      updateAdminTabVisibility();
+      document.querySelector('.tab[data-tab="chats"]')?.click();
+      showToast('管理者ログアウトしました');
+    }
+  };
+
+  document.body.addEventListener('click', (e) => {
+    const el = e.target.closest('[id]');
+    if (!el || !actions[el.id]) return;
+    e.preventDefault();
+    e.stopPropagation();
+    actions[el.id]();
+  }, true);
+}
+
+onAppInit(() => {
   initExtendedFeatures();
-};
+  setupGlobalClickDelegation();
+});
 
   </script>
 </body>
