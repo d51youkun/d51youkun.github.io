@@ -27,8 +27,11 @@
     <nav class="tab-nav">
       <button class="tab active" data-tab="chats">トーク</button>
       <button class="tab" data-tab="friends">友だち</button>
+      <button class="tab" data-tab="feature">要望</button>
+      <button class="tab" data-tab="bug">バグ報告</button>
       <button class="tab" data-tab="profile">マイページ</button>
       <button class="tab hidden" data-tab="admin" id="tab-admin-nav">管理</button>
+      <button class="tab hidden" data-tab="moderator" id="tab-moderator-nav">停止</button>
     </nav>
 
     <!-- トーク一覧 -->
@@ -55,6 +58,26 @@
       </div>
     </div>
 
+    <!-- 新機能の要望 -->
+    <div id="tab-feature" class="tab-content hidden">
+      <div class="feedback-panel">
+        <h3>新機能の要望</h3>
+        <p class="qr-hint">ほしい機能を教えてください</p>
+        <textarea id="input-feature-request" class="invite-code-input" rows="5" placeholder="例: 音声メッセージが欲しい"></textarea>
+        <button type="button" id="btn-submit-feature" class="btn-primary">送信</button>
+      </div>
+    </div>
+
+    <!-- バグ報告 -->
+    <div id="tab-bug" class="tab-content hidden">
+      <div class="feedback-panel">
+        <h3>バグの報告</h3>
+        <p class="qr-hint">不具合の内容を教えてください</p>
+        <textarea id="input-bug-report" class="invite-code-input" rows="5" placeholder="例: 通知が鳴らない"></textarea>
+        <button type="button" id="btn-submit-bug" class="btn-primary">送信</button>
+      </div>
+    </div>
+
     <!-- マイページ -->
     <div id="tab-profile" class="tab-content hidden">
       <div class="profile-card">
@@ -68,6 +91,11 @@
         <p class="profile-id" id="profile-id"></p>
       </div>
       <div class="profile-menu">
+        <div class="sync-settings">
+          <p class="form-label">アカウントパスワード（引き継ぎ用・任意）</p>
+          <input type="password" id="input-account-password" placeholder="新しいパスワード" autocomplete="new-password">
+          <button type="button" id="btn-save-password" class="btn-secondary btn-sm">パスワードを保存</button>
+        </div>
         <div class="sync-settings">
           <p class="form-label">他の端末と同期</p>
           <input type="url" id="input-sync-url" placeholder="http://192.168.179.18:8766" autocomplete="off">
@@ -99,6 +127,7 @@
       <nav class="tab-nav sub-tab-nav">
         <button class="tab active" data-main-admin-tab="users">ユーザー</button>
         <button class="tab" data-main-admin-tab="conversations">会話</button>
+        <button class="tab" data-main-admin-tab="feedback">要望・報告</button>
       </nav>
       <div id="main-admin-users" class="admin-panel">
         <div id="main-admin-user-list" class="list"></div>
@@ -108,8 +137,24 @@
         <div id="main-admin-conv-list" class="list"></div>
         <div id="main-admin-empty-conv" class="empty-state hidden"><p>会話がありません</p></div>
       </div>
+      <div id="main-admin-feedback" class="admin-panel hidden">
+        <div class="action-bar">
+          <button type="button" id="btn-refresh-feedback" class="btn-secondary btn-sm">更新</button>
+        </div>
+        <div id="main-admin-feedback-list" class="feedback-admin-list"></div>
+        <div id="main-admin-empty-feedback" class="empty-state hidden"><p>要望・バグ報告はまだありません</p></div>
+      </div>
       <div class="action-bar">
         <button type="button" id="btn-admin-logout" class="btn-secondary btn-sm">管理者ログアウト</button>
+      </div>
+    </div>
+
+    <!-- モデレータータブ -->
+    <div id="tab-moderator" class="tab-content hidden">
+      <p class="qr-hint" style="padding:12px">リンクしたアカウントを1時間停止できます</p>
+      <div id="moderator-user-list" class="list"></div>
+      <div class="action-bar">
+        <button type="button" id="btn-admin-logout-mod" class="btn-secondary btn-sm">ログアウト</button>
       </div>
     </div>
   </div>
@@ -221,6 +266,9 @@
       <h3 id="group-info-title">グループ情報</h3>
       <p class="form-label">メンバー</p>
       <div id="group-info-members" class="member-list"></div>
+      <p class="form-label">友だちを招待</p>
+      <div id="group-invite-select" class="member-select"></div>
+      <button type="button" id="btn-invite-group-members" class="btn-secondary btn-sm">招待する</button>
       <button id="btn-leave-group" class="btn-danger">グループを退出</button>
       <button class="btn-close-modal">閉じる</button>
     </div>
@@ -252,6 +300,7 @@
     <nav class="tab-nav">
       <button class="tab active" data-admin-tab="users">ユーザー管理</button>
       <button class="tab" data-admin-tab="conversations">会話監視</button>
+      <button class="tab" data-admin-tab="feedback">要望・報告</button>
     </nav>
 
     <div id="admin-tab-users" class="tab-content active">
@@ -266,6 +315,14 @@
       <div id="admin-conv-empty" class="empty-state hidden">
         <p>会話がありません</p>
       </div>
+    </div>
+
+    <div id="admin-tab-feedback" class="tab-content hidden">
+      <div class="action-bar">
+        <button type="button" id="btn-refresh-feedback-screen" class="btn-secondary btn-sm">更新</button>
+      </div>
+      <div id="admin-feedback-list" class="feedback-admin-list"></div>
+      <div id="admin-feedback-empty" class="empty-state hidden"><p>要望・バグ報告はまだありません</p></div>
     </div>
   </div>
 
@@ -290,6 +347,17 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <h3>スタンプ</h3>
+      <div class="sticker-import">
+        <p class="form-label">LINEスタンプショップURL</p>
+        <input type="url" id="input-line-sticker-url" placeholder="https://store.line.me/stickershop/product/..." class="sync-settings input-url">
+        <button type="button" id="btn-import-line-stickers" class="btn-secondary btn-sm">LINEスタンプを取り込む</button>
+      </div>
+      <div class="sticker-import">
+        <p class="form-label">写真からスタンプを作る</p>
+        <input type="text" id="input-custom-sticker-name" placeholder="スタンプ帳の名前" maxlength="30">
+        <input type="file" id="input-custom-sticker-images" accept="image/*" multiple>
+        <button type="button" id="btn-create-custom-stickers" class="btn-secondary btn-sm">スタンプを作成</button>
+      </div>
       <div id="sticker-grid" class="sticker-grid"></div>
       <a href="https://creator.line.me/ja/" target="_blank" rel="noopener" id="btn-line-sticker-shop" class="btn-secondary btn-sm" style="display:block;text-align:center;margin:12px 0;text-decoration:none">LINEスタンプを作る（無料）</a>
       <button class="btn-close-modal">閉じる</button>

@@ -14,7 +14,7 @@ function loadData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (e) {
-    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {} };
+    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [] };
   }
 }
 
@@ -41,7 +41,7 @@ function sendJson(res, status, data) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
   });
   res.end(JSON.stringify(data));
@@ -51,7 +51,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type'
     });
     res.end();
@@ -237,6 +237,62 @@ const server = http.createServer(async (req, res) => {
       const since = parseInt(url.searchParams.get('since') || '0', 10);
       const list = (data.callSignals[parts[3]] || []).filter(s => (s.timestamp || 0) > since);
       sendJson(res, 200, list);
+      return;
+    }
+
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'line-stickers' && parts[2]) {
+      const productId = parts[2];
+      const https = require('https');
+      const fetchText = (url) => new Promise((resolve, reject) => {
+        https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+          let d = '';
+          res.on('data', c => { d += c; });
+          res.on('end', () => resolve(d));
+        }).on('error', reject);
+      });
+      try {
+        const html = await fetchText(`https://store.line.me/stickershop/product/${productId}/ja`);
+        const ids = [...new Set((html.match(/stickershop\/v1\/sticker\/(\d+)/g) || [])
+          .map(s => s.match(/(\d+)$/)[1]))];
+        const stickers = ids.slice(0, 40).map(id => ({
+          id,
+          url: `https://stickershop.line-scdn.net/stickershop/v1/sticker/${id}/android/sticker.png`,
+          emoji: '🎨'
+        }));
+        const nameMatch = html.match(/<title>([^<]+)<\/title>/i);
+        sendJson(res, 200, { name: nameMatch ? nameMatch[1].replace(/LINE STORE/gi, '').trim() : 'LINE', stickers });
+      } catch (e) {
+        sendJson(res, 500, { error: e.message, stickers: [] });
+      }
+      return;
+    }
+
+    if (!data.feedback) data.feedback = [];
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'feedback') {
+      const type = url.searchParams.get('type');
+      let list = [...(data.feedback || [])];
+      if (type) list = list.filter(f => f.type === type);
+      list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      sendJson(res, 200, list);
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'feedback') {
+      const body = await readBody(req);
+      const entry = {
+        ...body,
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        receivedAt: Date.now()
+      };
+      data.feedback.push(entry);
+      if (data.feedback.length > 500) data.feedback = data.feedback.slice(-200);
+      saveData(data);
+      sendJson(res, 200, { ok: true, id: entry.id });
+      return;
+    }
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'feedback' && parts[2]) {
+      data.feedback = (data.feedback || []).filter(f => f.id !== parts[2]);
+      saveData(data);
+      sendJson(res, 200, { ok: true });
       return;
     }
 

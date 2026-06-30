@@ -1144,6 +1144,85 @@ input:focus {
 
 #qr-reader-transfer { width: 100%; min-height: 200px; }
 
+.feedback-panel { padding: 16px; }
+.feedback-panel h3 { margin-bottom: 8px; color: var(--blue-dark); }
+.sticker-import { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--gray-200); }
+.sticker-import .input-url { width: 100%; margin-bottom: 8px; padding: 8px; border: 1px solid var(--gray-300); border-radius: 8px; }
+.sticker-pack-label { grid-column: 1 / -1; font-size: 12px; color: var(--gray-500); margin-top: 8px; }
+.sticker-img { width: 48px; height: 48px; object-fit: contain; }
+.message-sticker-img { max-width: 120px; max-height: 120px; }
+.user-title-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.in-app-notify {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 9999;
+  background: var(--white);
+  border-left: 4px solid var(--blue-primary);
+  box-shadow: var(--shadow-lg);
+  border-radius: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+.in-app-notify strong { display: block; color: var(--blue-dark); margin-bottom: 4px; }
+.in-app-notify p { margin: 0; font-size: 14px; color: var(--gray-700); }
+.tab-nav .tab { font-size: 13px; padding: 10px 8px; }
+.btn-unfriend { flex-shrink: 0; font-size: 12px; color: var(--danger); }
+.member-list-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--gray-100); }
+.member-list-item .btn-text-link { margin-left: auto; font-size: 12px; }
+
+.feedback-admin-list { padding: 0 12px 16px; }
+.feedback-admin-item {
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow);
+}
+.feedback-admin-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+.feedback-type { font-weight: 600; color: var(--blue-dark); font-size: 14px; }
+.feedback-time { font-size: 12px; color: var(--gray-500); }
+.feedback-text { margin: 0 0 10px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+.feedback-user-card {
+  display: flex;
+  gap: 10px;
+  background: var(--blue-pale);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.feedback-user-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.feedback-user-avatar.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gray-200);
+  font-size: 22px;
+}
+.feedback-user-name { font-weight: 600; font-size: 14px; }
+.feedback-user-id, .feedback-user-meta, .feedback-user-friends {
+  font-size: 12px;
+  color: var(--gray-600);
+  margin-top: 2px;
+}
+.feedback-admin-actions { display: flex; gap: 8px; align-items: center; }
+
 .incoming-call-modal { align-items: center; justify-content: center; }
 .incoming-call-content { text-align: center; border-radius: var(--radius); max-width: 320px; }
 .incoming-call-icon { font-size: 56px; animation: ring-pulse 1s infinite; }

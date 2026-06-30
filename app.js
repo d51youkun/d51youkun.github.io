@@ -26,6 +26,11 @@ let qrScanner = null;
 let qrScanHandled = false;
 let globalSyncTimer = null;
 let chatSyncTimer = null;
+const _afterInitCallbacks = [];
+
+function onAppInit(fn) {
+  if (typeof fn === 'function') _afterInitCallbacks.push(fn);
+}
 
 // ─── Data Layer ──────────────────────────────────────────
 function loadData() {
@@ -33,14 +38,15 @@ function loadData() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) { /* ignore */ }
-  return {
+    return {
     currentUserId: null,
     users: {},
     friendCodes: {},
     friendships: [],
     conversations: {},
     messages: {},
-    readReceipts: {}
+    readReceipts: {},
+    customStickerPacks: []
   };
 }
 
@@ -278,6 +284,14 @@ function ensureLocalUser(userInfo) {
       local.avatarUpdatedAt = remoteTs;
       saveData(data);
     }
+  }
+  if (userInfo.title !== undefined) {
+    data.users[userInfo.id].title = userInfo.title;
+    saveData(data);
+  }
+  if (userInfo.suspendedUntil !== undefined) {
+    data.users[userInfo.id].suspendedUntil = userInfo.suspendedUntil;
+    saveData(data);
   }
   return data.users[userInfo.id];
 }
@@ -672,7 +686,10 @@ async function cloudPushUser(user) {
       name: user.name,
       createdAt: user.createdAt || Date.now(),
       avatar: user.avatar || null,
-      avatarUpdatedAt: user.avatarUpdatedAt || 0
+      avatarUpdatedAt: user.avatarUpdatedAt || 0,
+      title: user.title || null,
+      suspendedUntil: user.suspendedUntil || null,
+      passwordHash: user.passwordHash || null
     })
   });
 }
@@ -711,6 +728,14 @@ async function syncFriendships() {
       const before = getUser(friendId)?.avatar;
       ensureLocalUser(remoteUser);
       if (getUser(friendId)?.avatar !== before) avatarsUpdated = true;
+      if (remoteUser.title || remoteUser.suspendedUntil) {
+        const u = getUser(friendId);
+        if (u) {
+          if (remoteUser.title) u.title = remoteUser.title;
+          if (remoteUser.suspendedUntil) u.suspendedUntil = remoteUser.suspendedUntil;
+          saveData(getData());
+        }
+      }
     }
     if (!areFriends(user.id, friendId)) {
       addFriendship(user.id, friendId, { skipCloud: true });
@@ -1063,7 +1088,7 @@ function appendMessageToChat(msg, convId) {
 
   const el = createMessageElement(msg, convId, user);
   if (el) container.appendChild(el);
-  scrollMessagesToBottom();
+  scrollMessagesToBottom(true);
 }
 
 // ─── Admin ───────────────────────────────────────────────
@@ -1237,8 +1262,6 @@ function renderMessages(convId) {
     const el = createMessageElement(msg, convId, user);
     if (el) container.appendChild(el);
   });
-
-  scrollMessagesToBottom();
 }
 
 function openChat(convId) {
@@ -1265,6 +1288,7 @@ function openChat(convId) {
   document.getElementById('input-message').value = '';
   document.getElementById('btn-send').disabled = true;
   renderMessages(convId);
+  scrollMessagesToBottom(true);
   startChatSync(convId);
   showScreen('chat');
 }
@@ -1619,8 +1643,10 @@ function setupAdminHandlers() {
       currentAdminTab = tab.dataset.adminTab;
       document.getElementById('admin-tab-users').classList.toggle('hidden', currentAdminTab !== 'users');
       document.getElementById('admin-tab-conversations').classList.toggle('hidden', currentAdminTab !== 'conversations');
+      document.getElementById('admin-tab-feedback').classList.toggle('hidden', currentAdminTab !== 'feedback');
       if (currentAdminTab === 'users') renderAdminUsers();
       if (currentAdminTab === 'conversations') renderAdminConversations();
+      if (currentAdminTab === 'feedback' && typeof renderAdminFeedbackScreen === 'function') renderAdminFeedbackScreen();
     });
   });
 
@@ -1919,6 +1945,8 @@ function init() {
     document.getElementById('input-name').value = '';
     showToast('データをリセットしました');
   });
-}
 
-document.addEventListener('DOMContentLoaded', init);
+  _afterInitCallbacks.forEach(fn => {
+    try { fn(); } catch (err) { console.error('BlueChat init extension error:', err); }
+  });
+}

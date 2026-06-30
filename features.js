@@ -152,9 +152,10 @@ function onNewMessageReceived(convId, msg) {
 }
 
 async function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) return;
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('./sw.js');
+    const swUrl = new URL('sw.js', window.location.href).pathname;
+    await navigator.serviceWorker.register(swUrl);
   } catch (e) { /* ignore */ }
 }
 
@@ -223,26 +224,10 @@ function showMainAdminTab() {
   if (panel) panel.classList.remove('hidden');
   renderAdminUsers();
   renderAdminConversations();
+  if (typeof renderAdminFeedback === 'function') renderAdminFeedback();
 }
 
-// Override admin login flow
-const _performAdminLoginOrig = performAdminLogin;
-performAdminLogin = function () {
-  const email = document.getElementById('input-admin-email').value;
-  const password = document.getElementById('input-admin-password').value;
-  if (!verifyAdminCredentials(email, password)) {
-    showToast('メールアドレスまたはパスワードが正しくありません');
-    return;
-  }
-  adminLoggedIn = true;
-  saveAdminSession();
-  document.getElementById('input-admin-email').value = '';
-  document.getElementById('input-admin-password').value = '';
-  updateAdminTabVisibility();
-  showScreen('main');
-  showMainAdminTab();
-  showToast('管理者としてログインしました');
-};
+// Override admin login flow — v4.js で上書き
 
 // ─── Read receipts ─────────────────────────────────────────
 function getReadReceipts(convId) {
@@ -297,6 +282,9 @@ function isMessageReadByOther(msg, convId, myId) {
 // ─── Extended message rendering ──────────────────────────
 function getMessageContentHtmlExt(msg) {
   if (msg.type === 'sticker') {
+    if (msg.stickerImage) {
+      return `<img src="${msg.stickerImage}" class="message-sticker-img" alt="スタンプ">`;
+    }
     return `<div class="message-sticker">${msg.stickerEmoji || '🎨'}</div>`;
   }
   if (msg.type === 'video' && msg.video) {
@@ -392,7 +380,6 @@ renderMessages = function (convId) {
     if (el) container.appendChild(el);
   });
   scrollMessagesToBottom();
-  markConversationRead(convId);
 };
 
 // Patch chat sync to include reads
@@ -873,55 +860,20 @@ function initExtendedFeatures() {
   loadAdminSession();
   updateAdminTabVisibility();
   if (adminLoggedIn && getCurrentUser()) {
-    setTimeout(showMainAdminTab, 100);
+    setTimeout(() => {
+      if (typeof adminRole !== 'undefined' && adminRole === 'moderator' && typeof showMainModeratorTab === 'function') {
+        showMainModeratorTab();
+      } else if (typeof showMainAdminTab === 'function') {
+        showMainAdminTab();
+      }
+    }, 100);
   }
-
-  bindClick('btn-transfer-onboarding', () => {
-    if (!getEffectiveSyncUrl()) {
-      showToast('同期サーバーが未設定です。引き継ぎ後にマイページで設定できます');
-    }
-    showModal('modal-transfer-scan');
-  });
-
-  bindClick('btn-transfer-qr', () => {
-    if (!getEffectiveSyncUrl()) {
-      showToast('同期サーバーURLを設定してください');
-      return;
-    }
-    renderTransferQR();
-    showModal('modal-transfer-qr');
-  });
-
-  bindClick('btn-start-transfer-camera', () => startQrScannerForTransfer());
-  bindClick('btn-stop-transfer-camera', () => stopTransferScanner());
-
-  bindClick('btn-stickers', () => {
-    renderStickerPicker();
-    showModal('modal-stickers');
-  });
-
-  bindClick('btn-line-sticker-shop', () => {
-    window.open(LINE_STICKER_SHOP_URL, '_blank');
-  });
-
-  bindClick('btn-attach-file', () => {
-    document.getElementById('input-chat-file').click();
-  });
-
-  bindClick('btn-attach-video', () => {
-    document.getElementById('input-chat-video').click();
-  });
-
-  bindClick('btn-voice-call', () => startCall('audio'));
-  bindClick('btn-video-call', () => startCall('video'));
-  bindClick('btn-end-call', () => endCall());
-  bindClick('btn-answer-call', () => answerIncomingCall());
-  bindClick('btn-decline-call', () => declineIncomingCall());
-  bindClick('btn-enable-notify', () => requestNotificationPermission());
 
   updateNotifyButtonLabel();
   setupNotificationClickHandler();
-  if (Notification.permission === 'granted') registerServiceWorker();
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    registerServiceWorker();
+  }
 
   const fileInput = document.getElementById('input-chat-file');
   if (fileInput) {
@@ -997,18 +949,14 @@ function initExtendedFeatures() {
       const name = tab.dataset.mainAdminTab;
       document.getElementById('main-admin-users').classList.toggle('hidden', name !== 'users');
       document.getElementById('main-admin-conversations').classList.toggle('hidden', name !== 'conversations');
+      document.getElementById('main-admin-feedback').classList.toggle('hidden', name !== 'feedback');
       if (name === 'users') renderAdminUsers();
       if (name === 'conversations') renderAdminConversations();
+      if (name === 'feedback' && typeof renderAdminFeedback === 'function') renderAdminFeedback();
     });
   });
 
-  bindClick('btn-admin-logout', () => {
-    adminLoggedIn = false;
-    saveAdminSession();
-    updateAdminTabVisibility();
-    document.querySelector('.tab[data-tab="chats"]').click();
-    showToast('管理者ログアウトしました');
-  });
+  // 管理者タブ・通話・添付ボタンは setupGlobalClickDelegation で処理
 
   // Override admin exit to persist
   const exitBtn = document.getElementById('btn-admin-exit');
@@ -1124,8 +1072,101 @@ hideAllModals = function () {
   stopTransferScanner();
 };
 
-const _initOrig = init;
-init = function () {
-  _initOrig();
+// ─── グローバルクリック委譲（ボタンが確実に反応する） ───
+function setupGlobalClickDelegation() {
+  const actions = {
+    'btn-attach-video': () => document.getElementById('input-chat-video')?.click(),
+    'btn-attach-file': () => document.getElementById('input-chat-file')?.click(),
+    'btn-attach-image': () => document.getElementById('input-chat-image')?.click(),
+    'btn-stickers': () => { renderStickerPicker(); showModal('modal-stickers'); },
+    'btn-voice-call': () => startCall('audio'),
+    'btn-video-call': () => startCall('video'),
+    'btn-end-call': () => endCall(),
+    'btn-answer-call': () => answerIncomingCall(),
+    'btn-decline-call': () => declineIncomingCall(),
+    'btn-enable-notify': () => requestNotificationPermission(),
+    'btn-transfer-qr': () => {
+      if (!getEffectiveSyncUrl()) { showToast('同期サーバーURLを設定してください'); return; }
+      renderTransferQR();
+      showModal('modal-transfer-qr');
+    },
+    'btn-transfer-onboarding': () => {
+      if (!getEffectiveSyncUrl()) showToast('同期サーバーが未設定です。引き継ぎ後にマイページで設定できます');
+      showModal('modal-transfer-scan');
+    },
+    'btn-start-transfer-camera': () => startQrScannerForTransfer(),
+    'btn-stop-transfer-camera': () => stopTransferScanner(),
+    'btn-line-sticker-shop': () => window.open(LINE_STICKER_SHOP_URL, '_blank'),
+    'btn-admin-logout': () => {
+      adminLoggedIn = false;
+      adminRole = null;
+      saveAdminSession();
+      updateAdminTabVisibility();
+      document.querySelector('.tab[data-tab="chats"]')?.click();
+      showToast('管理者ログアウトしました');
+    },
+    'btn-admin-logout-mod': () => {
+      adminLoggedIn = false;
+      adminRole = null;
+      saveAdminSession();
+      updateAdminTabVisibility();
+      document.querySelector('.tab[data-tab="chats"]')?.click();
+      showToast('ログアウトしました');
+    },
+    'btn-refresh-feedback': () => { if (typeof renderAdminFeedback === 'function') renderAdminFeedback(); },
+    'btn-refresh-feedback-screen': () => { if (typeof renderAdminFeedbackScreen === 'function') renderAdminFeedbackScreen(); },
+    'btn-submit-feature': () => submitFeedback('feature', document.getElementById('input-feature-request')?.value || ''),
+    'btn-submit-bug': () => submitFeedback('bug', document.getElementById('input-bug-report')?.value || ''),
+    'btn-save-password': () => {
+      const user = getCurrentUser();
+      const pw = document.getElementById('input-account-password')?.value || '';
+      if (typeof setUserAccountPassword === 'function') setUserAccountPassword(user.id, pw);
+      document.getElementById('input-account-password').value = '';
+      showToast(pw ? 'パスワードを設定しました' : 'パスワードを解除しました');
+    },
+    'btn-invite-group-members': () => {
+      const ids = Array.from(document.querySelectorAll('#group-invite-select input:checked')).map(c => c.value);
+      if (!ids.length) { showToast('招待する友だちを選んでください'); return; }
+      addMembersToGroup(currentConvId, ids);
+      if (typeof renderGroupInfoV4 === 'function') renderGroupInfoV4();
+      refreshMainUI();
+      showToast('メンバーを招待しました');
+    },
+    'btn-import-line-stickers': () => {
+      const url = document.getElementById('input-line-sticker-url')?.value || '';
+      if (typeof importLineStickerPack === 'function') importLineStickerPack(url).then(() => renderStickerPicker());
+    },
+    'btn-create-custom-stickers': async () => {
+      const name = document.getElementById('input-custom-sticker-name')?.value?.trim() || 'マイスタンプ';
+      const files = document.getElementById('input-custom-sticker-images')?.files;
+      if (!files || !files.length) { showToast('画像を選択してください'); return; }
+      if (typeof createCustomPhotoStickerPack === 'function') {
+        await createCustomPhotoStickerPack(name, Array.from(files));
+        document.getElementById('input-custom-sticker-images').value = '';
+        renderStickerPicker();
+      }
+    }
+  };
+
+  document.body.addEventListener('click', (e) => {
+    const el = e.target.closest('button[id], a[id]');
+    if (!el || !actions[el.id]) return;
+    if (el.tagName === 'A') e.preventDefault();
+    actions[el.id]();
+  });
+}
+
+onAppInit(() => {
   initExtendedFeatures();
-};
+  setupGlobalClickDelegation();
+});
+
+function bootBlueChat() {
+  init();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootBlueChat);
+} else {
+  bootBlueChat();
+}
