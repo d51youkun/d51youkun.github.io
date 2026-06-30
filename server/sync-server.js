@@ -14,7 +14,7 @@ function loadData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (e) {
-    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {} };
+    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [] };
   }
 }
 
@@ -164,6 +164,116 @@ const server = http.createServer(async (req, res) => {
       const userId = parts[2];
       const friends = (data.userFriendships && data.userFriendships[userId]) || {};
       sendJson(res, 200, Object.keys(friends));
+      return;
+    }
+
+    // Read receipts
+    if (!data.readReceipts) data.readReceipts = {};
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'reads' && parts[2] && parts[3]) {
+      const body = await readBody(req);
+      if (!data.readReceipts[parts[2]]) data.readReceipts[parts[2]] = {};
+      data.readReceipts[parts[2]][parts[3]] = body.timestamp || Date.now();
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'reads' && parts[2]) {
+      sendJson(res, 200, data.readReceipts[parts[2]] || {});
+      return;
+    }
+
+    // Device transfer
+    if (!data.transfers) data.transfers = {};
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'transfer' && parts[2]) {
+      const body = await readBody(req);
+      data.transfers[parts[2]] = {
+        backup: body.backup,
+        expiresAt: body.expiresAt || Date.now() + 900000,
+        consumed: false,
+        createdAt: Date.now()
+      };
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'transfer' && parts[2] && parts[3] === 'status') {
+      const t = data.transfers[parts[2]];
+      sendJson(res, 200, { consumed: !!(t && t.consumed), exists: !!t });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'transfer' && parts[2]) {
+      const t = data.transfers[parts[2]];
+      if (!t || Date.now() > t.expiresAt) {
+        sendJson(res, 404, { error: 'expired' });
+        return;
+      }
+      sendJson(res, 200, { backup: t.backup });
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'transfer' && parts[2] && parts[3] === 'consumed') {
+      if (data.transfers[parts[2]]) {
+        data.transfers[parts[2]].consumed = true;
+        saveData(data);
+      }
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    // WebRTC signaling
+    if (!data.callSignals) data.callSignals = {};
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'call' && parts[2] === 'signal') {
+      const body = await readBody(req);
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      if (!data.callSignals[body.to]) data.callSignals[body.to] = [];
+      data.callSignals[body.to].push({ id, ...body });
+      if (data.callSignals[body.to].length > 100) {
+        data.callSignals[body.to] = data.callSignals[body.to].slice(-50);
+      }
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'call' && parts[2] === 'signals' && parts[3]) {
+      const since = parseInt(url.searchParams.get('since') || '0', 10);
+      const list = (data.callSignals[parts[3]] || []).filter(s => (s.timestamp || 0) > since);
+      sendJson(res, 200, list);
+      return;
+    }
+
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'line-stickers' && parts[2]) {
+      const productId = parts[2];
+      const https = require('https');
+      const fetchText = (url) => new Promise((resolve, reject) => {
+        https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+          let d = '';
+          res.on('data', c => { d += c; });
+          res.on('end', () => resolve(d));
+        }).on('error', reject);
+      });
+      try {
+        const html = await fetchText(`https://store.line.me/stickershop/product/${productId}/ja`);
+        const ids = [...new Set((html.match(/stickershop\/v1\/sticker\/(\d+)/g) || [])
+          .map(s => s.match(/(\d+)$/)[1]))];
+        const stickers = ids.slice(0, 40).map(id => ({
+          id,
+          url: `https://stickershop.line-scdn.net/stickershop/v1/sticker/${id}/android/sticker.png`,
+          emoji: '🎨'
+        }));
+        const nameMatch = html.match(/<title>([^<]+)<\/title>/i);
+        sendJson(res, 200, { name: nameMatch ? nameMatch[1].replace(/LINE STORE/gi, '').trim() : 'LINE', stickers });
+      } catch (e) {
+        sendJson(res, 500, { error: e.message, stickers: [] });
+      }
+      return;
+    }
+
+    if (!data.feedback) data.feedback = [];
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'feedback') {
+      const body = await readBody(req);
+      data.feedback.push({ ...body, id: Date.now().toString(36) });
+      if (data.feedback.length > 500) data.feedback = data.feedback.slice(-200);
+      saveData(data);
+      sendJson(res, 200, { ok: true });
       return;
     }
 
