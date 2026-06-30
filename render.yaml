@@ -1,0 +1,11 @@
+# Render.com で同期サーバーを公開する設定
+# https://render.com で New > Blueprint からこのリポジトリを接続
+services:
+  - type: web
+    name: bluechat-sync
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    healthCheckPath: /api/health

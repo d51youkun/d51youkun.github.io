@@ -5,7 +5,13 @@
 const STORAGE_KEY = 'bluechat_data';
 const ADMIN_EMAIL = 'd51498go@icloud.com';
 const ADMIN_PASSWORD = 'D51498Go';
-const CODE_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+const CODE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+const INVITE_PREFIX = 'bluechat:';
+const SYNC_URL_KEY = 'bluechat_sync_url';
+const DEFAULT_SYNC_URL = '__DEFAULT_SYNC_URL__';
+const ADMIN_SESSION_KEY = 'bluechat_admin_session';
+const TRANSFER_PREFIX = 'bluechat-transfer:';
+const TRANSFER_EXPIRY_MS = 15 * 60 * 1000;
 
 // ─── State ───────────────────────────────────────────────
 let currentScreen = 'onboarding';
@@ -13,8 +19,13 @@ let currentTab = 'chats';
 let currentAdminTab = 'users';
 let currentConvId = null;
 let adminViewConvId = null;
+let adminFocusUserId = null;
 let adminLoggedIn = false;
 let returnScreenAfterAdmin = 'onboarding';
+let qrScanner = null;
+let qrScanHandled = false;
+let globalSyncTimer = null;
+let chatSyncTimer = null;
 
 // ─── Data Layer ──────────────────────────────────────────
 function loadData() {
@@ -28,7 +39,8 @@ function loadData() {
     friendCodes: {},
     friendships: [],
     conversations: {},
-    messages: {}
+    messages: {},
+    readReceipts: {}
   };
 }
 
@@ -40,15 +52,6 @@ function getData() { return loadData(); }
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
-function generateCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
 }
 
 function getUser(id) {
@@ -92,6 +95,14 @@ function getConvAvatarUser(conv, currentUserId) {
 }
 
 function compressImage(file, maxSize = 256, quality = 0.82) {
+  return compressImageFile(file, maxSize, quality);
+}
+
+function compressChatImage(file) {
+  return compressImageFile(file, 1024, 0.85);
+}
+
+function compressImageFile(file, maxSize, quality) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -122,12 +133,38 @@ function compressImage(file, maxSize = 256, quality = 0.82) {
   });
 }
 
+function getMessagePreview(msg) {
+  if (msg.type === 'sticker') return msg.stickerEmoji || '🎨 スタンプ';
+  if (msg.type === 'video') return '🎬 動画';
+  if (msg.type === 'file') return '📎 ' + (msg.fileName || 'ファイル');
+  if (msg.type === 'image' || msg.image) return '📷 写真';
+  return (msg.text || '').slice(0, 50);
+}
+
+function downloadImage(dataUrl, filename) {
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = filename || 'bluechat-photo.jpg';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast('画像を保存しました');
+}
+
+function openImageViewer(imageSrc) {
+  document.getElementById('image-view-full').src = imageSrc;
+  document.getElementById('btn-download-full-image').dataset.imageSrc = imageSrc;
+  showModal('modal-image-view');
+}
+
 function setUserAvatar(userId, dataUrl) {
   const data = getData();
   if (!data.users[userId]) return false;
   data.users[userId].avatar = dataUrl;
+  data.users[userId].avatarUpdatedAt = Date.now();
   try {
     saveData(data);
+    cloudPushUser(data.users[userId]);
     return true;
   } catch (e) {
     return false;
@@ -138,7 +175,9 @@ function removeUserAvatar(userId) {
   const data = getData();
   if (!data.users[userId]) return;
   delete data.users[userId].avatar;
+  data.users[userId].avatarUpdatedAt = Date.now();
   saveData(data);
+  cloudPushUser(data.users[userId]);
 }
 
 function formatTime(ts) {
@@ -179,6 +218,7 @@ function createUser(name) {
   };
   data.currentUserId = id;
   saveData(data);
+  cloudPushUser(data.users[id]);
   return data.users[id];
 }
 
@@ -199,76 +239,620 @@ function areFriends(id1, id2) {
   );
 }
 
-function addFriendship(id1, id2) {
+function addFriendship(id1, id2, options = {}) {
+  const { skipCloud = false } = options;
   if (id1 === id2 || areFriends(id1, id2)) return null;
   const data = getData();
   data.friendships.push({ user1: id1, user2: id2, createdAt: Date.now() });
-  const convId = getOrCreateDirectConv(id1, id2);
   saveData(data);
+  const convId = getOrCreateDirectConv(id1, id2);
+  if (!skipCloud) cloudPushFriendship(id1, id2);
   return convId;
 }
 
-// ─── Friend Codes ────────────────────────────────────────
-function createFriendCode(userId) {
+function ensureLocalUser(userInfo) {
+  if (!userInfo || !userInfo.id) return null;
   const data = getData();
-  // Remove old codes for this user
-  Object.keys(data.friendCodes).forEach(code => {
-    if (data.friendCodes[code].userId === userId) delete data.friendCodes[code];
-  });
-  const code = generateCode();
-  data.friendCodes[code] = {
-    userId,
-    createdAt: Date.now(),
-    expiresAt: Date.now() + CODE_EXPIRY_MS
-  };
-  saveData(data);
-  return code;
+  if (!data.users[userInfo.id]) {
+    data.users[userInfo.id] = {
+      id: userInfo.id,
+      name: userInfo.name || '不明',
+      createdAt: userInfo.createdAt || Date.now(),
+      isRemote: true
+    };
+    saveData(data);
+  } else if (userInfo.name && data.users[userInfo.id].name !== userInfo.name) {
+    data.users[userInfo.id].name = userInfo.name;
+    saveData(data);
+  }
+  if (userInfo.avatar !== undefined) {
+    const local = data.users[userInfo.id];
+    const remoteTs = userInfo.avatarUpdatedAt || 0;
+    const localTs = local.avatarUpdatedAt || 0;
+    if (userInfo.avatar && remoteTs >= localTs && local.avatar !== userInfo.avatar) {
+      local.avatar = userInfo.avatar;
+      local.avatarUpdatedAt = remoteTs;
+      saveData(data);
+    } else if (!userInfo.avatar && remoteTs > localTs && local.avatar) {
+      delete local.avatar;
+      local.avatarUpdatedAt = remoteTs;
+      saveData(data);
+    }
+  }
+  return data.users[userInfo.id];
 }
 
-function redeemFriendCode(code, currentUserId) {
-  const data = getData();
-  const entry = data.friendCodes[code.toUpperCase()];
-  if (!entry) return { error: 'パスワードが見つかりません' };
-  if (Date.now() > entry.expiresAt) {
-    delete data.friendCodes[code.toUpperCase()];
-    saveData(data);
-    return { error: 'パスワードの有効期限が切れています' };
-  }
-  if (entry.userId === currentUserId) return { error: '自分のパスワードは使えません' };
-  const targetUser = data.users[entry.userId];
-  if (!targetUser) return { error: 'ユーザーが見つかりません' };
-  if (areFriends(currentUserId, entry.userId)) return { error: 'すでに友だちです' };
+// ─── Friend QR Invites ───────────────────────────────────
+function encodeInvite(user) {
+  const payload = {
+    i: user.id,
+    n: user.name,
+    e: Date.now() + CODE_EXPIRY_MS
+  };
+  const json = JSON.stringify(payload);
+  const b64 = btoa(unescape(encodeURIComponent(json)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return INVITE_PREFIX + b64;
+}
 
-  addFriendship(currentUserId, entry.userId);
-  delete data.friendCodes[code.toUpperCase()];
-  saveData(data);
+function decodeInvite(str) {
+  if (!str) return null;
+  const text = String(str).trim();
+  const idx = text.indexOf(INVITE_PREFIX);
+  const raw = idx >= 0 ? text.slice(idx) : text;
+  if (!raw.startsWith(INVITE_PREFIX)) return null;
+  try {
+    let b64 = raw.slice(INVITE_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const json = decodeURIComponent(escape(atob(b64)));
+    return JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
+}
+
+function redeemFriendInvite(inviteStr, currentUserId) {
+  const payload = decodeInvite(inviteStr);
+  if (!payload || !payload.i || !payload.n) {
+    return { error: '無効なコードです。もう一度お試しください' };
+  }
+  if (Date.now() > payload.e) {
+    return { error: 'コードの有効期限が切れています。QRを更新してください' };
+  }
+  if (String(payload.i) === String(currentUserId)) {
+    return { error: '自分のコードは使えません' };
+  }
+  if (areFriends(currentUserId, payload.i)) {
+    return { error: 'すでに友だちです' };
+  }
+
+  const me = getCurrentUser();
+  ensureLocalUser({ id: payload.i, name: payload.n });
+  if (me) cloudPushUser(me);
+  cloudPushUser({ id: payload.i, name: payload.n });
+
+  addFriendship(currentUserId, payload.i);
+  const targetUser = getUser(payload.i);
   return { success: true, user: targetUser };
 }
 
-function cleanExpiredCodes() {
+function handleFriendInviteSuccess(result) {
+  qrScanHandled = true;
+  stopQrScanner();
+  hideModal('modal-add-friend');
+  const me = getCurrentUser();
+  if (me && result.user) {
+    cloudPushFriendship(me.id, result.user.id);
+    if (getSyncUrl()) syncFriendships().then(() => refreshMainUI());
+  }
+  refreshMainUI();
+  showToast(`${result.user.name}さんと友だちになりました！`);
+}
+
+function tryRedeemInviteCode(code) {
+  const user = getCurrentUser();
+  if (!user) return;
+  const result = redeemFriendInvite(code, user.id);
+  if (result.error) {
+    showToast(result.error);
+    return;
+  }
+  handleFriendInviteSuccess(result);
+}
+
+function renderMyQR() {
+  const user = getCurrentUser();
+  if (!user) return;
+  if (typeof QRCode === 'undefined') {
+    showToast('QRコードライブラリを読み込めませんでした');
+    return;
+  }
+  const container = document.getElementById('qr-canvas');
+  if (!container) return;
+  container.innerHTML = '';
+  const invite = encodeInvite(user);
+  document.getElementById('qr-user-name').textContent = user.name;
+  document.getElementById('qr-expiry-note').textContent = '有効期限: 24時間（更新ボタンで再発行）';
+  const codeEl = document.getElementById('invite-code-text');
+  if (codeEl) codeEl.textContent = invite;
+  try {
+    new QRCode(container, {
+      text: invite,
+      width: 220,
+      height: 220,
+      colorDark: '#1a6fd4',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.L
+    });
+  } catch (e) {
+    showToast('QRコードの生成に失敗しました');
+  }
+}
+
+async function startQrScanner() {
+  if (typeof Html5Qrcode === 'undefined') {
+    showToast('カメラ機能を読み込めませんでした');
+    return false;
+  }
+  if (!window.isSecureContext) {
+    showToast('カメラはHTTPSまたはlocalhostでのみ使えます');
+    return false;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast('このブラウザはカメラに対応していません');
+    return false;
+  }
+  if (qrScanner && qrScanner.isScanning) return true;
+
+  qrScanHandled = false;
+  document.getElementById('qr-scan-idle').classList.add('hidden');
+  document.getElementById('qr-scan-active').classList.remove('hidden');
+
+  try {
+    if (!qrScanner) {
+      qrScanner = new Html5Qrcode('qr-reader', { verbose: false });
+    }
+
+    const configs = [
+      { facingMode: 'environment' },
+      { facingMode: 'user' }
+    ];
+
+    let started = false;
+    let lastError = null;
+    for (const config of configs) {
+      try {
+        await qrScanner.start(
+          config,
+          { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 },
+          onQrScanSuccess,
+          () => {}
+        );
+        started = true;
+        break;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+
+    if (!started) {
+      const cameras = await Html5Qrcode.getCameras();
+      if (cameras.length > 0) {
+        await qrScanner.start(
+          cameras[0].id,
+          { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 },
+          onQrScanSuccess,
+          () => {}
+        );
+        started = true;
+      }
+    }
+
+    if (!started) {
+      throw lastError || new Error('カメラを起動できません');
+    }
+    return true;
+  } catch (e) {
+    resetScanUI();
+    const msg = (e && e.name === 'NotAllowedError')
+      ? 'カメラの使用が拒否されました。ブラウザの設定で許可してください'
+      : 'カメラを起動できません。権限を確認してください';
+    showToast(msg);
+    return false;
+  }
+}
+
+function resetScanUI() {
+  document.getElementById('qr-scan-idle').classList.remove('hidden');
+  document.getElementById('qr-scan-active').classList.add('hidden');
+  updateSecureContextHint();
+}
+
+function updateSecureContextHint() {
+  const hint = document.getElementById('qr-secure-hint');
+  if (!hint) return;
+  if (!window.isSecureContext) {
+    hint.textContent = '※ カメラを使うには https:// または localhost で開いてください';
+    hint.classList.add('warn');
+  } else if (typeof Html5Qrcode === 'undefined') {
+    hint.textContent = '※ カメラ機能の読み込みに失敗しました。ページを再読み込みしてください';
+    hint.classList.add('warn');
+  } else {
+    hint.textContent = '※ ボタンを押すとカメラの使用許可を求められます';
+    hint.classList.remove('warn');
+  }
+}
+
+async function stopQrScanner() {
+  if (!qrScanner) {
+    resetScanUI();
+    return;
+  }
+  try {
+    if (qrScanner.isScanning) {
+      await qrScanner.stop();
+    }
+    qrScanner.clear();
+  } catch (e) { /* ignore */ }
+  qrScanner = null;
+  qrScanHandled = false;
+  resetScanUI();
+}
+
+function onQrScanSuccess(decodedText) {
+  if (qrScanHandled) return;
+  const code = String(decodedText || '').trim();
+  if (!code.includes(INVITE_PREFIX)) return;
+  const user = getCurrentUser();
+  const result = redeemFriendInvite(code, user.id);
+  if (result.error) {
+    showToast(result.error);
+    return;
+  }
+  handleFriendInviteSuccess(result);
+}
+
+function switchAddFriendTab(tab) {
+  document.querySelectorAll('#modal-add-friend .modal-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.modalTab === tab);
+  });
+  const scanEl = document.getElementById('modal-tab-scan');
+  const enterEl = document.getElementById('modal-tab-enter');
+  const showEl = document.getElementById('modal-tab-show');
+  if (scanEl) scanEl.classList.toggle('hidden', tab !== 'scan');
+  if (enterEl) enterEl.classList.toggle('hidden', tab !== 'enter');
+  if (showEl) showEl.classList.toggle('hidden', tab !== 'show');
+
+  if (tab === 'scan') {
+    stopQrScanner();
+    updateSecureContextHint();
+  } else {
+    stopQrScanner();
+    if (tab === 'show') setTimeout(() => renderMyQR(), 150);
+    if (tab === 'enter') {
+      const input = document.getElementById('input-friend-invite');
+      if (input) input.value = '';
+    }
+  }
+}
+
+function openAddFriendModal(tab = 'scan') {
+  qrScanHandled = false;
+  showModal('modal-add-friend');
+  switchAddFriendTab(tab);
+}
+
+function getDirectConvId(id1, id2) {
+  return 'dm_' + [id1, id2].sort().join('_');
+}
+
+// ─── Cloud Sync ────────────────────────────────────────────
+function getSyncUrl() {
+  const stored = (localStorage.getItem(SYNC_URL_KEY) || '').replace(/\/$/, '');
+  if (stored) return stored;
+  if (typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+    return DEFAULT_SYNC_URL;
+  }
+  return '';
+}
+
+function setSyncUrl(url) {
+  const trimmed = (url || '').trim().replace(/\/$/, '');
+  if (trimmed) localStorage.setItem(SYNC_URL_KEY, trimmed);
+  else localStorage.removeItem(SYNC_URL_KEY);
+}
+
+function initSyncFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const sync = params.get('sync');
+  if (sync) {
+    setSyncUrl(sync);
+    return;
+  }
+  if (DEFAULT_SYNC_URL && !getSyncUrl()) {
+    setSyncUrl(DEFAULT_SYNC_URL);
+  }
+}
+
+async function cloudRequest(path, options = {}, timeoutMs = 45000) {
+  const base = getSyncUrl();
+  if (!base) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(base + path, {
+      ...options,
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function cloudPushConversation(conv) {
+  if (!conv || !getSyncUrl()) return;
+  await cloudRequest(`/api/conversations/${conv.id}`, {
+    method: 'PUT',
+    body: JSON.stringify(conv)
+  });
+}
+
+async function cloudPushMessage(convId, msg) {
+  if (!getSyncUrl()) return;
+  await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
+    method: 'PUT',
+    body: JSON.stringify(msg)
+  });
+}
+
+async function cloudFetchMessages(convId, since = 0) {
+  const data = await cloudRequest(`/api/messages/${convId}?since=${since}`);
+  return Array.isArray(data) ? data : [];
+}
+
+async function cloudFetchConversation(convId) {
+  return cloudRequest(`/api/conversations/${convId}`);
+}
+
+function mergeRemoteMessage(convId, remoteMsg) {
+  if (!remoteMsg || !remoteMsg.id) return false;
+  const data = getData();
+  if (!data.messages[convId]) data.messages[convId] = [];
+  if (data.messages[convId].some(m => m.id === remoteMsg.id)) return false;
+  data.messages[convId].push(remoteMsg);
+  data.messages[convId].sort((a, b) => a.timestamp - b.timestamp);
+  const conv = data.conversations[convId];
+  if (conv) {
+    const last = data.messages[convId][data.messages[convId].length - 1];
+    conv.lastMessageAt = last.timestamp;
+    conv.lastMessagePreview = getMessagePreview(last);
+    conv.lastMessageSenderId = last.senderId;
+  }
+  saveData(data);
+  return true;
+}
+
+async function syncConversation(convId) {
+  if (!getSyncUrl() || !convId) return 0;
+
+  const remoteConv = await cloudFetchConversation(convId);
+  if (remoteConv && remoteConv.id) {
+    const data = getData();
+    if (!data.conversations[convId]) {
+      data.conversations[convId] = remoteConv;
+      if (!data.messages[convId]) data.messages[convId] = [];
+      saveData(data);
+    }
+  }
+
+  const messages = getMessages(convId);
+  const since = messages.length
+    ? Math.min(...messages.map(m => m.timestamp || 0)) - 1
+    : 0;
+  const remote = await cloudFetchMessages(convId, since);
+  let added = 0;
+  for (const msg of remote) {
+    if (mergeRemoteMessage(convId, msg)) added++;
+  }
+  return added;
+}
+
+async function cloudPushUser(user) {
+  if (!user || !user.id || !getSyncUrl()) return;
+  await cloudRequest(`/api/users/${user.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      id: user.id,
+      name: user.name,
+      createdAt: user.createdAt || Date.now(),
+      avatar: user.avatar || null,
+      avatarUpdatedAt: user.avatarUpdatedAt || 0
+    })
+  });
+}
+
+async function cloudFetchUser(userId) {
+  return cloudRequest(`/api/users/${userId}`);
+}
+
+async function cloudPushFriendship(id1, id2) {
+  if (!getSyncUrl()) return;
+  const key = [id1, id2].sort().join('_');
+  await cloudRequest(`/api/friendships/${key}`, {
+    method: 'PUT',
+    body: JSON.stringify({ user1: id1, user2: id2, createdAt: Date.now() })
+  });
+}
+
+async function cloudFetchFriendIds(userId) {
+  const data = await cloudRequest(`/api/user/${userId}/friendships`);
+  return Array.isArray(data) ? data : [];
+}
+
+async function syncFriendships() {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return 0;
+
+  cloudPushUser(user);
+  const friendIds = await cloudFetchFriendIds(user.id);
+  let added = 0;
+  let avatarsUpdated = false;
+
+  for (const friendId of friendIds) {
+    if (String(friendId) === String(user.id)) continue;
+    const remoteUser = await cloudFetchUser(friendId);
+    if (remoteUser && remoteUser.id) {
+      const before = getUser(friendId)?.avatar;
+      ensureLocalUser(remoteUser);
+      if (getUser(friendId)?.avatar !== before) avatarsUpdated = true;
+    }
+    if (!areFriends(user.id, friendId)) {
+      addFriendship(user.id, friendId, { skipCloud: true });
+      added++;
+    }
+  }
+  if (avatarsUpdated) refreshMainUI();
+  return added;
+}
+
+async function syncUserConversationList() {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return;
+  const convIds = await cloudRequest(`/api/user/${user.id}/conversations`);
+  if (!Array.isArray(convIds)) return;
   const data = getData();
   let changed = false;
-  Object.keys(data.friendCodes).forEach(code => {
-    if (Date.now() > data.friendCodes[code].expiresAt) {
-      delete data.friendCodes[code];
-      changed = true;
+  for (const convId of convIds) {
+    if (!data.conversations[convId]) {
+      const remoteConv = await cloudFetchConversation(convId);
+      if (remoteConv && remoteConv.members && remoteConv.members.includes(user.id)) {
+        data.conversations[convId] = remoteConv;
+        if (!data.messages[convId]) data.messages[convId] = [];
+        changed = true;
+      }
+    }
+  }
+  if (changed) saveData(data);
+}
+
+async function syncAllConversations() {
+  if (!getSyncUrl()) return;
+  const user = getCurrentUser();
+  if (!user) return;
+  const friendsAdded = await syncFriendships();
+  await syncUserConversationList();
+  const convs = getUserConversations(user.id);
+  let total = 0;
+  for (const conv of convs) {
+    total += await syncConversation(conv.id);
+  }
+  if (total > 0 || friendsAdded > 0) {
+    refreshMainUI();
+    if (currentConvId) renderMessages(currentConvId);
+  }
+}
+
+async function cloudSyncAfterSend(convId, msg) {
+  if (!getSyncUrl()) return;
+  const data = getData();
+  const conv = data.conversations[convId];
+  if (conv) await cloudPushConversation(conv);
+  await cloudPushMessage(convId, msg);
+}
+
+function startGlobalSync() {
+  stopGlobalSync();
+  if (!getSyncUrl()) return;
+  syncAllConversations();
+  globalSyncTimer = setInterval(syncAllConversations, 5000);
+}
+
+function stopGlobalSync() {
+  if (globalSyncTimer) {
+    clearInterval(globalSyncTimer);
+    globalSyncTimer = null;
+  }
+}
+
+function startChatSync(convId) {
+  stopChatSync();
+  if (!getSyncUrl() || !convId) return;
+  syncConversation(convId).then((added) => {
+    if (added > 0 && currentConvId === convId) renderMessages(convId);
+  });
+  chatSyncTimer = setInterval(async () => {
+    const added = await syncConversation(convId);
+    if (added > 0) {
+      if (currentConvId === convId) renderMessages(convId);
+      renderChatList();
+    }
+  }, 2000);
+}
+
+function stopChatSync() {
+  if (chatSyncTimer) {
+    clearInterval(chatSyncTimer);
+    chatSyncTimer = null;
+  }
+}
+
+async function testSyncConnection() {
+  const result = await cloudRequest('/api/health');
+  return result && result.ok;
+}
+
+function updateSyncStatusUI() {
+  const status = document.getElementById('sync-status');
+  const input = document.getElementById('input-sync-url');
+  if (!status || !input) return;
+  input.value = getSyncUrl();
+  if (!getSyncUrl()) {
+    status.textContent = '未設定 — 他の端末とメッセージを共有するには同期サーバーURLを入力してください';
+    status.classList.add('warn');
+    return;
+  }
+  status.textContent = '接続確認中…（初回は30秒ほどかかることがあります）';
+  status.classList.add('warn');
+  testSyncConnection().then((ok) => {
+    if (ok) {
+      status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
+      status.classList.remove('warn');
+    } else {
+      status.textContent = '同期サーバーに接続できません。RenderのDeployが成功しているか、URLを確認してください';
+      status.classList.add('warn');
     }
   });
-  if (changed) saveData(data);
 }
 
 // ─── Conversations ───────────────────────────────────────
 function getOrCreateDirectConv(id1, id2) {
   const data = getData();
   const members = [id1, id2].sort();
-  const existing = Object.values(data.conversations).find(c =>
+  const convId = getDirectConvId(id1, id2);
+  const existing = data.conversations[convId] || Object.values(data.conversations).find(c =>
     c.type === 'direct' &&
     c.members.length === 2 &&
     c.members.slice().sort().join() === members.join()
   );
-  if (existing) return existing.id;
 
-  const convId = generateId();
+  if (existing) {
+    if (!data.conversations[convId] && existing.id !== convId) {
+      data.conversations[convId] = { ...existing, id: convId };
+      data.messages[convId] = data.messages[existing.id] || [];
+      delete data.conversations[existing.id];
+      delete data.messages[existing.id];
+      saveData(data);
+    }
+    cloudPushConversation(data.conversations[convId] || existing);
+    return convId;
+  }
+
   data.conversations[convId] = {
     id: convId,
     type: 'direct',
@@ -279,6 +863,7 @@ function getOrCreateDirectConv(id1, id2) {
   };
   data.messages[convId] = [];
   saveData(data);
+  cloudPushConversation(data.conversations[convId]);
   return convId;
 }
 
@@ -298,6 +883,7 @@ function createGroup(name, creatorId, memberIds) {
   };
   data.messages[convId] = [];
   saveData(data);
+  cloudPushConversation(data.conversations[convId]);
   return convId;
 }
 
@@ -329,27 +915,155 @@ function leaveGroup(convId, userId) {
 }
 
 // ─── Messages ────────────────────────────────────────────
-function sendMessage(convId, senderId, text) {
+function pushMessage(convId, senderId, msgData) {
   const data = getData();
   const conv = data.conversations[convId];
   if (!conv) return null;
   const msg = {
     id: generateId(),
     senderId,
-    text: text.trim(),
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    type: 'text',
+    text: '',
+    image: null,
+    ...msgData
   };
   if (!data.messages[convId]) data.messages[convId] = [];
   data.messages[convId].push(msg);
   conv.lastMessageAt = msg.timestamp;
-  conv.lastMessagePreview = text.trim().slice(0, 50);
-  saveData(data);
-  return msg;
+  conv.lastMessagePreview = getMessagePreview(msg);
+  conv.lastMessageSenderId = senderId;
+  try {
+    saveData(data);
+    cloudSyncAfterSend(convId, msg);
+    return msg;
+  } catch (e) {
+    data.messages[convId].pop();
+    showToast('保存に失敗しました。画像サイズを小さくしてください');
+    return null;
+  }
+}
+
+function sendMessage(convId, senderId, text) {
+  return pushMessage(convId, senderId, { type: 'text', text: text.trim() });
+}
+
+function sendImageMessage(convId, senderId, imageData) {
+  return pushMessage(convId, senderId, { type: 'image', image: imageData, text: '' });
 }
 
 function getMessages(convId) {
   const data = getData();
   return data.messages[convId] || [];
+}
+
+function syncConversationMeta(convId) {
+  const data = getData();
+  const conv = data.conversations[convId];
+  const messages = data.messages[convId];
+  if (!conv || !messages || messages.length === 0) return;
+  const last = messages[messages.length - 1];
+  conv.lastMessageAt = last.timestamp;
+  conv.lastMessagePreview = getMessagePreview(last);
+  conv.lastMessageSenderId = last.senderId;
+  saveData(data);
+}
+
+function getConvPreview(conv, userId) {
+  const messages = getMessages(conv.id);
+  if (messages.length > 0) {
+    const last = messages[messages.length - 1];
+    const preview = getMessagePreview(last);
+    return last.senderId === userId ? 'あなた: ' + preview : preview;
+  }
+  if (conv.lastMessagePreview) {
+    return conv.lastMessageSenderId === userId
+      ? 'あなた: ' + conv.lastMessagePreview
+      : conv.lastMessagePreview;
+  }
+  return 'メッセージはありません';
+}
+
+function getMessageContentHtml(msg) {
+  if (msg.type === 'image' || msg.image) {
+    return `
+      <div class="message-image-wrap">
+        <img src="${msg.image}" alt="写真" class="message-image" loading="lazy">
+        <button type="button" class="btn-download-image">⬇ 保存</button>
+      </div>`;
+  }
+  return escapeHtml(msg.text || '');
+}
+
+function bindMessageImageEvents(el, msg) {
+  if (!(msg.type === 'image' || msg.image)) return;
+  const img = el.querySelector('.message-image');
+  const btn = el.querySelector('.btn-download-image');
+  if (img) {
+    img.addEventListener('click', () => openImageViewer(msg.image));
+  }
+  if (btn) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      downloadImage(msg.image, `bluechat-${msg.id}.jpg`);
+    });
+  }
+}
+
+function createMessageElement(msg, convId, user) {
+  if (!user) return null;
+  const data = getData();
+  const conv = data.conversations[convId];
+  const isGroup = conv && conv.type === 'group';
+  const isSent = String(msg.senderId) === String(user.id);
+  const sender = data.users[msg.senderId];
+  const senderLabel = isSent ? 'あなた' : (sender ? sender.name : '不明');
+  const showSender = isGroup || isSent;
+  const isImage = msg.type === 'image' || msg.image;
+
+  const el = document.createElement('div');
+  el.className = `message ${isSent ? 'sent' : 'received'}`;
+  el.innerHTML = `
+    <div class="message-bubble${isImage ? ' message-bubble-image' : ''}">
+      ${showSender ? `<div class="message-sender">${escapeHtml(senderLabel)}</div>` : ''}
+      ${getMessageContentHtml(msg)}
+    </div>
+    <div class="message-meta">
+      <span class="message-time">${formatMessageTime(msg.timestamp)}</span>
+    </div>
+  `;
+  bindMessageImageEvents(el, msg);
+  return el;
+}
+
+function scrollMessagesToBottom() {
+  const container = document.getElementById('messages-container');
+  if (!container) return;
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
+}
+
+function appendMessageToChat(msg, convId) {
+  const user = getCurrentUser();
+  const container = document.getElementById('messages-container');
+  if (!user || !container) return;
+
+  const messages = getMessages(convId);
+  const prev = messages.length > 1 ? messages[messages.length - 2] : null;
+  const dateLabel = formatDateLabel(msg.timestamp);
+  const prevDateLabel = prev ? formatDateLabel(prev.timestamp) : '';
+
+  if (dateLabel !== prevDateLabel) {
+    const sep = document.createElement('div');
+    sep.className = 'date-separator';
+    sep.innerHTML = `<span>${dateLabel}</span>`;
+    container.appendChild(sep);
+  }
+
+  const el = createMessageElement(msg, convId, user);
+  if (el) container.appendChild(el);
+  scrollMessagesToBottom();
 }
 
 // ─── Admin ───────────────────────────────────────────────
@@ -402,10 +1116,12 @@ function showModal(id) {
 }
 
 function hideModal(id) {
+  if (id === 'modal-add-friend') stopQrScanner();
   document.getElementById(id).classList.add('hidden');
 }
 
 function hideAllModals() {
+  stopQrScanner();
   document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'));
 }
 
@@ -425,16 +1141,18 @@ function renderChatList() {
   empty.classList.add('hidden');
 
   convs.forEach(conv => {
+    syncConversationMeta(conv.id);
     const name = getConvDisplayName(conv, user.id);
     const isGroup = conv.type === 'group';
     const avatarUser = isGroup ? null : getConvAvatarUser(conv, user.id);
+    const preview = getConvPreview(conv, user.id);
     const item = document.createElement('div');
     item.className = 'list-item';
     item.innerHTML = `
       ${avatarHtml(avatarUser, { group: isGroup })}
       <div class="list-info">
         <div class="list-name">${escapeHtml(name)}</div>
-        <div class="list-preview">${conv.lastMessagePreview ? escapeHtml(conv.lastMessagePreview) : 'メッセージはありません'}</div>
+        <div class="list-preview">${escapeHtml(preview)}</div>
       </div>
       <div class="list-meta">
         ${conv.lastMessageAt ? `<div class="list-time">${formatTime(conv.lastMessageAt)}</div>` : ''}
@@ -495,10 +1213,12 @@ function renderProfile() {
   document.getElementById('btn-remove-avatar').classList.toggle('hidden', !user.avatar);
   document.getElementById('profile-name').textContent = user.name;
   document.getElementById('profile-id').textContent = 'ID: ' + user.id;
+  updateSyncStatusUI();
 }
 
 function renderMessages(convId) {
   const user = getCurrentUser();
+  if (!user) return;
   const messages = getMessages(convId);
   const container = document.getElementById('messages-container');
   container.innerHTML = '';
@@ -514,27 +1234,11 @@ function renderMessages(convId) {
       container.appendChild(sep);
     }
 
-    const isSent = msg.senderId === user.id;
-    const data = getData();
-    const conv = data.conversations[convId];
-    const isGroup = conv && conv.type === 'group';
-
-    const el = document.createElement('div');
-    el.className = `message ${isSent ? 'sent' : 'received'}`;
-    const sender = data.users[msg.senderId];
-    el.innerHTML = `
-      <div class="message-bubble">
-        ${!isSent && isGroup ? `<div class="message-sender">${escapeHtml(sender ? sender.name : '不明')}</div>` : ''}
-        ${escapeHtml(msg.text)}
-      </div>
-      <div class="message-meta">
-        <span class="message-time">${formatMessageTime(msg.timestamp)}</span>
-      </div>
-    `;
-    container.appendChild(el);
+    const el = createMessageElement(msg, convId, user);
+    if (el) container.appendChild(el);
   });
 
-  container.scrollTop = container.scrollHeight;
+  scrollMessagesToBottom();
 }
 
 function openChat(convId) {
@@ -561,6 +1265,7 @@ function openChat(convId) {
   document.getElementById('input-message').value = '';
   document.getElementById('btn-send').disabled = true;
   renderMessages(convId);
+  startChatSync(convId);
   showScreen('chat');
 }
 
@@ -669,6 +1374,8 @@ function showAdminUserConversations(userId) {
   const user = data.users[userId];
   if (!user) return;
 
+  adminFocusUserId = userId;
+
   document.querySelectorAll('[data-admin-tab]').forEach(t => t.classList.remove('active'));
   document.querySelector('[data-admin-tab="conversations"]').classList.add('active');
   document.getElementById('admin-tab-users').classList.add('hidden');
@@ -707,7 +1414,10 @@ function showAdminUserConversations(userId) {
         ${conv.lastMessageAt ? `<div class="list-time">${formatTime(conv.lastMessageAt)}</div>` : ''}
       </div>
     `;
-    item.addEventListener('click', () => openAdminChat(conv.id));
+    item.addEventListener('click', () => {
+      adminFocusUserId = null;
+      openAdminChat(conv.id);
+    });
     list.appendChild(item);
   });
 }
@@ -747,7 +1457,10 @@ function renderAdminConversations() {
         ${conv.lastMessageAt ? `<div class="list-time">${formatTime(conv.lastMessageAt)}</div>` : ''}
       </div>
     `;
-    item.addEventListener('click', () => openAdminChat(conv.id));
+    item.addEventListener('click', () => {
+      adminFocusUserId = null;
+      openAdminChat(conv.id);
+    });
     list.appendChild(item);
   });
 }
@@ -783,17 +1496,20 @@ function openAdminChat(convId) {
     }
 
     const sender = data.users[msg.senderId];
+    const isFocusUser = adminFocusUserId && msg.senderId === adminFocusUserId;
+    const isImage = msg.type === 'image' || msg.image;
     const el = document.createElement('div');
-    el.className = 'message received';
+    el.className = `message ${isFocusUser ? 'sent' : 'received'}`;
     el.innerHTML = `
-      <div class="message-bubble">
+      <div class="message-bubble${isImage ? ' message-bubble-image' : ''}">
         <div class="message-sender">${escapeHtml(sender ? sender.name : '不明')}</div>
-        ${escapeHtml(msg.text)}
+        ${getMessageContentHtml(msg)}
       </div>
       <div class="message-meta">
         <span class="message-time">${formatMessageTime(msg.timestamp)}</span>
       </div>
     `;
+    bindMessageImageEvents(el, msg);
     container.appendChild(el);
   });
 
@@ -818,13 +1534,111 @@ function refreshMainUI() {
 }
 
 // ─── Event Handlers ──────────────────────────────────────
+function bindClick(id, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('click', handler);
+}
+
+function verifyAdminCredentials(email, password) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedPassword = String(password || '').trim();
+  return normalizedEmail === ADMIN_EMAIL.toLowerCase() && normalizedPassword === ADMIN_PASSWORD;
+}
+
+function saveAdminSession() {
+  if (adminLoggedIn) localStorage.setItem(ADMIN_SESSION_KEY, '1');
+  else localStorage.removeItem(ADMIN_SESSION_KEY);
+}
+
+function performAdminLogin() {
+  const email = document.getElementById('input-admin-email').value;
+  const password = document.getElementById('input-admin-password').value;
+  if (!verifyAdminCredentials(email, password)) {
+    showToast('メールアドレスまたはパスワードが正しくありません');
+    return;
+  }
+  adminLoggedIn = true;
+  saveAdminSession();
+  document.getElementById('input-admin-email').value = '';
+  document.getElementById('input-admin-password').value = '';
+  try {
+    renderAdminUsers();
+    renderAdminConversations();
+  } catch (e) {
+    console.error(e);
+  }
+  showScreen('admin');
+  showToast('管理者としてログインしました');
+}
+
+function setupAdminHandlers() {
+  bindClick('link-admin-onboarding', (e) => {
+    e.preventDefault();
+    returnScreenAfterAdmin = 'onboarding';
+    showScreen('admin-login');
+  });
+
+  bindClick('link-admin-main', (e) => {
+    e.preventDefault();
+    returnScreenAfterAdmin = 'main';
+    showScreen('admin-login');
+  });
+
+  bindClick('btn-admin-back', () => {
+    showScreen(returnScreenAfterAdmin);
+  });
+
+  bindClick('btn-admin-login', (e) => {
+    e.preventDefault();
+    performAdminLogin();
+  });
+
+  const adminPassword = document.getElementById('input-admin-password');
+  if (adminPassword) {
+    adminPassword.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') performAdminLogin();
+    });
+  }
+
+  const adminEmail = document.getElementById('input-admin-email');
+  if (adminEmail) {
+    adminEmail.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') performAdminLogin();
+    });
+  }
+
+  bindClick('btn-admin-exit', () => {
+    showScreen(returnScreenAfterAdmin);
+    if (returnScreenAfterAdmin === 'main') refreshMainUI();
+  });
+
+  document.querySelectorAll('[data-admin-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('[data-admin-tab]').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentAdminTab = tab.dataset.adminTab;
+      document.getElementById('admin-tab-users').classList.toggle('hidden', currentAdminTab !== 'users');
+      document.getElementById('admin-tab-conversations').classList.toggle('hidden', currentAdminTab !== 'conversations');
+      if (currentAdminTab === 'users') renderAdminUsers();
+      if (currentAdminTab === 'conversations') renderAdminConversations();
+    });
+  });
+
+  bindClick('btn-admin-chat-back', () => {
+    adminViewConvId = null;
+    showScreen('admin');
+  });
+}
+
 function init() {
-  cleanExpiredCodes();
+  setupAdminHandlers();
+  initSyncFromQuery();
 
   const user = getCurrentUser();
   if (user) {
     showScreen('main');
     refreshMainUI();
+    startGlobalSync();
   } else {
     showScreen('onboarding');
   }
@@ -836,6 +1650,7 @@ function init() {
     createUser(name);
     showScreen('main');
     refreshMainUI();
+    startGlobalSync();
     showToast(`ようこそ、${name}さん！`);
   });
 
@@ -854,54 +1669,63 @@ function init() {
     });
   });
 
-  // Add friend
+  // Add friend (QR)
   document.getElementById('btn-add-friend').addEventListener('click', () => {
-    document.getElementById('input-friend-code').value = '';
-    document.getElementById('generated-code-display').classList.add('hidden');
-    showModal('modal-add-friend');
+    openAddFriendModal('scan');
   });
 
-  document.getElementById('btn-generate-code').addEventListener('click', () => {
-    showModal('modal-add-friend');
-    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
-    document.querySelector('.modal-tab[data-modal-tab="generate"]').classList.add('active');
-    document.getElementById('modal-tab-enter').classList.add('hidden');
-    document.getElementById('modal-tab-generate').classList.remove('hidden');
+  document.getElementById('btn-show-qr').addEventListener('click', () => {
+    openAddFriendModal('show');
   });
 
-  // Modal tabs
-  document.querySelectorAll('.modal-tab').forEach(tab => {
+  document.querySelectorAll('#modal-add-friend .modal-tab').forEach(tab => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      document.getElementById('modal-tab-enter').classList.toggle('hidden', tab.dataset.modalTab !== 'enter');
-      document.getElementById('modal-tab-generate').classList.toggle('hidden', tab.dataset.modalTab !== 'generate');
+      switchAddFriendTab(tab.dataset.modalTab);
     });
   });
 
-  document.getElementById('btn-submit-code').addEventListener('click', () => {
-    const code = document.getElementById('input-friend-code').value.trim();
-    if (!code) { showToast('パスワードを入力してください'); return; }
-    const user = getCurrentUser();
-    const result = redeemFriendCode(code, user.id);
-    if (result.error) { showToast(result.error); return; }
-    hideModal('modal-add-friend');
-    refreshMainUI();
-    showToast(`${result.user.name}さんと友だちになりました！`);
+  document.getElementById('btn-start-camera').addEventListener('click', () => {
+    startQrScanner();
   });
 
-  document.getElementById('btn-generate-new-code').addEventListener('click', () => {
-    const user = getCurrentUser();
-    const code = createFriendCode(user.id);
-    document.getElementById('generated-code-text').textContent = code;
-    document.getElementById('generated-code-display').classList.remove('hidden');
-    showToast('パスワードを発行しました');
+  document.getElementById('btn-stop-camera').addEventListener('click', () => {
+    stopQrScanner();
   });
 
-  document.getElementById('btn-copy-code').addEventListener('click', () => {
-    const code = document.getElementById('generated-code-text').textContent;
-    navigator.clipboard.writeText(code).then(() => showToast('コピーしました'));
+  document.getElementById('btn-refresh-qr').addEventListener('click', () => {
+    renderMyQR();
+    showToast('QRコードを更新しました');
   });
+
+  bindClick('btn-submit-invite', () => {
+    const code = (document.getElementById('input-friend-invite')?.value || '').trim();
+    if (!code) {
+      showToast('コードを入力してください');
+      return;
+    }
+    tryRedeemInviteCode(code);
+  });
+
+  bindClick('btn-copy-invite', async () => {
+    const code = document.getElementById('invite-code-text')?.textContent || '';
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      showToast('コードをコピーしました');
+    } catch (e) {
+      showToast('コピーに失敗しました');
+    }
+  });
+
+  const inputFriendInvite = document.getElementById('input-friend-invite');
+  if (inputFriendInvite) {
+    inputFriendInvite.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById('btn-submit-invite')?.click();
+      }
+    });
+  }
 
   // Close modals
   document.querySelectorAll('.btn-close-modal, .modal-backdrop').forEach(el => {
@@ -947,6 +1771,7 @@ function init() {
 
   // Chat
   document.getElementById('btn-back-chat').addEventListener('click', () => {
+    stopChatSync();
     currentConvId = null;
     showScreen('main');
     refreshMainUI();
@@ -970,10 +1795,74 @@ function init() {
     const text = msgInput.value.trim();
     if (!text || !currentConvId) return;
     const user = getCurrentUser();
-    sendMessage(currentConvId, user.id, text);
+    if (!user) return;
+    const msg = sendMessage(currentConvId, user.id, text);
     msgInput.value = '';
     sendBtn.disabled = true;
-    renderMessages(currentConvId);
+    if (msg) {
+      appendMessageToChat(msg, currentConvId);
+      renderChatList();
+    } else {
+      renderMessages(currentConvId);
+    }
+  });
+
+  const chatImageInput = document.getElementById('input-chat-image');
+  document.getElementById('btn-attach-image').addEventListener('click', () => {
+    chatImageInput.click();
+  });
+
+  chatImageInput.addEventListener('change', async () => {
+    const file = chatImageInput.files[0];
+    chatImageInput.value = '';
+    if (!file || !currentConvId) return;
+    if (!file.type.startsWith('image/')) {
+      showToast('画像ファイルを選択してください');
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      showToast('15MB以下の画像を選択してください');
+      return;
+    }
+    try {
+      const dataUrl = await compressChatImage(file);
+      const user = getCurrentUser();
+      if (!user) return;
+      const msg = sendImageMessage(currentConvId, user.id, dataUrl);
+      if (msg) {
+        appendMessageToChat(msg, currentConvId);
+        renderChatList();
+        showToast('写真を送信しました');
+      }
+    } catch (e) {
+      showToast('画像の送信に失敗しました');
+    }
+  });
+
+  document.getElementById('btn-download-full-image').addEventListener('click', () => {
+    const src = document.getElementById('btn-download-full-image').dataset.imageSrc;
+    if (src) downloadImage(src, 'bluechat-photo.jpg');
+  });
+
+  document.getElementById('btn-save-sync').addEventListener('click', async () => {
+    const url = document.getElementById('input-sync-url').value.trim();
+    setSyncUrl(url);
+    stopGlobalSync();
+    stopChatSync();
+    if (url) {
+      const ok = await testSyncConnection();
+      if (ok) {
+        showToast('同期サーバーを設定しました');
+        startGlobalSync();
+        await syncAllConversations();
+        refreshMainUI();
+      } else {
+        showToast('同期サーバーに接続できません');
+      }
+    } else {
+      showToast('同期をオフにしました');
+    }
+    updateSyncStatusUI();
   });
 
   // Profile image
@@ -1029,67 +1918,6 @@ function init() {
     showScreen('onboarding');
     document.getElementById('input-name').value = '';
     showToast('データをリセットしました');
-  });
-
-  // Admin links
-  document.getElementById('link-admin-onboarding').addEventListener('click', (e) => {
-    e.preventDefault();
-    returnScreenAfterAdmin = 'onboarding';
-    showScreen('admin-login');
-  });
-
-  document.getElementById('link-admin-main').addEventListener('click', (e) => {
-    e.preventDefault();
-    returnScreenAfterAdmin = 'main';
-    showScreen('admin-login');
-  });
-
-  document.getElementById('btn-admin-back').addEventListener('click', () => {
-    showScreen(returnScreenAfterAdmin);
-  });
-
-  document.getElementById('btn-admin-login').addEventListener('click', () => {
-    const email = document.getElementById('input-admin-email').value.trim();
-    const password = document.getElementById('input-admin-password').value;
-    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-      adminLoggedIn = true;
-      document.getElementById('input-admin-email').value = '';
-      document.getElementById('input-admin-password').value = '';
-      renderAdminUsers();
-      renderAdminConversations();
-      showScreen('admin');
-      showToast('管理者としてログインしました');
-    } else {
-      showToast('メールアドレスまたはパスワードが正しくありません');
-    }
-  });
-
-  document.getElementById('input-admin-password').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') document.getElementById('btn-admin-login').click();
-  });
-
-  document.getElementById('btn-admin-exit').addEventListener('click', () => {
-    adminLoggedIn = false;
-    showScreen(returnScreenAfterAdmin);
-    if (returnScreenAfterAdmin === 'main') refreshMainUI();
-  });
-
-  // Admin tabs
-  document.querySelectorAll('[data-admin-tab]').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('[data-admin-tab]').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      currentAdminTab = tab.dataset.adminTab;
-      document.getElementById('admin-tab-users').classList.toggle('hidden', currentAdminTab !== 'users');
-      document.getElementById('admin-tab-conversations').classList.toggle('hidden', currentAdminTab !== 'conversations');
-      if (currentAdminTab === 'users') renderAdminUsers();
-      if (currentAdminTab === 'conversations') renderAdminConversations();
-    });
-  });
-
-  document.getElementById('btn-admin-chat-back').addEventListener('click', () => {
-    adminViewConvId = null;
-    showScreen('admin');
   });
 }
 
