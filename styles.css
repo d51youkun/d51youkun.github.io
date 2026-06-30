@@ -609,29 +609,41 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 12px;
-  padding-bottom: calc(10px + var(--safe-bottom));
+  padding: 8px 10px;
+  padding-bottom: calc(8px + var(--safe-bottom));
   background: var(--white);
   border-top: 1px solid var(--gray-200);
   flex-shrink: 0;
 }
 
+.attach-toolbar {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  max-width: 42%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.attach-toolbar::-webkit-scrollbar { display: none; }
+
 .btn-attach {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
   background: var(--blue-pale);
   border: none;
   border-radius: 50%;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.1s;
 }
 
-.btn-attach:hover { background: var(--gray-200); }
+.btn-attach:active { transform: scale(0.92); background: var(--blue-light); color: #fff; }
 
 .message-bubble-image {
   padding: 4px !important;
@@ -1131,3 +1143,17 @@ input:focus {
 .admin-panel { flex: 1; overflow-y: auto; }
 
 #qr-reader-transfer { width: 100%; min-height: 200px; }
+
+.incoming-call-modal { align-items: center; justify-content: center; }
+.incoming-call-content { text-align: center; border-radius: var(--radius); max-width: 320px; }
+.incoming-call-icon { font-size: 56px; animation: ring-pulse 1s infinite; }
+@keyframes ring-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+.incoming-call-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+.btn-call-action { flex: 1; height: 48px; }
