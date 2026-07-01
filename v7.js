@@ -333,10 +333,37 @@ async function updateTabBadges() {
   setTabBadge('chats', countUnreadChats());
 }
 
+async function deleteAnnouncement(annId) {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return;
+  const list = await fetchAnnouncements();
+  const ann = list.find(a => a.id === annId);
+  if (!ann || ann.authorId !== user.id) {
+    showToast('削除できません');
+    return;
+  }
+  if (!confirm('このお知らせを削除しますか？')) return;
+  await cloudRequest(`/api/announcements/${annId}`, { method: 'DELETE' });
+  showToast('お知らせを削除しました');
+  renderAnnouncements();
+  updateTabBadges();
+}
+
+async function deleteAnnouncementComment(annId, commentId) {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return;
+  await cloudRequest(`/api/announcements/${annId}/comments/${commentId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ userId: user.id })
+  });
+  renderAnnouncements();
+}
+
 async function renderAnnouncements() {
   const list = document.getElementById('notice-list');
   const empty = document.getElementById('notice-list-empty');
   if (!list) return;
+  const user = getCurrentUser();
   const announcements = await fetchAnnouncements();
   list.innerHTML = '';
   if (!announcements.length) {
@@ -349,10 +376,12 @@ async function renderAnnouncements() {
     const item = document.createElement('div');
     item.className = 'notice-item glass-panel' + (read[ann.id] ? '' : ' unread');
     const typeLabel = ann.type === 'personal' ? '個人' : ann.type === 'group' ? 'グループ' : '全体';
+    const canDeleteAnn = user && ann.authorId === user.id;
     item.innerHTML = `
       <div class="notice-header">
         <span class="notice-type">${typeLabel}</span>
         <span class="notice-date">${new Date(ann.createdAt).toLocaleString('ja-JP')}</span>
+        ${canDeleteAnn ? `<button type="button" class="btn-delete-post btn-sm" data-ann-id="${ann.id}">削除</button>` : ''}
       </div>
       <h3 class="notice-title">${escapeHtml(ann.title)}</h3>
       <p class="notice-body">${escapeHtml(ann.body)}</p>
@@ -371,8 +400,22 @@ async function renderAnnouncements() {
     (ann.comments || []).forEach(c => {
       const cEl = document.createElement('div');
       cEl.className = 'notice-comment';
-      cEl.innerHTML = `<strong>${escapeHtml(c.userName)}</strong>: ${escapeHtml(c.text)}`;
+      const canDeleteComment = user && c.userId === user.id;
+      cEl.innerHTML = `<strong>${escapeHtml(c.userName)}</strong>: ${escapeHtml(c.text)}${canDeleteComment ? ` <button type="button" class="btn-delete-post btn-sm" data-ann-id="${ann.id}" data-comment-id="${c.id}">削除</button>` : ''}`;
       commentsEl.appendChild(cEl);
+    });
+    item.querySelectorAll('.btn-delete-post').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const annId = btn.dataset.annId;
+        const commentId = btn.dataset.commentId;
+        if (commentId) {
+          if (!confirm('コメントを削除しますか？')) return;
+          await deleteAnnouncementComment(annId, commentId);
+        } else {
+          await deleteAnnouncement(annId);
+        }
+      });
     });
     item.querySelector('.btn-notice-comment')?.addEventListener('click', async (e) => {
       e.stopPropagation();

@@ -24,6 +24,8 @@
   --gray-500: #8b95a5;
   --gray-700: #4a5568;
   --gray-900: #1a202c;
+  --text-primary: #000000;
+  --text-secondary: #000000;
   --danger: #e53935;
   --danger-light: #ffebee;
   --shadow: 0 2px 12px rgba(26, 111, 212, 0.12);
@@ -46,7 +48,7 @@ html, body {
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
   background: var(--blue-bg);
-  color: var(--gray-900);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
@@ -1021,8 +1023,8 @@ input:focus {
   bottom: calc(80px + var(--safe-bottom));
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(26, 32, 44, 0.9);
-  color: var(--white);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text-primary);
   padding: 12px 24px;
   border-radius: 24px;
   font-size: 14px;
@@ -1031,6 +1033,12 @@ input:focus {
   white-space: nowrap;
   max-width: 90vw;
   text-align: center;
+  border: 1px solid var(--gray-300);
+}
+
+[data-theme="dark"] .toast {
+  background: rgba(0, 0, 0, 0.9);
+  border-color: var(--gray-300);
 }
 
 @keyframes toastIn {
@@ -1290,13 +1298,15 @@ input:focus {
   --gray-500: #94a3b8;
   --gray-700: #cbd5e1;
   --gray-900: #f1f5f9;
+  --text-primary: #ffffff;
+  --text-secondary: #ffffff;
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
 [data-theme="dark"] body {
   background: var(--blue-bg);
-  color: var(--gray-900);
+  color: var(--text-primary);
 }
 
 /* v7: liquid glass */
@@ -1441,16 +1451,128 @@ input:focus {
 
 .admin-not-friend {
   font-size: 11px;
-  color: var(--gray-500);
+  color: var(--text-primary);
   font-weight: normal;
+}
+
+.admin-self {
+  font-size: 11px;
+  color: var(--text-primary);
+  font-weight: normal;
+}
+
+#profile-name {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-primary);
+}
+
+.message-bubble {
+  position: relative;
+}
+
+.btn-delete-message {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(128, 128, 128, 0.45);
+  color: var(--text-primary) !important;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.btn-delete-message:hover { opacity: 1; }
+
+.btn-delete-post {
+  border: 1px solid var(--text-primary);
+  background: transparent;
+  color: var(--text-primary) !important;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.notice-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.notice-header .btn-delete-post {
+  margin-left: auto;
+}
+
+/* Theme text: light=all black, dark=all white */
+html {
+  color: var(--text-primary);
+}
+
+body,
+body :where(
+  h1, h2, h3, h4, h5, h6,
+  p, span, a, label, li, td, th,
+  button, input, textarea, select, option,
+  strong, em, small, time
+) {
+  color: var(--text-primary);
+}
+
+.list-name, .list-preview, .list-time, .list-avatar,
+.message-bubble, .message-sender, .message-time, .read-badge,
+.menu-item, .menu-item.danger, .tab, .tab.active,
+.notice-title, .notice-body, .notice-author, .notice-comment,
+.notice-type, .notice-date,
+.btn-primary, .btn-secondary, .btn-send, .btn-attach, .btn-call,
+.btn-text-link, .btn-download-image, .message-file-link,
+.admin-btn, .admin-btn-view, .admin-btn-delete, .admin-btn-ban,
+.admin-btn-unban, .admin-btn-premium, .admin-btn-suspend, .admin-btn-title,
+.icon-btn, #btn-back-chat,
+.chat-header-info h2, #header-title, #chat-title, #chat-subtitle,
+.form-label, .form-desc, .profile-id, .qr-hint, .admin-search-input,
+.empty-state, .empty-state p, .empty-state .sub,
+.in-app-notify, .in-app-notify strong, .in-app-notify p,
+.feedback-panel h3, .feedback-type, .feedback-time,
+.presence-label, .presence-label.online, .presence-label.offline,
+.chat-presence-status, .chat-presence-status.online, .chat-presence-status.offline,
+.user-title-badge, .premium-check,
+.date-separator span, .sticker-pack-label, .file-name,
+.ban-message, .admin-not-friend, .admin-self,
+.toast, .btn-delete-message, .btn-delete-post,
+.logo-large h1, .logo-large .tagline, .admin-link,
+#profile-name, .profile-avatar:not(.has-image),
+.app-header h1, .modal-content h2, .modal-content h3,
+.list-name, .list-preview, .message.received .message-bubble,
+.message.received .message-sender, .message.sent .message-bubble,
+.message.sent .message-sender, .message.sent .message-time,
+.message.sent .read-badge, .message.sent .btn-download-image,
+.message.sent .message-file-link, .invite-code-text,
+.member-option span, .group-member-item span {
+  color: var(--text-primary) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-primary) !important;
+  opacity: 0.45;
 }
 
 /* Back button visibility */
 .chat-header .icon-btn,
 #btn-back-chat {
   background: rgba(0, 0, 0, 0.45);
-  border: 2px solid rgba(255, 255, 255, 0.95);
-  color: #fff;
+  border: 2px solid var(--text-primary);
+  color: var(--text-primary) !important;
   font-size: 22px;
   font-weight: 700;
   width: 44px;
@@ -1467,8 +1589,29 @@ input:focus {
 [data-theme="dark"] .chat-header .icon-btn,
 [data-theme="dark"] #btn-back-chat {
   background: rgba(255, 255, 255, 0.25);
-  border-color: #fff;
-  color: #fff;
+  border-color: var(--text-primary);
+  color: var(--text-primary) !important;
+}
+
+/* Force all text: light=black, dark=white (overrides every rule above) */
+html:not([data-theme="dark"]) body * {
+  color: #000000 !important;
+}
+
+html[data-theme="dark"] body * {
+  color: #ffffff !important;
+}
+
+html:not([data-theme="dark"]) body input::placeholder,
+html:not([data-theme="dark"]) body textarea::placeholder {
+  color: #000000 !important;
+  opacity: 0.45;
+}
+
+html[data-theme="dark"] body input::placeholder,
+html[data-theme="dark"] body textarea::placeholder {
+  color: #ffffff !important;
+  opacity: 0.45;
 }
 
   </style>
@@ -2608,6 +2751,27 @@ async function cloudPushConversation(conv) {
   });
 }
 
+async function cloudDeleteMessage(convId, msgId) {
+  if (!getSyncUrl()) return false;
+  const res = await cloudRequest(`/api/messages/${convId}/${msgId}`, { method: 'DELETE' });
+  return !!(res && res.ok);
+}
+
+async function syncMessageDeletions(convId) {
+  if (!getSyncUrl() || !convId) return;
+  const ids = await cloudRequest(`/api/messages/${convId}/ids`);
+  if (!Array.isArray(ids)) return;
+  const data = getData();
+  if (!data.messages[convId]) return;
+  const idSet = new Set(ids);
+  const before = data.messages[convId].length;
+  data.messages[convId] = data.messages[convId].filter(m => idSet.has(m.id));
+  if (data.messages[convId].length !== before) {
+    syncConversationMeta(convId);
+    saveData(data);
+  }
+}
+
 async function cloudPushMessage(convId, msg) {
   if (!getSyncUrl()) return;
   await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
@@ -2663,6 +2827,7 @@ async function syncConversation(convId) {
   if (!getSyncUrl() || !convId) return 0;
 
   await syncPushLocalMessages(convId);
+  await syncMessageDeletions(convId);
 
   const remoteConv = await cloudFetchConversation(convId);
   if (remoteConv && remoteConv.id) {
@@ -2802,9 +2967,18 @@ async function syncAllConversations() {
   }
   if (typeof updateTabBadges === 'function') updateTabBadges();
   if (typeof fetchFriendsPresence === 'function') await fetchFriendsPresence();
-  refreshMainUI();
-  if (currentConvId) renderMessages(currentConvId);
+  refreshUIAfterSync();
   return total + friendsAdded;
+}
+
+function refreshUIAfterSync() {
+  renderChatList();
+  if (currentScreen === 'chat' && currentConvId) {
+    renderMessages(currentConvId);
+  } else {
+    renderFriendList();
+    renderProfile();
+  }
 }
 
 async function cloudSyncAfterSend(convId, msg) {
@@ -3003,6 +3177,21 @@ function sendImageMessage(convId, senderId, imageData) {
 function getMessages(convId) {
   const data = getData();
   return data.messages[convId] || [];
+}
+
+async function deleteMessage(convId, msgId) {
+  const user = getCurrentUser();
+  if (!user) return false;
+  const data = getData();
+  const msgs = data.messages[convId];
+  if (!msgs) return false;
+  const msg = msgs.find(m => m.id === msgId);
+  if (!msg || String(msg.senderId) !== String(user.id)) return false;
+  data.messages[convId] = msgs.filter(m => m.id !== msgId);
+  syncConversationMeta(convId);
+  saveData(data);
+  if (getSyncUrl()) await cloudDeleteMessage(convId, msgId);
+  return true;
 }
 
 function syncConversationMeta(convId) {
@@ -3259,7 +3448,8 @@ function renderProfile() {
     avatarEl.textContent = getInitial(user.name);
   }
   document.getElementById('btn-remove-avatar').classList.toggle('hidden', !user.avatar);
-  document.getElementById('profile-name').textContent = user.name;
+  const nameEl = document.getElementById('profile-name');
+  if (nameEl) nameEl.innerHTML = typeof displayNameHtml === 'function' ? displayNameHtml(user) : escapeHtml(user.name);
   document.getElementById('profile-id').textContent = 'ID: ' + user.id;
   updateSyncStatusUI();
 }
@@ -4297,10 +4487,12 @@ function createMessageElementExt(msg, convId, user) {
 
   const el = document.createElement('div');
   el.className = `message ${isSent ? 'sent' : 'received'}`;
+  el.dataset.msgId = msg.id;
   el.innerHTML = `
     <div class="message-bubble${isMedia ? ' message-bubble-image' : ''}">
       ${showSender ? `<div class="message-sender">${escapeHtml(senderLabel)}</div>` : ''}
       ${getMessageContentHtmlExt(msg)}
+      ${isSent ? '<button type="button" class="btn-delete-message" aria-label="削除">×</button>' : ''}
     </div>
     <div class="message-meta">
       ${readLabel}
@@ -4313,6 +4505,18 @@ function createMessageElementExt(msg, convId, user) {
     fileLink.addEventListener('click', (e) => {
       e.preventDefault();
       downloadImage(msg.fileData, msg.fileName || 'file');
+    });
+  }
+  const delBtn = el.querySelector('.btn-delete-message');
+  if (delBtn) {
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('このメッセージを削除しますか？')) return;
+      if (await deleteMessage(convId, msg.id)) {
+        el.remove();
+        renderChatList();
+        showToast('メッセージを削除しました');
+      }
     });
   }
   return el;
@@ -4836,10 +5040,6 @@ function startGlobalCallPolling() {
     for (const sig of signals) {
       lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
       if (sig.type === 'offer' && !callState.active) {
-        if (!pendingIncomingCall) {
-          const convId = getDirectConvId(user.id, sig.from);
-          if (convId && currentConvId !== convId) currentConvId = convId;
-        }
         await handleCallSignal(sig);
       } else if (callState.active) {
         await handleCallSignal(sig);
@@ -5956,7 +6156,10 @@ renderAdminUsers = function () {
     users.forEach(user => {
       const item = document.createElement('div');
       item.className = 'list-item';
-      const friendMark = areFriends(getCurrentUser()?.id, user.id) ? '' : ' <span class="admin-not-friend">(未友だち)</span>';
+      const meId = getCurrentUser()?.id;
+      const friendMark = String(user.id) === String(meId)
+        ? ' <span class="admin-self">(自分)</span>'
+        : (areFriends(meId, user.id) ? '' : ' <span class="admin-not-friend">(未友だち)</span>');
       item.innerHTML = `
       ${avatarHtml(user)}
       <div class="list-info">
@@ -6828,10 +7031,37 @@ async function updateTabBadges() {
   setTabBadge('chats', countUnreadChats());
 }
 
+async function deleteAnnouncement(annId) {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return;
+  const list = await fetchAnnouncements();
+  const ann = list.find(a => a.id === annId);
+  if (!ann || ann.authorId !== user.id) {
+    showToast('削除できません');
+    return;
+  }
+  if (!confirm('このお知らせを削除しますか？')) return;
+  await cloudRequest(`/api/announcements/${annId}`, { method: 'DELETE' });
+  showToast('お知らせを削除しました');
+  renderAnnouncements();
+  updateTabBadges();
+}
+
+async function deleteAnnouncementComment(annId, commentId) {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return;
+  await cloudRequest(`/api/announcements/${annId}/comments/${commentId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ userId: user.id })
+  });
+  renderAnnouncements();
+}
+
 async function renderAnnouncements() {
   const list = document.getElementById('notice-list');
   const empty = document.getElementById('notice-list-empty');
   if (!list) return;
+  const user = getCurrentUser();
   const announcements = await fetchAnnouncements();
   list.innerHTML = '';
   if (!announcements.length) {
@@ -6844,10 +7074,12 @@ async function renderAnnouncements() {
     const item = document.createElement('div');
     item.className = 'notice-item glass-panel' + (read[ann.id] ? '' : ' unread');
     const typeLabel = ann.type === 'personal' ? '個人' : ann.type === 'group' ? 'グループ' : '全体';
+    const canDeleteAnn = user && ann.authorId === user.id;
     item.innerHTML = `
       <div class="notice-header">
         <span class="notice-type">${typeLabel}</span>
         <span class="notice-date">${new Date(ann.createdAt).toLocaleString('ja-JP')}</span>
+        ${canDeleteAnn ? `<button type="button" class="btn-delete-post btn-sm" data-ann-id="${ann.id}">削除</button>` : ''}
       </div>
       <h3 class="notice-title">${escapeHtml(ann.title)}</h3>
       <p class="notice-body">${escapeHtml(ann.body)}</p>
@@ -6866,8 +7098,22 @@ async function renderAnnouncements() {
     (ann.comments || []).forEach(c => {
       const cEl = document.createElement('div');
       cEl.className = 'notice-comment';
-      cEl.innerHTML = `<strong>${escapeHtml(c.userName)}</strong>: ${escapeHtml(c.text)}`;
+      const canDeleteComment = user && c.userId === user.id;
+      cEl.innerHTML = `<strong>${escapeHtml(c.userName)}</strong>: ${escapeHtml(c.text)}${canDeleteComment ? ` <button type="button" class="btn-delete-post btn-sm" data-ann-id="${ann.id}" data-comment-id="${c.id}">削除</button>` : ''}`;
       commentsEl.appendChild(cEl);
+    });
+    item.querySelectorAll('.btn-delete-post').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const annId = btn.dataset.annId;
+        const commentId = btn.dataset.commentId;
+        if (commentId) {
+          if (!confirm('コメントを削除しますか？')) return;
+          await deleteAnnouncementComment(annId, commentId);
+        } else {
+          await deleteAnnouncement(annId);
+        }
+      });
     });
     item.querySelector('.btn-notice-comment')?.addEventListener('click', async (e) => {
       e.stopPropagation();

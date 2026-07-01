@@ -787,7 +787,10 @@ renderAdminUsers = function () {
     users.forEach(user => {
       const item = document.createElement('div');
       item.className = 'list-item';
-      const friendMark = areFriends(getCurrentUser()?.id, user.id) ? '' : ' <span class="admin-not-friend">(未友だち)</span>';
+      const meId = getCurrentUser()?.id;
+      const friendMark = String(user.id) === String(meId)
+        ? ' <span class="admin-self">(自分)</span>'
+        : (areFriends(meId, user.id) ? '' : ' <span class="admin-not-friend">(未友だち)</span>');
       item.innerHTML = `
       ${avatarHtml(user)}
       <div class="list-info">

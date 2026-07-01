@@ -320,10 +320,12 @@ function createMessageElementExt(msg, convId, user) {
 
   const el = document.createElement('div');
   el.className = `message ${isSent ? 'sent' : 'received'}`;
+  el.dataset.msgId = msg.id;
   el.innerHTML = `
     <div class="message-bubble${isMedia ? ' message-bubble-image' : ''}">
       ${showSender ? `<div class="message-sender">${escapeHtml(senderLabel)}</div>` : ''}
       ${getMessageContentHtmlExt(msg)}
+      ${isSent ? '<button type="button" class="btn-delete-message" aria-label="削除">×</button>' : ''}
     </div>
     <div class="message-meta">
       ${readLabel}
@@ -336,6 +338,18 @@ function createMessageElementExt(msg, convId, user) {
     fileLink.addEventListener('click', (e) => {
       e.preventDefault();
       downloadImage(msg.fileData, msg.fileName || 'file');
+    });
+  }
+  const delBtn = el.querySelector('.btn-delete-message');
+  if (delBtn) {
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('このメッセージを削除しますか？')) return;
+      if (await deleteMessage(convId, msg.id)) {
+        el.remove();
+        renderChatList();
+        showToast('メッセージを削除しました');
+      }
     });
   }
   return el;
@@ -859,10 +873,6 @@ function startGlobalCallPolling() {
     for (const sig of signals) {
       lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
       if (sig.type === 'offer' && !callState.active) {
-        if (!pendingIncomingCall) {
-          const convId = getDirectConvId(user.id, sig.from);
-          if (convId && currentConvId !== convId) currentConvId = convId;
-        }
         await handleCallSignal(sig);
       } else if (callState.active) {
         await handleCallSignal(sig);

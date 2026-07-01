@@ -665,6 +665,27 @@ async function cloudPushConversation(conv) {
   });
 }
 
+async function cloudDeleteMessage(convId, msgId) {
+  if (!getSyncUrl()) return false;
+  const res = await cloudRequest(`/api/messages/${convId}/${msgId}`, { method: 'DELETE' });
+  return !!(res && res.ok);
+}
+
+async function syncMessageDeletions(convId) {
+  if (!getSyncUrl() || !convId) return;
+  const ids = await cloudRequest(`/api/messages/${convId}/ids`);
+  if (!Array.isArray(ids)) return;
+  const data = getData();
+  if (!data.messages[convId]) return;
+  const idSet = new Set(ids);
+  const before = data.messages[convId].length;
+  data.messages[convId] = data.messages[convId].filter(m => idSet.has(m.id));
+  if (data.messages[convId].length !== before) {
+    syncConversationMeta(convId);
+    saveData(data);
+  }
+}
+
 async function cloudPushMessage(convId, msg) {
   if (!getSyncUrl()) return;
   await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
@@ -720,6 +741,7 @@ async function syncConversation(convId) {
   if (!getSyncUrl() || !convId) return 0;
 
   await syncPushLocalMessages(convId);
+  await syncMessageDeletions(convId);
 
   const remoteConv = await cloudFetchConversation(convId);
   if (remoteConv && remoteConv.id) {
@@ -859,9 +881,18 @@ async function syncAllConversations() {
   }
   if (typeof updateTabBadges === 'function') updateTabBadges();
   if (typeof fetchFriendsPresence === 'function') await fetchFriendsPresence();
-  refreshMainUI();
-  if (currentConvId) renderMessages(currentConvId);
+  refreshUIAfterSync();
   return total + friendsAdded;
+}
+
+function refreshUIAfterSync() {
+  renderChatList();
+  if (currentScreen === 'chat' && currentConvId) {
+    renderMessages(currentConvId);
+  } else {
+    renderFriendList();
+    renderProfile();
+  }
 }
 
 async function cloudSyncAfterSend(convId, msg) {
@@ -1060,6 +1091,21 @@ function sendImageMessage(convId, senderId, imageData) {
 function getMessages(convId) {
   const data = getData();
   return data.messages[convId] || [];
+}
+
+async function deleteMessage(convId, msgId) {
+  const user = getCurrentUser();
+  if (!user) return false;
+  const data = getData();
+  const msgs = data.messages[convId];
+  if (!msgs) return false;
+  const msg = msgs.find(m => m.id === msgId);
+  if (!msg || String(msg.senderId) !== String(user.id)) return false;
+  data.messages[convId] = msgs.filter(m => m.id !== msgId);
+  syncConversationMeta(convId);
+  saveData(data);
+  if (getSyncUrl()) await cloudDeleteMessage(convId, msgId);
+  return true;
 }
 
 function syncConversationMeta(convId) {
@@ -1316,7 +1362,8 @@ function renderProfile() {
     avatarEl.textContent = getInitial(user.name);
   }
   document.getElementById('btn-remove-avatar').classList.toggle('hidden', !user.avatar);
-  document.getElementById('profile-name').textContent = user.name;
+  const nameEl = document.getElementById('profile-name');
+  if (nameEl) nameEl.innerHTML = typeof displayNameHtml === 'function' ? displayNameHtml(user) : escapeHtml(user.name);
   document.getElementById('profile-id').textContent = 'ID: ' + user.id;
   updateSyncStatusUI();
 }

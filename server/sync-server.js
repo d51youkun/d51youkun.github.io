@@ -100,6 +100,22 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'messages' && parts[2] && parts[3]) {
+      const convId = parts[2];
+      const msgId = parts[3];
+      if (data.messages[convId]) delete data.messages[convId][msgId];
+      saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'messages' && parts[2] && parts[3] === 'ids') {
+      const convId = parts[2];
+      const convMsgs = data.messages[convId] || {};
+      sendJson(res, 200, Object.keys(convMsgs));
+      return;
+    }
+
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'messages' && parts[2] && parts[3]) {
       const convId = parts[2];
       const msgId = parts[3];
@@ -444,6 +460,20 @@ const server = http.createServer(async (req, res) => {
         text: body.text || '',
         createdAt: Date.now()
       });
+      saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'announcements' && parts[2] && parts[3] === 'comments' && parts[4]) {
+      const ann = data.announcements.find(a => a.id === parts[2]);
+      if (!ann) { sendJson(res, 404, { error: 'not_found' }); return; }
+      const body = await readBody(req);
+      const comment = (ann.comments || []).find(c => c.id === parts[4]);
+      if (!comment || comment.userId !== body.userId) {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      ann.comments = ann.comments.filter(c => c.id !== parts[4]);
       saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
