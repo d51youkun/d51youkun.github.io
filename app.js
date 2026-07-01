@@ -62,7 +62,8 @@ function generateId() {
 
 function getUser(id) {
   const data = getData();
-  return data.users[id] || null;
+  if (!id) return null;
+  return data.users[id] || data.users[String(id)] || null;
 }
 
 function getCurrentUser() {
@@ -96,8 +97,9 @@ function avatarHtml(user, opts = {}) {
 function getConvAvatarUser(conv, currentUserId) {
   const data = getData();
   if (conv.type === 'group') return null;
-  const otherId = conv.members.find(m => m !== currentUserId);
-  return otherId ? data.users[otherId] : null;
+  const uid = String(currentUserId);
+  const otherId = conv.members.find(m => String(m) !== uid);
+  return otherId ? getUser(otherId) : null;
 }
 
 function compressImage(file, maxSize = 256, quality = 0.82) {
@@ -268,21 +270,22 @@ function addFriendship(id1, id2, options = {}) {
 
 function ensureLocalUser(userInfo) {
   if (!userInfo || !userInfo.id) return null;
+  const uid = String(userInfo.id);
   const data = getData();
-  if (!data.users[userInfo.id]) {
-    data.users[userInfo.id] = {
-      id: userInfo.id,
+  if (!data.users[uid]) {
+    data.users[uid] = {
+      id: uid,
       name: userInfo.name || '不明',
       createdAt: userInfo.createdAt || Date.now(),
       isRemote: true
     };
     saveData(data);
-  } else if (userInfo.name && data.users[userInfo.id].name !== userInfo.name) {
-    data.users[userInfo.id].name = userInfo.name;
+  } else if (userInfo.name && data.users[uid].name !== userInfo.name) {
+    data.users[uid].name = userInfo.name;
     saveData(data);
   }
   if (userInfo.avatar !== undefined) {
-    const local = data.users[userInfo.id];
+    const local = data.users[uid];
     const remoteTs = userInfo.avatarUpdatedAt || 0;
     const localTs = local.avatarUpdatedAt || 0;
     if (userInfo.avatar && remoteTs >= localTs && local.avatar !== userInfo.avatar) {
@@ -296,26 +299,26 @@ function ensureLocalUser(userInfo) {
     }
   }
   if (userInfo.title !== undefined) {
-    data.users[userInfo.id].title = userInfo.title;
+    data.users[uid].title = userInfo.title;
     saveData(data);
   }
   if (userInfo.suspendedUntil !== undefined) {
-    data.users[userInfo.id].suspendedUntil = userInfo.suspendedUntil;
+    data.users[uid].suspendedUntil = userInfo.suspendedUntil;
     saveData(data);
   }
   if (userInfo.banned !== undefined) {
-    data.users[userInfo.id].banned = userInfo.banned;
+    data.users[uid].banned = userInfo.banned;
     saveData(data);
   }
   if (userInfo.bannedUntil !== undefined) {
-    data.users[userInfo.id].bannedUntil = userInfo.bannedUntil;
+    data.users[uid].bannedUntil = userInfo.bannedUntil;
     saveData(data);
   }
   if (userInfo.premium !== undefined) {
-    data.users[userInfo.id].premium = userInfo.premium;
+    data.users[uid].premium = userInfo.premium;
     saveData(data);
   }
-  return data.users[userInfo.id];
+  return data.users[uid];
 }
 
 // ─── Friend QR Invites ───────────────────────────────────
@@ -333,77 +336,102 @@ function encodeInvite(user) {
 
 function decodeInvite(str) {
   if (!str) return null;
-  const text = String(str).trim();
-  const idx = text.indexOf(INVITE_PREFIX);
+  const text = String(str).trim().replace(/^\uFEFF/, '');
+  if (text.startsWith(TRANSFER_PREFIX)) return null;
+  const idx = text.toLowerCase().indexOf(INVITE_PREFIX);
   if (idx < 0) return null;
   const raw = text.slice(idx).split(/[\s\r\n]/)[0];
-  if (!raw.startsWith(INVITE_PREFIX)) return null;
+  if (!raw.toLowerCase().startsWith(INVITE_PREFIX)) return null;
   try {
     let b64 = raw.slice(INVITE_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4) b64 += '=';
     const json = decodeURIComponent(escape(atob(b64)));
-    return JSON.parse(json);
+    const payload = JSON.parse(json);
+    if (payload && payload.i) payload.i = String(payload.i);
+    return payload;
   } catch (e) {
     return null;
   }
 }
 
-function redeemFriendInvite(inviteStr, currentUserId) {
-  const payload = decodeInvite(inviteStr);
+function normalizeInviteFromScan(raw) {
+  const text = String(raw || '').trim().replace(/^\uFEFF/, '');
+  if (!text || text.startsWith(TRANSFER_PREFIX)) return null;
+  const match = text.match(/bluechat:[A-Za-z0-9_-]+/i);
+  return match ? match[0] : null;
+}
+
+async function redeemFriendInvite(inviteStr, currentUserId) {
+  const normalized = normalizeInviteFromScan(inviteStr) || String(inviteStr || '').trim();
+  const payload = decodeInvite(normalized);
   if (!payload || !payload.i || !payload.n) {
     return { error: '無効なコードです。もう一度お試しください' };
   }
   if (Date.now() > payload.e) {
     return { error: 'コードの有効期限が切れています。QRを更新してください' };
   }
-  if (String(payload.i) === String(currentUserId)) {
+  const meId = String(currentUserId);
+  const friendId = String(payload.i);
+  if (friendId === meId) {
     return { error: '自分のコードは使えません' };
   }
-  if (areFriends(currentUserId, payload.i)) {
+  if (areFriends(meId, friendId)) {
     return { error: 'すでに友だちです' };
   }
 
   const me = getCurrentUser();
-  ensureLocalUser({ id: payload.i, name: payload.n });
-  if (me) cloudPushUser(me);
-  cloudPushUser({ id: payload.i, name: payload.n });
+  ensureLocalUser({ id: friendId, name: payload.n });
+  if (getSyncUrl()) {
+    const remote = await cloudFetchUser(friendId);
+    if (remote && remote.id) ensureLocalUser(remote);
+  }
+  if (me) await cloudPushUser(me);
+  await cloudPushUser(getUser(friendId) || { id: friendId, name: payload.n, createdAt: Date.now() });
 
-  addFriendship(currentUserId, payload.i);
-  const targetUser = getUser(payload.i);
+  addFriendship(meId, friendId);
+  const targetUser = getUser(friendId);
+  if (!targetUser) {
+    return { error: '友だち情報の保存に失敗しました' };
+  }
   return { success: true, user: targetUser };
 }
 
 async function handleFriendInviteSuccess(result) {
   qrScanHandled = true;
-  stopQrScanner();
+  await stopQrScanner();
   hideModal('modal-add-friend');
   const me = getCurrentUser();
   if (me && result.user) {
     await cloudPushUser(me);
     await cloudPushUser(result.user);
-    const pushed = await cloudPushFriendship(me.id, result.user.id);
+    let pushed = false;
+    for (let i = 0; i < 4 && !pushed; i++) {
+      pushed = await cloudPushFriendship(me.id, result.user.id);
+      if (!pushed && i < 3) await new Promise(r => setTimeout(r, 2000));
+    }
     const convId = getOrCreateDirectConv(me.id, result.user.id);
     const conv = getData().conversations[convId];
     if (conv) await cloudPushConversation(conv);
-    if (!pushed) {
-      showToast('友だちは追加しました。同期サーバーへの反映を再試行中…');
-    }
     if (getSyncUrl()) await syncFriendships();
+    if (!pushed && getSyncUrl()) {
+      showToast('友だちは追加しました（サーバー反映は後で再試行されます）');
+    }
   }
-  refreshMainUI();
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+  else refreshMainUI();
   showToast(`${result.user.name}さんと友だちになりました！`);
   document.querySelector('.tab[data-tab="friends"]')?.click();
 }
 
-function tryRedeemInviteCode(code) {
+async function tryRedeemInviteCode(code) {
   const user = getCurrentUser();
   if (!user) return;
-  const result = redeemFriendInvite(code, user.id);
+  const result = await redeemFriendInvite(code, user.id);
   if (result.error) {
     showToast(result.error);
     return;
   }
-  handleFriendInviteSuccess(result);
+  await handleFriendInviteSuccess(result);
 }
 
 function renderMyQR() {
@@ -547,22 +575,31 @@ async function stopQrScanner() {
 
 function onQrScanSuccess(decodedText) {
   if (qrScanHandled) return;
-  const code = String(decodedText || '').trim();
-  if (!code.includes(INVITE_PREFIX)) {
-    showToast('友だち追加用のQRコードではありません');
-    return;
-  }
+  const code = normalizeInviteFromScan(decodedText);
+  if (!code) return;
   const user = getCurrentUser();
   if (!user) {
     showToast('先にアカウントを作成してください');
     return;
   }
-  const result = redeemFriendInvite(code, user.id);
-  if (result.error) {
-    showToast(result.error);
-    return;
-  }
-  handleFriendInviteSuccess(result);
+  qrScanHandled = true;
+  (async () => {
+    try {
+      if (qrScanner && qrScanner.isScanning) {
+        try { await qrScanner.stop(); } catch (e) { /* ignore */ }
+      }
+      const result = await redeemFriendInvite(code, user.id);
+      if (result.error) {
+        qrScanHandled = false;
+        showToast(result.error);
+        return;
+      }
+      await handleFriendInviteSuccess(result);
+    } catch (e) {
+      qrScanHandled = false;
+      showToast('友だち追加に失敗しました。もう一度お試しください');
+    }
+  })();
 }
 
 function switchAddFriendTab(tab) {
@@ -596,7 +633,7 @@ function openAddFriendModal(tab = 'scan') {
 }
 
 function getDirectConvId(id1, id2) {
-  return 'dm_' + [id1, id2].sort().join('_');
+  return 'dm_' + [String(id1), String(id2)].sort().join('_');
 }
 
 // ─── Cloud Sync ────────────────────────────────────────────
@@ -968,21 +1005,26 @@ function updateSyncStatusUI() {
 
 // ─── Conversations ───────────────────────────────────────
 function getOrCreateDirectConv(id1, id2) {
+  const a = String(id1);
+  const b = String(id2);
   const data = getData();
-  const members = [id1, id2].sort();
-  const convId = getDirectConvId(id1, id2);
+  const members = [a, b].sort();
+  const convId = getDirectConvId(a, b);
   const existing = data.conversations[convId] || Object.values(data.conversations).find(c =>
     c.type === 'direct' &&
     c.members.length === 2 &&
-    c.members.slice().sort().join() === members.join()
+    c.members.map(m => String(m)).sort().join() === members.join()
   );
 
   if (existing) {
     if (!data.conversations[convId] && existing.id !== convId) {
-      data.conversations[convId] = { ...existing, id: convId };
+      data.conversations[convId] = { ...existing, id: convId, members: members };
       data.messages[convId] = data.messages[existing.id] || [];
       delete data.conversations[existing.id];
       delete data.messages[existing.id];
+      saveData(data);
+    } else if (existing.members && existing.members.map(m => String(m)).sort().join() !== members.join()) {
+      existing.members = members;
       saveData(data);
     }
     cloudPushConversation(data.conversations[convId] || existing);
@@ -992,7 +1034,7 @@ function getOrCreateDirectConv(id1, id2) {
   data.conversations[convId] = {
     id: convId,
     type: 'direct',
-    members: [id1, id2],
+    members: members,
     createdAt: Date.now(),
     lastMessageAt: null,
     lastMessagePreview: null
@@ -1025,16 +1067,18 @@ function createGroup(name, creatorId, memberIds) {
 
 function getUserConversations(userId) {
   const data = getData();
+  const uid = String(userId);
   return Object.values(data.conversations)
-    .filter(c => c.members.includes(userId))
+    .filter(c => Array.isArray(c.members) && c.members.some(m => String(m) === uid))
     .sort((a, b) => (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt));
 }
 
 function getConvDisplayName(conv, userId) {
   const data = getData();
   if (conv.type === 'group') return conv.name;
-  const otherId = conv.members.find(m => m !== userId);
-  const other = data.users[otherId];
+  const uid = String(userId);
+  const otherId = conv.members.find(m => String(m) !== uid);
+  const other = otherId ? getUser(otherId) : null;
   return other ? other.name : '不明';
 }
 
