@@ -14,11 +14,12 @@ function loadData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (e) {
-    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {} };
+    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {}, announcements: [], announcementReads: {}, syncVersion: 0 };
   }
 }
 
 function saveData(data) {
+  data.syncVersion = (data.syncVersion || 0) + 1;
   fs.writeFileSync(DATA_FILE, JSON.stringify(data));
 }
 
@@ -347,6 +348,87 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         sendJson(res, 500, { error: e.message || '取得エラー', stickers: [] });
       }
+      return;
+    }
+
+    // Sync version (force client reload)
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'sync-version') {
+      sendJson(res, 200, { version: data.syncVersion || 0 });
+      return;
+    }
+
+    // Announcements (お知らせ)
+    if (!data.announcements) data.announcements = [];
+    if (!data.announcementReads) data.announcementReads = {};
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'announcements') {
+      const userId = url.searchParams.get('userId') || '';
+      const groupIds = (url.searchParams.get('groupIds') || '').split(',').filter(Boolean);
+      let list = [...data.announcements];
+      if (userId) {
+        list = list.filter(a => {
+          if (a.type === 'global') return true;
+          if (a.type === 'personal') return (a.targetUserIds || []).includes(userId);
+          if (a.type === 'group') return groupIds.includes(a.groupId);
+          return false;
+        });
+      }
+      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      sendJson(res, 200, list);
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'announcements') {
+      const body = await readBody(req);
+      const entry = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        title: body.title || '',
+        body: body.body || '',
+        type: body.type || 'global',
+        targetUserIds: body.targetUserIds || [],
+        groupId: body.groupId || null,
+        authorId: body.authorId,
+        authorName: body.authorName || '管理者',
+        createdAt: Date.now(),
+        comments: []
+      };
+      data.announcements.unshift(entry);
+      if (data.announcements.length > 200) data.announcements = data.announcements.slice(0, 200);
+      saveData(data);
+      sendJson(res, 200, { ok: true, id: entry.id });
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'announcements' && parts[2] && parts[3] === 'comments') {
+      const body = await readBody(req);
+      const ann = data.announcements.find(a => a.id === parts[2]);
+      if (!ann) { sendJson(res, 404, { error: 'not_found' }); return; }
+      if (!ann.comments) ann.comments = [];
+      ann.comments.push({
+        id: Date.now().toString(36),
+        userId: body.userId,
+        userName: body.userName || 'ユーザー',
+        text: body.text || '',
+        createdAt: Date.now()
+      });
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'announcements' && parts[2]) {
+      data.announcements = data.announcements.filter(a => a.id !== parts[2]);
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'announcement-reads' && parts[2] && parts[3]) {
+      const userId = parts[2];
+      const annId = parts[3];
+      if (!data.announcementReads[userId]) data.announcementReads[userId] = {};
+      data.announcementReads[userId][annId] = Date.now();
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'announcement-reads' && parts[2]) {
+      sendJson(res, 200, data.announcementReads[parts[2]] || {});
       return;
     }
 

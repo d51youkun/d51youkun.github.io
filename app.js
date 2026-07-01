@@ -698,6 +698,9 @@ async function cloudPushUser(user) {
       avatarUpdatedAt: user.avatarUpdatedAt || 0,
       title: user.title || null,
       suspendedUntil: user.suspendedUntil || null,
+      banned: user.banned || false,
+      bannedUntil: user.bannedUntil || null,
+      premium: user.premium || false,
       passwordHash: user.passwordHash || null
     })
   });
@@ -737,11 +740,14 @@ async function syncFriendships() {
       const before = getUser(friendId)?.avatar;
       ensureLocalUser(remoteUser);
       if (getUser(friendId)?.avatar !== before) avatarsUpdated = true;
-      if (remoteUser.title || remoteUser.suspendedUntil) {
+      if (remoteUser.title || remoteUser.suspendedUntil || remoteUser.banned !== undefined || remoteUser.premium !== undefined) {
         const u = getUser(friendId);
         if (u) {
           if (remoteUser.title) u.title = remoteUser.title;
           if (remoteUser.suspendedUntil) u.suspendedUntil = remoteUser.suspendedUntil;
+          if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
+          if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
+          if (remoteUser.premium !== undefined) u.premium = remoteUser.premium;
           saveData(getData());
         }
       }

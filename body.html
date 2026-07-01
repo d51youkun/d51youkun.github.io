@@ -1,4 +1,14 @@
-<!-- オンボーディング -->
+  <!-- Ban画面 -->
+  <div id="screen-banned" class="screen hidden">
+    <div class="ban-container glass-panel">
+      <div class="ban-icon">⛔</div>
+      <h2>アカウントが停止されています</h2>
+      <p class="ban-message">利用規約、プライバシーポリシーに違反しました。</p>
+      <p class="qr-hint">ご不明な点は管理者にお問い合わせください。</p>
+    </div>
+  </div>
+
+  <!-- オンボーディング -->
   <div id="screen-onboarding" class="screen hidden">
     <div class="onboarding-container">
       <div class="logo-large">
@@ -27,6 +37,7 @@
     <!-- タブナビ -->
     <nav class="tab-nav">
       <button class="tab active" data-tab="chats">トーク</button>
+      <button class="tab" data-tab="notices">お知らせ</button>
       <button class="tab" data-tab="friends">友だち</button>
       <button class="tab" data-tab="feature">要望</button>
       <button class="tab" data-tab="bug">バグ報告</button>
@@ -44,6 +55,17 @@
       <div id="chat-list-empty" class="empty-state hidden">
         <p>トークがありません</p>
         <p class="sub">友だちを追加してメッセージを送りましょう</p>
+      </div>
+    </div>
+
+    <!-- お知らせ -->
+    <div id="tab-notices" class="tab-content hidden">
+      <div class="action-bar">
+        <button type="button" id="btn-refresh-notices" class="btn-secondary btn-sm">更新</button>
+      </div>
+      <div id="notice-list" class="notice-list"></div>
+      <div id="notice-list-empty" class="empty-state hidden">
+        <p>お知らせはありません</p>
       </div>
     </div>
 
@@ -107,6 +129,14 @@
           <span class="menu-icon">🔔</span>
           <span>通知を許可する</span>
         </button>
+        <button type="button" id="btn-notify-guide" class="menu-item">
+          <span class="menu-icon">❓</span>
+          <span>通知の設定方法</span>
+        </button>
+        <button type="button" id="btn-theme-toggle" class="menu-item">
+          <span class="menu-icon">🌙</span>
+          <span>テーマを切り替え</span>
+        </button>
         <button id="btn-show-qr" class="menu-item">
           <span class="menu-icon">📱</span>
           <span>友だち追加用QRコードを表示</span>
@@ -151,6 +181,7 @@
       </div>
       <div class="action-bar">
         <button type="button" id="btn-admin-logout" class="btn-secondary btn-sm">管理者ログアウト</button>
+        <button type="button" id="btn-admin-post-notice" class="btn-primary btn-sm">お知らせを投稿</button>
       </div>
     </div>
 

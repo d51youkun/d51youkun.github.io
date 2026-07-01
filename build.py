@@ -14,9 +14,9 @@ PAGES_HEAD = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#1a6fd4">
-  <title>BlueChat v6</title>
-  <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="apple-touch-icon" href="favicon.svg">
+  <title>BlueChat v7</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
   <style>
 """
 
@@ -40,11 +40,12 @@ def get_app_js() -> str:
 
 
 def get_merged_js() -> str:
-    """app.js + features.js + v4.js + v6.js を1つのスクリプトに結合"""
+    """app.js + features.js + v4.js + v6.js + v7.js を1つのスクリプトに結合"""
     parts_js = [get_app_js(), read("features.js"), read("v4.js")]
-    v6_path = ROOT / "v6.js"
-    if v6_path.exists():
-        parts_js.append(read("v6.js"))
+    for extra in ("v6.js", "v7.js"):
+        p = ROOT / extra
+        if p.exists():
+            parts_js.append(read(extra))
     return "\n\n".join(parts_js)
 
 
@@ -77,35 +78,35 @@ def build_bundle_html() -> str:
     return build_pages_html()
 
 
-def export_v6_folder(pages_html: str) -> None:
-    """Desktop/BlueChatv6 に v6 配布用フォルダを出力"""
-    v6_dir = ROOT.parent / "BlueChatv6"
-    if v6_dir.exists():
-        shutil.rmtree(v6_dir)
-    v6_dir.mkdir(parents=True)
+def export_version_folder(pages_html: str, version: str) -> None:
+    """Desktop/BlueChatvN に配布用フォルダを出力"""
+    out_dir = ROOT.parent / f"BlueChat{version}"
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
 
-    (v6_dir / "index.html").write_text(pages_html, encoding="utf-8")
-    (v6_dir / "BlueChat.html").write_text(pages_html, encoding="utf-8")
+    (out_dir / "index.html").write_text(pages_html, encoding="utf-8")
+    (out_dir / "BlueChat.html").write_text(pages_html, encoding="utf-8")
 
-    for name in ("favicon.svg", "sw.js", "sync-config.json", ".nojekyll"):
+    for name in ("icon.png", "favicon.svg", "sw.js", "sync-config.json", ".nojekyll"):
         src = ROOT / name
         if src.exists():
-            shutil.copy2(src, v6_dir / name)
+            shutil.copy2(src, out_dir / name)
 
     lib_src = ROOT / "lib"
     if lib_src.is_dir():
-        shutil.copytree(lib_src, v6_dir / "lib")
+        shutil.copytree(lib_src, out_dir / "lib")
 
     server_src = ROOT / "server"
     if server_src.is_dir():
-        shutil.copytree(server_src, v6_dir / "server")
+        shutil.copytree(server_src, out_dir / "server")
 
-    for name in ("app.js", "features.js", "v4.js", "v6.js", "body.html", "styles.css", "build.py"):
+    for name in ("app.js", "features.js", "v4.js", "v6.js", "v7.js", "body.html", "styles.css", "build.py"):
         src = ROOT / name
         if src.exists():
-            shutil.copy2(src, v6_dir / name)
+            shutil.copy2(src, out_dir / name)
 
-    print(f"Wrote {v6_dir}/ — BlueChat v6 配布フォルダ")
+    print(f"Wrote {out_dir}/ — BlueChat {version} 配布フォルダ")
 
 
 def main() -> None:
@@ -117,7 +118,7 @@ def main() -> None:
     (ROOT / "styles.css").write_text(read("styles.css"), encoding="utf-8")
     (ROOT / ".nojekyll").touch()
 
-    export_v6_folder(pages)
+    export_version_folder(pages, "v7")
 
     print(f"Wrote index.html ({len(pages)} bytes) — GitHub Pages 用（CSS+JS 内蔵）")
     print(f"Wrote BlueChat.html ({len(bundle)} bytes) — 1ファイル版")

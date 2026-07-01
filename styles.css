@@ -1267,3 +1267,155 @@ input:focus {
 
 .chat-presence-status.online { color: #16a34a; }
 .chat-presence-status.offline { color: var(--gray-500); }
+
+/* v7: dark theme */
+[data-theme="dark"] {
+  --blue-bg: #0d1b2a;
+  --blue-pale: #1b2838;
+  --white: #1a2332;
+  --gray-100: #243044;
+  --gray-200: #2d3a4f;
+  --gray-300: #4a5568;
+  --gray-500: #94a3b8;
+  --gray-700: #cbd5e1;
+  --gray-900: #f1f5f9;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] body {
+  background: var(--blue-bg);
+  color: var(--gray-900);
+}
+
+/* v7: liquid glass */
+.glass-panel,
+.app-header,
+.tab-nav,
+.chat-header,
+.modal-content,
+.profile-card,
+.notice-item,
+.ban-container {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.app-header,
+.tab-nav,
+.chat-header {
+  background: rgba(255, 255, 255, 0.72) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+[data-theme="dark"] .app-header,
+[data-theme="dark"] .tab-nav,
+[data-theme="dark"] .chat-header {
+  background: rgba(26, 35, 50, 0.75) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.modal-content,
+.glass-panel,
+.profile-card,
+.notice-item,
+.ban-container {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: var(--shadow-lg);
+}
+
+[data-theme="dark"] .modal-content,
+[data-theme="dark"] .glass-panel,
+[data-theme="dark"] .profile-card,
+[data-theme="dark"] .notice-item,
+[data-theme="dark"] .ban-container {
+  background: rgba(26, 35, 50, 0.88);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* v7: tab badges */
+.tab {
+  position: relative;
+}
+
+.tab-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.tab-badge.hidden { display: none; }
+
+/* v7: premium check */
+.premium-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  background: #1a6fd4;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+/* v7: ban screen */
+.ban-container {
+  max-width: 360px;
+  margin: 80px auto;
+  padding: 32px 24px;
+  text-align: center;
+  border-radius: var(--radius);
+}
+
+.ban-icon { font-size: 48px; margin-bottom: 16px; }
+.ban-message { font-size: 16px; font-weight: 600; color: var(--danger); margin: 16px 0; }
+
+/* v7: notices */
+.notice-list { padding: 12px; }
+.notice-item {
+  padding: 16px;
+  margin-bottom: 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.notice-item.unread { border-left: 4px solid var(--blue-primary); }
+.notice-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+.notice-type { font-size: 12px; color: var(--blue-primary); font-weight: 600; }
+.notice-date { font-size: 12px; color: var(--gray-500); }
+.notice-title { font-size: 16px; margin-bottom: 8px; }
+.notice-body { font-size: 14px; color: var(--gray-700); white-space: pre-wrap; }
+.notice-author { font-size: 12px; color: var(--gray-500); margin-top: 8px; }
+.notice-comment { font-size: 13px; padding: 6px 0; border-top: 1px solid var(--gray-200); }
+.notice-comment-form { display: flex; gap: 8px; margin-top: 12px; }
+.notice-comment-input { flex: 1; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--gray-300); }
+
+/* v7: logo icon */
+.logo-icon-img { width: 64px; height: 64px; border-radius: 16px; object-fit: cover; }
+
+.sticker-pack-header { display: flex; align-items: center; justify-content: space-between; width: 100%; grid-column: 1 / -1; }
+.sticker-gif { object-fit: contain; }
+
+.message-audio { width: 100%; max-width: 280px; }
+.file-name { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+
+.admin-btn-ban { background: #ef4444; color: #fff; }
+.admin-btn-unban { background: #22c55e; color: #fff; }
+.admin-btn-premium { background: #1a6fd4; color: #fff; }
+.admin-btn-suspend { background: #f59e0b; color: #fff; }
