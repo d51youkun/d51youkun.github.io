@@ -445,33 +445,50 @@ function buildTransferBackup() {
   const data = getData();
   const syncUrl = getSyncUrl();
   return {
-    version: 1,
+    version: 2,
     exportedAt: Date.now(),
     syncUrl,
     data: {
       currentUserId: data.currentUserId,
       users: data.users,
+      friendCodes: data.friendCodes || {},
       friendships: data.friendships,
       conversations: data.conversations,
       messages: data.messages,
-      readReceipts: data.readReceipts || {}
+      readReceipts: data.readReceipts || {},
+      customStickerPacks: data.customStickerPacks || []
     }
   };
 }
 
 function importTransferBackup(backup) {
-  if (!backup || !backup.data) throw new Error('無効なバックアップ');
+  if (!backup) throw new Error('無効なバックアップ');
+  if (backup.cloudBackupUserId && !backup.data) {
+    throw new Error('クラウド参照のみのバックアップです');
+  }
+  if (!backup.data) throw new Error('無効なバックアップ');
   const payload = backup.data;
+  if (!payload.currentUserId || !payload.users || !payload.users[payload.currentUserId]) {
+    throw new Error('バックアップにユーザー情報がありません');
+  }
   const merged = {
     currentUserId: payload.currentUserId,
     users: payload.users || {},
-    friendCodes: {},
+    friendCodes: payload.friendCodes || {},
     friendships: payload.friendships || [],
     conversations: payload.conversations || {},
     messages: payload.messages || {},
-    readReceipts: payload.readReceipts || {}
+    readReceipts: payload.readReceipts || {},
+    customStickerPacks: payload.customStickerPacks || []
   };
-  saveData(merged);
+  try {
+    saveData(merged);
+  } catch (e) {
+    if (e && e.name === 'QuotaExceededError') {
+      throw new Error('この端末の保存容量が足りません。ブラウザのデータを削除するか、別のブラウザをお試しください');
+    }
+    throw e;
+  }
   if (backup.syncUrl) setSyncUrl(backup.syncUrl);
 }
 
@@ -559,7 +576,8 @@ function onTransferScanSuccess(decodedText) {
   const code = String(decodedText || '').trim();
   if (!code.includes(TRANSFER_PREFIX)) return;
   qrScanHandled = true;
-  stopQrScanner();
+  if (typeof stopTransferScanner === 'function') stopTransferScanner();
+  else stopQrScanner();
   hideModal('modal-transfer-scan');
   redeemTransferCode(code).then(result => {
     if (result.error) {

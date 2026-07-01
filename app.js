@@ -11,7 +11,7 @@ const SYNC_URL_KEY = 'bluechat_sync_url';
 const DEFAULT_SYNC_URL = '__DEFAULT_SYNC_URL__';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
-const TRANSFER_EXPIRY_MS = 15 * 60 * 1000;
+const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 // ─── State ───────────────────────────────────────────────
 let currentScreen = 'onboarding';
@@ -652,8 +652,21 @@ function mergeRemoteMessage(convId, remoteMsg) {
   return true;
 }
 
+async function syncPushLocalMessages(convId) {
+  if (!getSyncUrl() || !convId) return;
+  const data = getData();
+  const conv = data.conversations[convId];
+  if (conv) await cloudPushConversation(conv);
+  const messages = getMessages(convId);
+  for (const msg of messages) {
+    await cloudPushMessage(convId, msg);
+  }
+}
+
 async function syncConversation(convId) {
   if (!getSyncUrl() || !convId) return 0;
+
+  await syncPushLocalMessages(convId);
 
   const remoteConv = await cloudFetchConversation(convId);
   if (remoteConv && remoteConv.id) {
@@ -665,11 +678,7 @@ async function syncConversation(convId) {
     }
   }
 
-  const messages = getMessages(convId);
-  const since = messages.length
-    ? Math.min(...messages.map(m => m.timestamp || 0)) - 1
-    : 0;
-  const remote = await cloudFetchMessages(convId, since);
+  const remote = await cloudFetchMessages(convId, 0);
   let added = 0;
   for (const msg of remote) {
     if (mergeRemoteMessage(convId, msg)) added++;

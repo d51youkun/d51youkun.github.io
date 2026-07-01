@@ -14,7 +14,7 @@ function loadData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (e) {
-    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [] };
+    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {} };
   }
 }
 
@@ -188,7 +188,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       data.transfers[parts[2]] = {
         backup: body.backup,
-        expiresAt: body.expiresAt || Date.now() + 900000,
+        expiresAt: body.expiresAt || Date.now() + 86400000,
         consumed: false,
         createdAt: Date.now()
       };
@@ -240,29 +240,112 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Cloud backup (7-day retention, restore anytime)
+    if (!data.cloudBackups) data.cloudBackups = {};
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'cloud-backup' && parts[2]) {
+      const body = await readBody(req);
+      const userId = parts[2];
+      data.cloudBackups[userId] = {
+        backup: body.backup,
+        updatedAt: body.updatedAt || Date.now(),
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+      };
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'cloud-backup' && parts[2]) {
+      const entry = data.cloudBackups[parts[2]];
+      if (!entry || Date.now() > entry.expiresAt) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      sendJson(res, 200, { backup: entry.backup, updatedAt: entry.updatedAt });
+      return;
+    }
+
+    // Presence (online/offline)
+    if (!data.presence) data.presence = {};
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'presence' && parts[2]) {
+      const body = await readBody(req);
+      data.presence[parts[2]] = { lastSeen: body.lastSeen || Date.now() };
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'presence') {
+      const ids = (url.searchParams.get('ids') || '').split(',').filter(Boolean);
+      const result = {};
+      ids.forEach(id => {
+        if (data.presence[id]) result[id] = data.presence[id];
+      });
+      sendJson(res, 200, result);
+      return;
+    }
+
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'line-stickers' && parts[2]) {
       const productId = parts[2];
       const https = require('https');
-      const fetchText = (url) => new Promise((resolve, reject) => {
-        https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      const fetchText = (fetchUrl) => new Promise((resolve, reject) => {
+        https.get(fetchUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }, (resp) => {
           let d = '';
-          res.on('data', c => { d += c; });
-          res.on('end', () => resolve(d));
+          resp.on('data', c => { d += c; });
+          resp.on('end', () => resolve(d));
         }).on('error', reject);
       });
+      const extractStickerIds = (html) => {
+        const ids = new Set();
+        const patterns = [
+          /stickershop\/v1\/sticker\/(\d+)/g,
+          /"stickerId"\s*:\s*(\d+)/g,
+          /"sticker_id"\s*:\s*(\d+)/g,
+          /stickerId=(\d+)/g
+        ];
+        patterns.forEach(p => {
+          let m;
+          while ((m = p.exec(html)) !== null) ids.add(m[1]);
+        });
+        const nextMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+        if (nextMatch) {
+          try {
+            const json = JSON.parse(nextMatch[1]);
+            const str = JSON.stringify(json);
+            const re = /"stickerId"\s*:\s*(\d+)/g;
+            let m;
+            while ((m = re.exec(str)) !== null) ids.add(m[1]);
+          } catch (e) { /* ignore */ }
+        }
+        return [...ids];
+      };
+      const pageUrls = [
+        `https://store.line.me/stickershop/product/${productId}/ja`,
+        `https://store.line.me/stickershop/product/${productId}/en`,
+        `https://store.line.me/stickershop/product/${productId}`
+      ];
       try {
-        const html = await fetchText(`https://store.line.me/stickershop/product/${productId}/ja`);
-        const ids = [...new Set((html.match(/stickershop\/v1\/sticker\/(\d+)/g) || [])
-          .map(s => s.match(/(\d+)$/)[1]))];
+        let html = '';
+        let ids = [];
+        for (const pageUrl of pageUrls) {
+          try {
+            html = await fetchText(pageUrl);
+            ids = extractStickerIds(html);
+            if (ids.length) break;
+          } catch (e) { /* try next */ }
+        }
+        if (!ids.length) {
+          sendJson(res, 404, { error: 'スタンプIDを取得できませんでした。URLまたは商品IDを確認してください', stickers: [] });
+          return;
+        }
         const stickers = ids.slice(0, 40).map(id => ({
           id,
           url: `https://stickershop.line-scdn.net/stickershop/v1/sticker/${id}/android/sticker.png`,
           emoji: '🎨'
         }));
         const nameMatch = html.match(/<title>([^<]+)<\/title>/i);
-        sendJson(res, 200, { name: nameMatch ? nameMatch[1].replace(/LINE STORE/gi, '').trim() : 'LINE', stickers });
+        const name = nameMatch ? nameMatch[1].replace(/LINE STORE|スタンプ・絵文字ショップ/gi, '').trim() : ('LINE ' + productId);
+        sendJson(res, 200, { name, stickers, productId });
       } catch (e) {
-        sendJson(res, 500, { error: e.message, stickers: [] });
+        sendJson(res, 500, { error: e.message || '取得エラー', stickers: [] });
       }
       return;
     }

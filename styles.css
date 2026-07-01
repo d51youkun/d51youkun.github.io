@@ -1236,3 +1236,34 @@ input:focus {
   margin-top: 20px;
 }
 .btn-call-action { flex: 1; height: 48px; }
+
+/* v6: online/offline presence */
+.avatar-with-presence {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.presence-dot {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--white);
+}
+
+.presence-dot.online { background: #22c55e; }
+.presence-dot.offline { background: var(--gray-400); }
+
+.presence-label.online { color: #16a34a; }
+.presence-label.offline { color: var(--gray-500); }
+
+.chat-presence-status {
+  font-size: 12px;
+  margin: 2px 0 0;
+  font-weight: 500;
+}
+
+.chat-presence-status.online { color: #16a34a; }
+.chat-presence-status.offline { color: var(--gray-500); }

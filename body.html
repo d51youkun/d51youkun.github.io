@@ -11,6 +11,7 @@
         <input type="text" id="input-name" placeholder="名前を入力" maxlength="20" autocomplete="off">
         <button id="btn-start" class="btn-primary">はじめる</button>
         <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:12px">引き継ぎ（QRスキャン）</button>
+        <button type="button" id="btn-cloud-restore-onboarding" class="btn-secondary" style="margin-top:8px">クラウドから復元</button>
       </div>
       <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
     </div>
@@ -114,6 +115,10 @@
           <span class="menu-icon">🔄</span>
           <span>引き継ぎQRを表示</span>
         </button>
+        <button type="button" id="btn-cloud-restore" class="menu-item">
+          <span class="menu-icon">☁️</span>
+          <span>クラウドから復元</span>
+        </button>
         <button id="btn-reset-data" class="menu-item danger">
           <span class="menu-icon">🗑️</span>
           <span>このデバイスのデータをリセット</span>
@@ -165,6 +170,7 @@
       <button id="btn-back-chat" class="icon-btn">←</button>
       <div class="chat-header-info">
         <h2 id="chat-title">トーク</h2>
+        <p id="chat-presence-status" class="chat-presence-status hidden"></p>
         <p id="chat-subtitle" class="hidden"></p>
       </div>
       <button id="btn-chat-info" class="icon-btn hidden" aria-label="情報">ℹ️</button>
@@ -369,7 +375,7 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <h3>引き継ぎQR</h3>
-      <p>新しい端末で「引き継ぎ」を選び、このQRをスキャンしてください。有効期限15分。</p>
+      <p>新しい端末で「引き継ぎ」を選び、このQRをスキャンしてください。有効期限24時間。データはクラウドにも7日間保存されます。</p>
       <div id="transfer-qr-canvas" class="qr-canvas-wrap"></div>
       <p id="transfer-code-text" class="invite-code-text"></p>
       <button class="btn-close-modal">閉じる</button>
