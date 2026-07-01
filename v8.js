@@ -49,6 +49,81 @@ async function setUserTitle(userId, text, color) {
   return true;
 }
 
+const TITLE_COLOR_PALETTE = [
+  { name: 'ブルー', color: '#1a6fd4' },
+  { name: 'ネイビー', color: '#0d4a8f' },
+  { name: 'スカイ', color: '#4a9af0' },
+  { name: 'レッド', color: '#e53935' },
+  { name: 'ピンク', color: '#ec407a' },
+  { name: 'オレンジ', color: '#f57c00' },
+  { name: 'イエロー', color: '#f9a825' },
+  { name: 'グリーン', color: '#43a047' },
+  { name: 'ティール', color: '#00897b' },
+  { name: 'パープル', color: '#7b1fa2' },
+  { name: 'グレー', color: '#546e7a' },
+  { name: 'ブラック', color: '#212121' }
+];
+
+function ensureTitleColorModal() {
+  let modal = document.getElementById('modal-title-color');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'modal-title-color';
+  modal.className = 'modal hidden';
+  modal.innerHTML = `
+    <div class="modal-content glass-panel title-color-modal">
+      <h3>称号の色を選択</h3>
+      <div id="title-color-palette" class="title-color-palette"></div>
+      <button type="button" id="btn-title-color-cancel" class="btn-secondary btn-sm">キャンセル</button>
+    </div>`;
+  document.body.appendChild(modal);
+  bindClick('btn-title-color-cancel', () => {
+    if (typeof modal._colorResolve === 'function') {
+      modal._colorResolve(null);
+      modal._colorResolve = null;
+    }
+    hideModal('modal-title-color');
+  });
+  return modal;
+}
+
+function pickTitleColor(currentColor) {
+  return new Promise((resolve) => {
+    const modal = ensureTitleColorModal();
+    const palette = modal.querySelector('#title-color-palette');
+    palette.innerHTML = '';
+    const normalized = (currentColor || '#1a6fd4').toLowerCase();
+    TITLE_COLOR_PALETTE.forEach(({ name, color }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'title-color-swatch' + (color.toLowerCase() === normalized ? ' selected' : '');
+      btn.style.background = color;
+      btn.setAttribute('aria-label', name);
+      btn.title = name;
+      btn.addEventListener('click', () => {
+        hideModal('modal-title-color');
+        resolve(color);
+      });
+      palette.appendChild(btn);
+    });
+    modal._colorResolve = resolve;
+    showModal('modal-title-color');
+  });
+}
+
+// モーダル外タップ・キャンセル時
+document.addEventListener('click', (e) => {
+  const modal = document.getElementById('modal-title-color');
+  if (!modal || modal.classList.contains('hidden')) return;
+  if (e.target === modal) {
+    hideModal('modal-title-color');
+    if (typeof modal._colorResolve === 'function') {
+      modal._colorResolve(null);
+      modal._colorResolve = null;
+    }
+  }
+});
+
 renderSuperAdminTitlePanel = async function (userId) {
   const user = getUser(userId);
   if (!user) return;
@@ -59,7 +134,7 @@ renderSuperAdminTitlePanel = async function (userId) {
   if (text === null) return;
   let color = user.title?.color || '#1a6fd4';
   if (text.trim()) {
-    const picked = prompt('称号の色（#1a6fd4 など）', color);
+    const picked = await pickTitleColor(color);
     if (picked === null) return;
     color = picked;
   }
@@ -95,7 +170,7 @@ function bindChatsTabOnMainOpen() {
 
 onAppInit(() => {
   applyV8Branding();
-  showChatsTab();
   bindChatsTabOnMainOpen();
+  requestAnimationFrame(showChatsTab);
   repairAllConversationHistory();
 });

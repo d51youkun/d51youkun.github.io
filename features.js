@@ -887,15 +887,6 @@ function startGlobalCallPolling() {
 function initExtendedFeatures() {
   loadAdminSession();
   updateAdminTabVisibility();
-  if (adminLoggedIn && getCurrentUser()) {
-    setTimeout(() => {
-      if (typeof adminRole !== 'undefined' && adminRole === 'moderator' && typeof showMainModeratorTab === 'function') {
-        showMainModeratorTab();
-      } else if (typeof showMainAdminTab === 'function') {
-        showMainAdminTab();
-      }
-    }, 100);
-  }
 
   updateNotifyButtonLabel();
   setupNotificationClickHandler();
