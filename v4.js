@@ -797,7 +797,7 @@ renderAdminUsers = function () {
         <div class="list-name">${displayNameHtml(user)}${friendMark}</div>
         <div class="list-preview">ID: ${user.id}</div>
         <div class="admin-user-actions">
-          <button class="admin-btn admin-btn-title" data-user-id="${user.id}">称号</button>
+          <button class="admin-btn admin-btn-title" data-user-id="${user.id}">${user.title?.text ? '称号変更' : '称号'}</button>
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
       </div>`;

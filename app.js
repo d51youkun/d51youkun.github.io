@@ -300,7 +300,8 @@ function ensureLocalUser(userInfo) {
     }
   }
   if (userInfo.title !== undefined) {
-    data.users[uid].title = userInfo.title;
+    if (userInfo.title && userInfo.title.text) data.users[uid].title = userInfo.title;
+    else delete data.users[uid].title;
     saveData(data);
   }
   if (userInfo.suspendedUntil !== undefined) {
@@ -888,10 +889,13 @@ async function syncFriendships() {
       const before = getUser(friendId)?.avatar;
       ensureLocalUser(remoteUser);
       if (getUser(friendId)?.avatar !== before) avatarsUpdated = true;
-      if (remoteUser.title || remoteUser.suspendedUntil || remoteUser.banned !== undefined || remoteUser.premium !== undefined) {
+      if (remoteUser.title !== undefined || remoteUser.suspendedUntil || remoteUser.banned !== undefined || remoteUser.premium !== undefined) {
         const u = getUser(friendId);
         if (u) {
-          if (remoteUser.title) u.title = remoteUser.title;
+          if (remoteUser.title !== undefined) {
+            if (remoteUser.title && remoteUser.title.text) u.title = remoteUser.title;
+            else delete u.title;
+          }
           if (remoteUser.suspendedUntil) u.suspendedUntil = remoteUser.suspendedUntil;
           if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
           if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
