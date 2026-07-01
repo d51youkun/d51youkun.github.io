@@ -6411,7 +6411,8 @@ onAppInit(() => {
  * BlueChat v7 — テーマ・Ban・お知らせ・プレミアム・引き継ぎ改善・通話修正
  */
 const THEME_KEY = 'bluechat_theme';
-const SYNC_VERSION_KEY = 'bluechat_sync_version';
+const ACTIVITY_VERSION_KEY = 'bluechat_activity_version';
+const ACTIVITY_POLL_MS = 8000;
 const ANNOUNCE_READ_KEY = 'bluechat_ann_read';
 
 const RTC_CONFIG_V7 = {
@@ -6616,23 +6617,45 @@ function adminSuspendUserHours(userId, hours) {
   showToast(`${hours}時間停止しました`);
 }
 
-// ─── Force reload on server activity ───────────────────────
+// ─── Sync on meaningful activity only (no constant reload) ───
+async function handleRemoteActivity() {
+  if (!getSyncUrl()) return;
+  await syncCurrentUserModeration();
+  const friendsAdded = await syncFriendships();
+  await syncUserConversationList();
+  const user = getCurrentUser();
+  let added = 0;
+  if (user) {
+    for (const conv of getUserConversations(user.id)) {
+      added += await syncConversation(conv.id);
+    }
+  }
+  if (typeof fetchFriendsPresence === 'function') await fetchFriendsPresence();
+  if (currentTab === 'notices') await renderAnnouncements();
+  updateTabBadges();
+  if (added > 0 || friendsAdded > 0) {
+    refreshMainUI();
+    if (currentConvId) renderMessages(currentConvId);
+    renderChatList();
+  }
+}
+
 function startSyncVersionPolling() {
   if (syncVersionTimer) clearInterval(syncVersionTimer);
   if (!getSyncUrl()) return;
   const poll = async () => {
-    const res = await cloudRequest('/api/sync-version');
+    const res = await cloudRequest('/api/activity-version');
     if (!res || res.version === undefined) return;
-    const last = parseInt(localStorage.getItem(SYNC_VERSION_KEY) || '0', 10);
+    const last = parseInt(localStorage.getItem(ACTIVITY_VERSION_KEY) || '0', 10);
     if (last > 0 && res.version > last) {
-      localStorage.setItem(SYNC_VERSION_KEY, String(res.version));
-      location.reload();
+      localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
+      await handleRemoteActivity();
       return;
     }
-    localStorage.setItem(SYNC_VERSION_KEY, String(res.version));
+    localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
   };
   poll();
-  syncVersionTimer = setInterval(poll, 3000);
+  syncVersionTimer = setInterval(poll, ACTIVITY_POLL_MS);
 }
 
 // ─── Announcements (お知らせ) ──────────────────────────────

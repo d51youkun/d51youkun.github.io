@@ -14,13 +14,17 @@ function loadData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (e) {
-    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {}, announcements: [], announcementReads: {}, syncVersion: 0 };
+    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {}, announcements: [], announcementReads: {}, activityVersion: 0 };
   }
 }
 
 function saveData(data) {
-  data.syncVersion = (data.syncVersion || 0) + 1;
   fs.writeFileSync(DATA_FILE, JSON.stringify(data));
+}
+
+function saveDataWithActivity(data) {
+  data.activityVersion = (data.activityVersion || 0) + 1;
+  saveData(data);
 }
 
 function readBody(req) {
@@ -83,13 +87,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'conversations' && parts[2]) {
       const conv = await readBody(req);
       const convId = parts[2];
+      const isNewConv = !data.conversations[convId];
       data.conversations[convId] = { ...conv, id: convId };
       if (!data.userConversations) data.userConversations = {};
       (conv.members || []).forEach(memberId => {
         if (!data.userConversations[memberId]) data.userConversations[memberId] = {};
         data.userConversations[memberId][convId] = true;
       });
-      saveData(data);
+      if (isNewConv) saveDataWithActivity(data);
+      else saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -99,8 +105,10 @@ const server = http.createServer(async (req, res) => {
       const msgId = parts[3];
       const msg = await readBody(req);
       if (!data.messages[convId]) data.messages[convId] = {};
+      const isNew = !data.messages[convId][msgId];
       data.messages[convId][msgId] = { ...msg, id: msgId };
-      saveData(data);
+      if (isNew) saveDataWithActivity(data);
+      else saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -132,8 +140,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'users' && parts[2]) {
       const user = await readBody(req);
       if (!data.users) data.users = {};
+      const prev = data.users[parts[2]] || {};
       data.users[parts[2]] = { ...user, id: parts[2] };
-      saveData(data);
+      const moderationChanged = prev.banned !== user.banned
+        || prev.bannedUntil !== user.bannedUntil
+        || prev.suspendedUntil !== user.suspendedUntil
+        || prev.premium !== user.premium
+        || JSON.stringify(prev.title) !== JSON.stringify(user.title);
+      if (moderationChanged) saveDataWithActivity(data);
+      else saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -173,7 +188,7 @@ const server = http.createServer(async (req, res) => {
         if (!data.userFriendships[uid]) data.userFriendships[uid] = {};
         data.userFriendships[uid][id1 === uid ? id2 : id1] = true;
       });
-      saveData(data);
+      saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -247,7 +262,7 @@ const server = http.createServer(async (req, res) => {
       if (data.callSignals[body.to].length > 100) {
         data.callSignals[body.to] = data.callSignals[body.to].slice(-50);
       }
-      saveData(data);
+      saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -368,9 +383,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // Sync version (force client reload)
+    // Activity version (meaningful actions only: messages, calls, announcements, etc.)
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'sync-version') {
-      sendJson(res, 200, { version: data.syncVersion || 0 });
+      sendJson(res, 200, { version: data.activityVersion || 0 });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'activity-version') {
+      sendJson(res, 200, { version: data.activityVersion || 0 });
       return;
     }
 
@@ -409,7 +428,7 @@ const server = http.createServer(async (req, res) => {
       };
       data.announcements.unshift(entry);
       if (data.announcements.length > 200) data.announcements = data.announcements.slice(0, 200);
-      saveData(data);
+      saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, id: entry.id });
       return;
     }
@@ -425,13 +444,13 @@ const server = http.createServer(async (req, res) => {
         text: body.text || '',
         createdAt: Date.now()
       });
-      saveData(data);
+      saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
     if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'announcements' && parts[2]) {
       data.announcements = data.announcements.filter(a => a.id !== parts[2]);
-      saveData(data);
+      saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
