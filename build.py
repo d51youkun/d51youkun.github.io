@@ -14,7 +14,7 @@ PAGES_HEAD = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#1a6fd4">
-  <title>BlueChat v7</title>
+  <title>BlueChat v8</title>
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <style>
@@ -40,9 +40,9 @@ def get_app_js() -> str:
 
 
 def get_merged_js() -> str:
-    """app.js + features.js + v4.js + v6.js + v7.js を1つのスクリプトに結合"""
+    """app.js + features.js + v4.js + v6.js + v7.js + v8.js を1つのスクリプトに結合"""
     parts_js = [get_app_js(), read("features.js"), read("v4.js")]
-    for extra in ("v6.js", "v7.js"):
+    for extra in ("v6.js", "v7.js", "v8.js"):
         p = ROOT / extra
         if p.exists():
             parts_js.append(read(extra))
@@ -101,7 +101,7 @@ def export_version_folder(pages_html: str, version: str) -> None:
     if server_src.is_dir():
         shutil.copytree(server_src, out_dir / "server")
 
-    for name in ("app.js", "features.js", "v4.js", "v6.js", "v7.js", "body.html", "styles.css", "build.py"):
+    for name in ("app.js", "features.js", "v4.js", "v6.js", "v7.js", "v8.js", "body.html", "styles.css", "build.py"):
         src = ROOT / name
         if src.exists():
             shutil.copy2(src, out_dir / name)
@@ -118,7 +118,7 @@ def main() -> None:
     (ROOT / "styles.css").write_text(read("styles.css"), encoding="utf-8")
     (ROOT / ".nojekyll").touch()
 
-    export_version_folder(pages, "v7")
+    export_version_folder(pages, "v8")
 
     print(f"Wrote index.html ({len(pages)} bytes) — GitHub Pages 用（CSS+JS 内蔵）")
     print(f"Wrote BlueChat.html ({len(bundle)} bytes) — 1ファイル版")

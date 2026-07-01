@@ -6,7 +6,8 @@ const STORAGE_KEY = 'bluechat_data';
 const ADMIN_EMAIL = 'd51498go@icloud.com';
 const ADMIN_PASSWORD = 'D51498Go';
 const CODE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
-const INVITE_PREFIX = 'bluechat:';
+const INVITE_PREFIX = 'bc:';
+const INVITE_PREFIX_LEGACY = 'bluechat:';
 const SYNC_URL_KEY = 'bluechat_sync_url';
 const DEFAULT_SYNC_URL = '__DEFAULT_SYNC_URL__';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
@@ -325,8 +326,7 @@ function ensureLocalUser(userInfo) {
 function encodeInvite(user) {
   const payload = {
     i: user.id,
-    n: user.name,
-    e: Date.now() + CODE_EXPIRY_MS
+    e: Math.floor((Date.now() + CODE_EXPIRY_MS) / 1000)
   };
   const json = JSON.stringify(payload);
   const b64 = btoa(unescape(encodeURIComponent(json)))
@@ -338,16 +338,25 @@ function decodeInvite(str) {
   if (!str) return null;
   const text = String(str).trim().replace(/^\uFEFF/, '');
   if (text.startsWith(TRANSFER_PREFIX)) return null;
-  const idx = text.toLowerCase().indexOf(INVITE_PREFIX);
-  if (idx < 0) return null;
-  const raw = text.slice(idx).split(/[\s\r\n]/)[0];
-  if (!raw.toLowerCase().startsWith(INVITE_PREFIX)) return null;
+  let raw = null;
+  let prefixLen = 0;
+  for (const prefix of [INVITE_PREFIX, INVITE_PREFIX_LEGACY]) {
+    const idx = text.toLowerCase().indexOf(prefix);
+    if (idx >= 0) {
+      raw = text.slice(idx).split(/[\s\r\n]/)[0];
+      prefixLen = prefix.length;
+      break;
+    }
+  }
+  if (!raw) return null;
   try {
-    let b64 = raw.slice(INVITE_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/');
+    let b64 = raw.slice(prefixLen).replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4) b64 += '=';
     const json = decodeURIComponent(escape(atob(b64)));
     const payload = JSON.parse(json);
-    if (payload && payload.i) payload.i = String(payload.i);
+    if (!payload || !payload.i) return null;
+    payload.i = String(payload.i);
+    if (payload.e < 1e12) payload.e = payload.e * 1000;
     return payload;
   } catch (e) {
     return null;
@@ -357,14 +366,14 @@ function decodeInvite(str) {
 function normalizeInviteFromScan(raw) {
   const text = String(raw || '').trim().replace(/^\uFEFF/, '');
   if (!text || text.startsWith(TRANSFER_PREFIX)) return null;
-  const match = text.match(/bluechat:[A-Za-z0-9_-]+/i);
+  const match = text.match(/(?:bc|bluechat):[A-Za-z0-9_-]+/i);
   return match ? match[0] : null;
 }
 
 async function redeemFriendInvite(inviteStr, currentUserId) {
   const normalized = normalizeInviteFromScan(inviteStr) || String(inviteStr || '').trim();
   const payload = decodeInvite(normalized);
-  if (!payload || !payload.i || !payload.n) {
+  if (!payload || !payload.i) {
     return { error: '無効なコードです。もう一度お試しください' };
   }
   if (Date.now() > payload.e) {
@@ -380,13 +389,17 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
   }
 
   const me = getCurrentUser();
-  ensureLocalUser({ id: friendId, name: payload.n });
+  let friendName = payload.n || null;
   if (getSyncUrl()) {
     const remote = await cloudFetchUser(friendId);
-    if (remote && remote.id) ensureLocalUser(remote);
+    if (remote && remote.id) {
+      ensureLocalUser(remote);
+      friendName = remote.name || friendName;
+    }
   }
+  ensureLocalUser({ id: friendId, name: friendName || '友だち' });
   if (me) await cloudPushUser(me);
-  await cloudPushUser(getUser(friendId) || { id: friendId, name: payload.n, createdAt: Date.now() });
+  await cloudPushUser(getUser(friendId) || { id: friendId, name: friendName || '友だち', createdAt: Date.now() });
 
   addFriendship(meId, friendId);
   const targetUser = getUser(friendId);
@@ -711,12 +724,19 @@ async function cloudDeleteMessage(convId, msgId) {
 async function syncMessageDeletions(convId) {
   if (!getSyncUrl() || !convId) return;
   const ids = await cloudRequest(`/api/messages/${convId}/ids`);
-  if (!Array.isArray(ids)) return;
+  if (!Array.isArray(ids) || ids.length === 0) return;
+
   const data = getData();
-  if (!data.messages[convId]) return;
+  if (!data.messages[convId] || !data.messages[convId].length) return;
+
   const idSet = new Set(ids);
+  const key = 'bluechat_last_push_' + convId;
+  const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
   const before = data.messages[convId].length;
-  data.messages[convId] = data.messages[convId].filter(m => idSet.has(m.id));
+  data.messages[convId] = data.messages[convId].filter(m => {
+    if (idSet.has(m.id)) return true;
+    return (m.timestamp || 0) > lastPush;
+  });
   if (data.messages[convId].length !== before) {
     syncConversationMeta(convId);
     saveData(data);
@@ -744,7 +764,12 @@ function mergeRemoteMessage(convId, remoteMsg) {
   if (!remoteMsg || !remoteMsg.id) return false;
   const data = getData();
   if (!data.messages[convId]) data.messages[convId] = [];
-  if (data.messages[convId].some(m => m.id === remoteMsg.id)) return false;
+  const idx = data.messages[convId].findIndex(m => m.id === remoteMsg.id);
+  if (idx >= 0) {
+    data.messages[convId][idx] = { ...data.messages[convId][idx], ...remoteMsg };
+    saveData(data);
+    return false;
+  }
   data.messages[convId].push(remoteMsg);
   data.messages[convId].sort((a, b) => a.timestamp - b.timestamp);
   const conv = data.conversations[convId];

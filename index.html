@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#1a6fd4">
-  <title>BlueChat v7</title>
+  <title>BlueChat v8</title>
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <style>
@@ -1887,7 +1887,7 @@ html[data-theme="dark"] body textarea::placeholder {
       </div>
       <div id="modal-tab-enter" class="modal-tab-content hidden">
         <p>友だちから受け取ったコードを貼り付けてください</p>
-        <textarea id="input-friend-invite" class="invite-code-input" rows="3" placeholder="bluechat:..."></textarea>
+        <textarea id="input-friend-invite" class="invite-code-input" rows="3" placeholder="bc:..."></textarea>
         <button type="button" id="btn-submit-invite" class="btn-primary">友だち追加</button>
         <p class="qr-hint">※ 双方向で友だちになるには、両方の端末で同じ同期サーバーURLを設定してください（マイページ）</p>
       </div>
@@ -2092,7 +2092,8 @@ const STORAGE_KEY = 'bluechat_data';
 const ADMIN_EMAIL = 'd51498go@icloud.com';
 const ADMIN_PASSWORD = 'D51498Go';
 const CODE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
-const INVITE_PREFIX = 'bluechat:';
+const INVITE_PREFIX = 'bc:';
+const INVITE_PREFIX_LEGACY = 'bluechat:';
 const SYNC_URL_KEY = 'bluechat_sync_url';
 const DEFAULT_SYNC_URL = 'https://bluechat-sync.onrender.com';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
@@ -2411,8 +2412,7 @@ function ensureLocalUser(userInfo) {
 function encodeInvite(user) {
   const payload = {
     i: user.id,
-    n: user.name,
-    e: Date.now() + CODE_EXPIRY_MS
+    e: Math.floor((Date.now() + CODE_EXPIRY_MS) / 1000)
   };
   const json = JSON.stringify(payload);
   const b64 = btoa(unescape(encodeURIComponent(json)))
@@ -2424,16 +2424,25 @@ function decodeInvite(str) {
   if (!str) return null;
   const text = String(str).trim().replace(/^\uFEFF/, '');
   if (text.startsWith(TRANSFER_PREFIX)) return null;
-  const idx = text.toLowerCase().indexOf(INVITE_PREFIX);
-  if (idx < 0) return null;
-  const raw = text.slice(idx).split(/[\s\r\n]/)[0];
-  if (!raw.toLowerCase().startsWith(INVITE_PREFIX)) return null;
+  let raw = null;
+  let prefixLen = 0;
+  for (const prefix of [INVITE_PREFIX, INVITE_PREFIX_LEGACY]) {
+    const idx = text.toLowerCase().indexOf(prefix);
+    if (idx >= 0) {
+      raw = text.slice(idx).split(/[\s\r\n]/)[0];
+      prefixLen = prefix.length;
+      break;
+    }
+  }
+  if (!raw) return null;
   try {
-    let b64 = raw.slice(INVITE_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/');
+    let b64 = raw.slice(prefixLen).replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4) b64 += '=';
     const json = decodeURIComponent(escape(atob(b64)));
     const payload = JSON.parse(json);
-    if (payload && payload.i) payload.i = String(payload.i);
+    if (!payload || !payload.i) return null;
+    payload.i = String(payload.i);
+    if (payload.e < 1e12) payload.e = payload.e * 1000;
     return payload;
   } catch (e) {
     return null;
@@ -2443,14 +2452,14 @@ function decodeInvite(str) {
 function normalizeInviteFromScan(raw) {
   const text = String(raw || '').trim().replace(/^\uFEFF/, '');
   if (!text || text.startsWith(TRANSFER_PREFIX)) return null;
-  const match = text.match(/bluechat:[A-Za-z0-9_-]+/i);
+  const match = text.match(/(?:bc|bluechat):[A-Za-z0-9_-]+/i);
   return match ? match[0] : null;
 }
 
 async function redeemFriendInvite(inviteStr, currentUserId) {
   const normalized = normalizeInviteFromScan(inviteStr) || String(inviteStr || '').trim();
   const payload = decodeInvite(normalized);
-  if (!payload || !payload.i || !payload.n) {
+  if (!payload || !payload.i) {
     return { error: '無効なコードです。もう一度お試しください' };
   }
   if (Date.now() > payload.e) {
@@ -2466,13 +2475,17 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
   }
 
   const me = getCurrentUser();
-  ensureLocalUser({ id: friendId, name: payload.n });
+  let friendName = payload.n || null;
   if (getSyncUrl()) {
     const remote = await cloudFetchUser(friendId);
-    if (remote && remote.id) ensureLocalUser(remote);
+    if (remote && remote.id) {
+      ensureLocalUser(remote);
+      friendName = remote.name || friendName;
+    }
   }
+  ensureLocalUser({ id: friendId, name: friendName || '友だち' });
   if (me) await cloudPushUser(me);
-  await cloudPushUser(getUser(friendId) || { id: friendId, name: payload.n, createdAt: Date.now() });
+  await cloudPushUser(getUser(friendId) || { id: friendId, name: friendName || '友だち', createdAt: Date.now() });
 
   addFriendship(meId, friendId);
   const targetUser = getUser(friendId);
@@ -2797,12 +2810,19 @@ async function cloudDeleteMessage(convId, msgId) {
 async function syncMessageDeletions(convId) {
   if (!getSyncUrl() || !convId) return;
   const ids = await cloudRequest(`/api/messages/${convId}/ids`);
-  if (!Array.isArray(ids)) return;
+  if (!Array.isArray(ids) || ids.length === 0) return;
+
   const data = getData();
-  if (!data.messages[convId]) return;
+  if (!data.messages[convId] || !data.messages[convId].length) return;
+
   const idSet = new Set(ids);
+  const key = 'bluechat_last_push_' + convId;
+  const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
   const before = data.messages[convId].length;
-  data.messages[convId] = data.messages[convId].filter(m => idSet.has(m.id));
+  data.messages[convId] = data.messages[convId].filter(m => {
+    if (idSet.has(m.id)) return true;
+    return (m.timestamp || 0) > lastPush;
+  });
   if (data.messages[convId].length !== before) {
     syncConversationMeta(convId);
     saveData(data);
@@ -2830,7 +2850,12 @@ function mergeRemoteMessage(convId, remoteMsg) {
   if (!remoteMsg || !remoteMsg.id) return false;
   const data = getData();
   if (!data.messages[convId]) data.messages[convId] = [];
-  if (data.messages[convId].some(m => m.id === remoteMsg.id)) return false;
+  const idx = data.messages[convId].findIndex(m => m.id === remoteMsg.id);
+  if (idx >= 0) {
+    data.messages[convId][idx] = { ...data.messages[convId][idx], ...remoteMsg };
+    saveData(data);
+    return false;
+  }
   data.messages[convId].push(remoteMsg);
   data.messages[convId].sort((a, b) => a.timestamp - b.timestamp);
   const conv = data.conversations[convId];
@@ -6317,7 +6342,7 @@ onAppInit(() => {
 /**
  * BlueChat v6 — クラウド復元・同期改善・オンライン表示・LINEスタンプ修正
  */
-const APP_VERSION = 'v6';
+var APP_VERSION = 'v6';
 const CLOUD_BACKUP_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const CLOUD_BACKUP_DIRECT_MAX = 350000;
 const PRESENCE_ONLINE_MS = 90000;
@@ -7491,6 +7516,46 @@ refreshMainUI = function () {
 
 onAppInit(() => {
   initV7Features();
+});
+
+
+/**
+ * BlueChat v8 — 会話履歴の修復・短い友だちコード
+ */
+var APP_VERSION = 'v8';
+
+function applyV8Branding() {
+  const title = 'BlueChat v8';
+  document.title = title;
+  const headerTitle = document.getElementById('header-title');
+  if (headerTitle) headerTitle.textContent = title;
+  const logoTitle = document.querySelector('.logo-large h1');
+  if (logoTitle) logoTitle.textContent = title;
+}
+
+async function repairAllConversationHistory() {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return;
+  const convs = getUserConversations(user.id);
+  for (const conv of convs) {
+    await syncConversation(conv.id);
+  }
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+  else refreshMainUI();
+}
+
+const _openChatV8 = openChat;
+openChat = function (convId) {
+  _openChatV8(convId);
+  if (!getSyncUrl() || !convId) return;
+  syncConversation(convId).then(() => {
+    if (currentConvId === convId) renderMessages(convId);
+  });
+};
+
+onAppInit(() => {
+  applyV8Branding();
+  repairAllConversationHistory();
 });
 
   </script>

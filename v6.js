@@ -1,7 +1,7 @@
 /**
  * BlueChat v6 — クラウド復元・同期改善・オンライン表示・LINEスタンプ修正
  */
-const APP_VERSION = 'v6';
+var APP_VERSION = 'v6';
 const CLOUD_BACKUP_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const CLOUD_BACKUP_DIRECT_MAX = 350000;
 const PRESENCE_ONLINE_MS = 90000;
