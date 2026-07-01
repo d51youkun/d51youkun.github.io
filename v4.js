@@ -763,40 +763,69 @@ renderAdminUsers = function () {
   const useMain = currentTab === 'admin' && document.getElementById('main-admin-user-list');
   if (!useMain && adminRole !== 'super') return _renderAdminUsersFeat();
   if (!useMain) return _renderAdminUsersFeat();
-  const data = getData();
-  const users = Object.values(data.users);
+
   const list = document.getElementById('main-admin-user-list');
   const empty = document.getElementById('main-admin-empty-users');
-  list.innerHTML = '';
-  if (users.length === 0) { empty.classList.remove('hidden'); return; }
-  empty.classList.add('hidden');
-  users.forEach(user => {
-    const item = document.createElement('div');
-    item.className = 'list-item';
-    item.innerHTML = `
+  if (!list) return;
+
+  const renderList = () => {
+    const data = getData();
+    let users = Object.values(data.users);
+    const q = (document.getElementById('input-admin-user-search')?.value || '').trim().toLowerCase();
+    if (q) {
+      users = users.filter(u =>
+        (u.name || '').toLowerCase().includes(q) || String(u.id).toLowerCase().includes(q)
+      );
+    }
+    users.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    list.innerHTML = '';
+    if (users.length === 0) {
+      empty?.classList.remove('hidden');
+      return;
+    }
+    empty?.classList.add('hidden');
+    users.forEach(user => {
+      const item = document.createElement('div');
+      item.className = 'list-item';
+      const friendMark = areFriends(getCurrentUser()?.id, user.id) ? '' : ' <span class="admin-not-friend">(未友だち)</span>';
+      item.innerHTML = `
       ${avatarHtml(user)}
       <div class="list-info">
-        <div class="list-name">${displayNameHtml(user)}</div>
+        <div class="list-name">${displayNameHtml(user)}${friendMark}</div>
         <div class="list-preview">ID: ${user.id}</div>
         <div class="admin-user-actions">
           <button class="admin-btn admin-btn-title" data-user-id="${user.id}">称号</button>
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
       </div>`;
-    item.querySelector('.admin-btn-title').addEventListener('click', (e) => {
-      e.stopPropagation();
-      renderSuperAdminTitlePanel(user.id);
+      item.querySelector('.admin-btn-title').addEventListener('click', (e) => {
+        e.stopPropagation();
+        renderSuperAdminTitlePanel(user.id);
+      });
+      item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm(`「${user.name}」を削除しますか？`)) {
+          deleteUser(user.id);
+          renderAdminUsers();
+          showToast('ユーザーを削除しました');
+        }
+      });
+      list.appendChild(item);
     });
-    item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (confirm(`「${user.name}」を削除しますか？`)) {
-        deleteUser(user.id);
-        renderAdminUsers();
-        showToast('ユーザーを削除しました');
+    if (typeof appendAdminV7Buttons === 'function') appendAdminV7Buttons();
+  };
+
+  if (getEffectiveSyncUrl()) {
+    list.innerHTML = '<p class="qr-hint" style="padding:12px">サーバーからユーザーを読み込み中…</p>';
+    cloudRequest('/api/users/list', {}, 60000).then(serverUsers => {
+      if (Array.isArray(serverUsers)) {
+        serverUsers.forEach(u => { if (u && u.id) ensureLocalUser(u); });
       }
-    });
-    list.appendChild(item);
-  });
+      renderList();
+    }).catch(() => renderList());
+  } else {
+    renderList();
+  }
 };
 
 const _pushMessageCheck = pushMessage;

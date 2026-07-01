@@ -121,8 +121,9 @@
         </div>
         <div class="sync-settings">
           <p class="form-label">他の端末と同期</p>
-          <input type="url" id="input-sync-url" placeholder="http://192.168.179.18:8766" autocomplete="off">
+          <input type="url" id="input-sync-url" placeholder="https://bluechat-sync.onrender.com" autocomplete="off">
           <button type="button" id="btn-save-sync" class="btn-secondary btn-sm">同期サーバーを保存</button>
+          <button type="button" id="btn-retry-sync" class="btn-secondary btn-sm">再試行</button>
           <p class="qr-hint" id="sync-status"></p>
         </div>
         <button type="button" id="btn-enable-notify" class="menu-item">
@@ -165,6 +166,10 @@
         <button class="tab" data-main-admin-tab="feedback">要望・報告</button>
       </nav>
       <div id="main-admin-users" class="admin-panel">
+        <div class="action-bar">
+          <input type="text" id="input-admin-user-search" class="admin-search-input" placeholder="名前またはIDで検索">
+          <button type="button" id="btn-admin-refresh-users" class="btn-secondary btn-sm">サーバーから更新</button>
+        </div>
         <div id="main-admin-user-list" class="list"></div>
         <div id="main-admin-empty-users" class="empty-state hidden"><p>登録ユーザーがいません</p></div>
       </div>

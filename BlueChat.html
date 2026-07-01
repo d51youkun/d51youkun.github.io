@@ -1431,6 +1431,20 @@ input:focus {
 .admin-btn-premium { background: #1a6fd4; color: #fff; }
 .admin-btn-suspend { background: #f59e0b; color: #fff; }
 
+.admin-search-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+
+.admin-not-friend {
+  font-size: 11px;
+  color: var(--gray-500);
+  font-weight: normal;
+}
+
   </style>
 </head>
 <body>
@@ -1557,8 +1571,9 @@ input:focus {
         </div>
         <div class="sync-settings">
           <p class="form-label">他の端末と同期</p>
-          <input type="url" id="input-sync-url" placeholder="http://192.168.179.18:8766" autocomplete="off">
+          <input type="url" id="input-sync-url" placeholder="https://bluechat-sync.onrender.com" autocomplete="off">
           <button type="button" id="btn-save-sync" class="btn-secondary btn-sm">同期サーバーを保存</button>
+          <button type="button" id="btn-retry-sync" class="btn-secondary btn-sm">再試行</button>
           <p class="qr-hint" id="sync-status"></p>
         </div>
         <button type="button" id="btn-enable-notify" class="menu-item">
@@ -1601,6 +1616,10 @@ input:focus {
         <button class="tab" data-main-admin-tab="feedback">要望・報告</button>
       </nav>
       <div id="main-admin-users" class="admin-panel">
+        <div class="action-bar">
+          <input type="text" id="input-admin-user-search" class="admin-search-input" placeholder="名前またはIDで検索">
+          <button type="button" id="btn-admin-refresh-users" class="btn-secondary btn-sm">サーバーから更新</button>
+        </div>
         <div id="main-admin-user-list" class="list"></div>
         <div id="main-admin-empty-users" class="empty-state hidden"><p>登録ユーザーがいません</p></div>
       </div>
@@ -2481,7 +2500,7 @@ function initSyncFromQuery() {
     setSyncUrl(sync);
     return;
   }
-  if (DEFAULT_SYNC_URL && !getSyncUrl()) {
+  if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__' && !localStorage.getItem(SYNC_URL_KEY)) {
     setSyncUrl(DEFAULT_SYNC_URL);
   }
 }
@@ -2497,14 +2516,23 @@ async function cloudRequest(path, options = {}, timeoutMs = 45000) {
       signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
     });
-    if (!res.ok) return null;
     const text = await res.text();
+    if (!res.ok) return null;
     return text ? JSON.parse(text) : null;
   } catch (e) {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function testSyncConnection(retries = 5) {
+  for (let i = 0; i < retries; i++) {
+    const result = await cloudRequest('/api/health', {}, 60000);
+    if (result && result.ok) return true;
+    if (i < retries - 1) await new Promise(r => setTimeout(r, 4000));
+  }
+  return false;
 }
 
 async function cloudPushConversation(conv) {
@@ -2740,11 +2768,6 @@ function stopChatSync() {
   }
 }
 
-async function testSyncConnection() {
-  const result = await cloudRequest('/api/health');
-  return result && result.ok;
-}
-
 function updateSyncStatusUI() {
   const status = document.getElementById('sync-status');
   const input = document.getElementById('input-sync-url');
@@ -2755,14 +2778,15 @@ function updateSyncStatusUI() {
     status.classList.add('warn');
     return;
   }
-  status.textContent = '接続確認中…（初回は30秒ほどかかることがあります）';
+  status.textContent = '接続確認中…（Renderは起動に最大1分かかることがあります）';
   status.classList.add('warn');
-  testSyncConnection().then((ok) => {
+  testSyncConnection(5).then((ok) => {
     if (ok) {
       status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
       status.classList.remove('warn');
+      if (!globalSyncTimer) startGlobalSync();
     } else {
-      status.textContent = '同期サーバーに接続できません。RenderのDeployが成功しているか、URLを確認してください';
+      status.textContent = '同期サーバーに接続できません。「再試行」を押すか、1分待ってから再度お試しください';
       status.classList.add('warn');
     }
   });
@@ -5822,40 +5846,69 @@ renderAdminUsers = function () {
   const useMain = currentTab === 'admin' && document.getElementById('main-admin-user-list');
   if (!useMain && adminRole !== 'super') return _renderAdminUsersFeat();
   if (!useMain) return _renderAdminUsersFeat();
-  const data = getData();
-  const users = Object.values(data.users);
+
   const list = document.getElementById('main-admin-user-list');
   const empty = document.getElementById('main-admin-empty-users');
-  list.innerHTML = '';
-  if (users.length === 0) { empty.classList.remove('hidden'); return; }
-  empty.classList.add('hidden');
-  users.forEach(user => {
-    const item = document.createElement('div');
-    item.className = 'list-item';
-    item.innerHTML = `
+  if (!list) return;
+
+  const renderList = () => {
+    const data = getData();
+    let users = Object.values(data.users);
+    const q = (document.getElementById('input-admin-user-search')?.value || '').trim().toLowerCase();
+    if (q) {
+      users = users.filter(u =>
+        (u.name || '').toLowerCase().includes(q) || String(u.id).toLowerCase().includes(q)
+      );
+    }
+    users.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    list.innerHTML = '';
+    if (users.length === 0) {
+      empty?.classList.remove('hidden');
+      return;
+    }
+    empty?.classList.add('hidden');
+    users.forEach(user => {
+      const item = document.createElement('div');
+      item.className = 'list-item';
+      const friendMark = areFriends(getCurrentUser()?.id, user.id) ? '' : ' <span class="admin-not-friend">(未友だち)</span>';
+      item.innerHTML = `
       ${avatarHtml(user)}
       <div class="list-info">
-        <div class="list-name">${displayNameHtml(user)}</div>
+        <div class="list-name">${displayNameHtml(user)}${friendMark}</div>
         <div class="list-preview">ID: ${user.id}</div>
         <div class="admin-user-actions">
           <button class="admin-btn admin-btn-title" data-user-id="${user.id}">称号</button>
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
       </div>`;
-    item.querySelector('.admin-btn-title').addEventListener('click', (e) => {
-      e.stopPropagation();
-      renderSuperAdminTitlePanel(user.id);
+      item.querySelector('.admin-btn-title').addEventListener('click', (e) => {
+        e.stopPropagation();
+        renderSuperAdminTitlePanel(user.id);
+      });
+      item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm(`「${user.name}」を削除しますか？`)) {
+          deleteUser(user.id);
+          renderAdminUsers();
+          showToast('ユーザーを削除しました');
+        }
+      });
+      list.appendChild(item);
     });
-    item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (confirm(`「${user.name}」を削除しますか？`)) {
-        deleteUser(user.id);
-        renderAdminUsers();
-        showToast('ユーザーを削除しました');
+    if (typeof appendAdminV7Buttons === 'function') appendAdminV7Buttons();
+  };
+
+  if (getEffectiveSyncUrl()) {
+    list.innerHTML = '<p class="qr-hint" style="padding:12px">サーバーからユーザーを読み込み中…</p>';
+    cloudRequest('/api/users/list', {}, 60000).then(serverUsers => {
+      if (Array.isArray(serverUsers)) {
+        serverUsers.forEach(u => { if (u && u.id) ensureLocalUser(u); });
       }
-    });
-    list.appendChild(item);
-  });
+      renderList();
+    }).catch(() => renderList());
+  } else {
+    renderList();
+  }
 };
 
 const _pushMessageCheck = pushMessage;
@@ -6514,7 +6567,7 @@ function showBannedScreen() {
 }
 
 function adminBanUser(userId, hours) {
-  const user = getUser(userId);
+  let user = getUser(userId);
   if (!user) return;
   user.banned = true;
   if (hours > 0) user.bannedUntil = Date.now() + hours * 60 * 60 * 1000;
@@ -6522,6 +6575,16 @@ function adminBanUser(userId, hours) {
   saveData(getData());
   cloudPushUser(user);
   showToast('アカウントを停止しました（全端末に反映）');
+}
+
+async function adminBanUserAsync(userId, hours) {
+  let user = getUser(userId);
+  if (!user && getSyncUrl()) {
+    const remote = await cloudFetchUser(userId);
+    if (remote) { ensureLocalUser(remote); user = getUser(userId); }
+  }
+  if (!user) { showToast('ユーザーが見つかりません'); return; }
+  adminBanUser(userId, hours);
 }
 
 function adminUnbanUser(userId) {
@@ -6916,8 +6979,8 @@ requestNotificationPermission = async function () {
 
 // ─── Admin UI extensions ───────────────────────────────────
 const _renderAdminUsersV7 = renderAdminUsers;
-renderAdminUsers = function () {
-  _renderAdminUsersV7();
+
+function appendAdminV7Buttons() {
   if (adminRole !== 'super') return;
   const useMain = currentTab === 'admin' && document.getElementById('main-admin-user-list');
   if (!useMain) return;
@@ -6928,12 +6991,11 @@ renderAdminUsers = function () {
     const banBtn = document.createElement('button');
     banBtn.className = 'admin-btn admin-btn-ban';
     banBtn.textContent = 'Ban';
-    banBtn.dataset.userId = userId;
     banBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const h = prompt('停止時間（時間）。永久=0', '0');
       if (h === null) return;
-      adminBanUser(userId, parseInt(h, 10) || 0);
+      adminBanUserAsync(userId, parseInt(h, 10) || 0);
       renderAdminUsers();
     });
     const unbanBtn = document.createElement('button');
@@ -6968,6 +7030,10 @@ renderAdminUsers = function () {
     actions.appendChild(suspBtn);
     actions.appendChild(premBtn);
   });
+}
+
+renderAdminUsers = function () {
+  _renderAdminUsersV7();
 };
 
 // Override suspendUserForOneHour to use cloud
@@ -7002,6 +7068,15 @@ function initV7Features() {
   bindClick('btn-notify-guide', () => showNotificationGuide());
   bindClick('btn-admin-post-notice', () => showAdminPostNoticeModal());
   bindClick('btn-refresh-notices', () => renderAnnouncements());
+  bindClick('btn-retry-sync', () => updateSyncStatusUI());
+  bindClick('btn-admin-refresh-users', () => renderAdminUsers());
+
+  const adminSearch = document.getElementById('input-admin-user-search');
+  if (adminSearch) {
+    adminSearch.addEventListener('input', () => {
+      if (currentTab === 'admin') renderAdminUsers();
+    });
+  }
 
   syncCurrentUserModeration();
   startSyncVersionPolling();

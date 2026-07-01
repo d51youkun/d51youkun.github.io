@@ -1419,3 +1419,17 @@ input:focus {
 .admin-btn-unban { background: #22c55e; color: #fff; }
 .admin-btn-premium { background: #1a6fd4; color: #fff; }
 .admin-btn-suspend { background: #f59e0b; color: #fff; }
+
+.admin-search-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+
+.admin-not-friend {
+  font-size: 11px;
+  color: var(--gray-500);
+  font-weight: normal;
+}

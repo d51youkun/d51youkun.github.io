@@ -158,7 +158,7 @@ function showBannedScreen() {
 }
 
 function adminBanUser(userId, hours) {
-  const user = getUser(userId);
+  let user = getUser(userId);
   if (!user) return;
   user.banned = true;
   if (hours > 0) user.bannedUntil = Date.now() + hours * 60 * 60 * 1000;
@@ -166,6 +166,16 @@ function adminBanUser(userId, hours) {
   saveData(getData());
   cloudPushUser(user);
   showToast('アカウントを停止しました（全端末に反映）');
+}
+
+async function adminBanUserAsync(userId, hours) {
+  let user = getUser(userId);
+  if (!user && getSyncUrl()) {
+    const remote = await cloudFetchUser(userId);
+    if (remote) { ensureLocalUser(remote); user = getUser(userId); }
+  }
+  if (!user) { showToast('ユーザーが見つかりません'); return; }
+  adminBanUser(userId, hours);
 }
 
 function adminUnbanUser(userId) {
@@ -560,8 +570,8 @@ requestNotificationPermission = async function () {
 
 // ─── Admin UI extensions ───────────────────────────────────
 const _renderAdminUsersV7 = renderAdminUsers;
-renderAdminUsers = function () {
-  _renderAdminUsersV7();
+
+function appendAdminV7Buttons() {
   if (adminRole !== 'super') return;
   const useMain = currentTab === 'admin' && document.getElementById('main-admin-user-list');
   if (!useMain) return;
@@ -572,12 +582,11 @@ renderAdminUsers = function () {
     const banBtn = document.createElement('button');
     banBtn.className = 'admin-btn admin-btn-ban';
     banBtn.textContent = 'Ban';
-    banBtn.dataset.userId = userId;
     banBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const h = prompt('停止時間（時間）。永久=0', '0');
       if (h === null) return;
-      adminBanUser(userId, parseInt(h, 10) || 0);
+      adminBanUserAsync(userId, parseInt(h, 10) || 0);
       renderAdminUsers();
     });
     const unbanBtn = document.createElement('button');
@@ -612,6 +621,10 @@ renderAdminUsers = function () {
     actions.appendChild(suspBtn);
     actions.appendChild(premBtn);
   });
+}
+
+renderAdminUsers = function () {
+  _renderAdminUsersV7();
 };
 
 // Override suspendUserForOneHour to use cloud
@@ -646,6 +659,15 @@ function initV7Features() {
   bindClick('btn-notify-guide', () => showNotificationGuide());
   bindClick('btn-admin-post-notice', () => showAdminPostNoticeModal());
   bindClick('btn-refresh-notices', () => renderAnnouncements());
+  bindClick('btn-retry-sync', () => updateSyncStatusUI());
+  bindClick('btn-admin-refresh-users', () => renderAdminUsers());
+
+  const adminSearch = document.getElementById('input-admin-user-search');
+  if (adminSearch) {
+    adminSearch.addEventListener('input', () => {
+      if (currentTab === 'admin') renderAdminUsers();
+    });
+  }
 
   syncCurrentUserModeration();
   startSyncVersionPolling();

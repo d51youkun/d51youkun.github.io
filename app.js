@@ -583,7 +583,7 @@ function initSyncFromQuery() {
     setSyncUrl(sync);
     return;
   }
-  if (DEFAULT_SYNC_URL && !getSyncUrl()) {
+  if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__' && !localStorage.getItem(SYNC_URL_KEY)) {
     setSyncUrl(DEFAULT_SYNC_URL);
   }
 }
@@ -599,14 +599,23 @@ async function cloudRequest(path, options = {}, timeoutMs = 45000) {
       signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
     });
-    if (!res.ok) return null;
     const text = await res.text();
+    if (!res.ok) return null;
     return text ? JSON.parse(text) : null;
   } catch (e) {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function testSyncConnection(retries = 5) {
+  for (let i = 0; i < retries; i++) {
+    const result = await cloudRequest('/api/health', {}, 60000);
+    if (result && result.ok) return true;
+    if (i < retries - 1) await new Promise(r => setTimeout(r, 4000));
+  }
+  return false;
 }
 
 async function cloudPushConversation(conv) {
@@ -842,11 +851,6 @@ function stopChatSync() {
   }
 }
 
-async function testSyncConnection() {
-  const result = await cloudRequest('/api/health');
-  return result && result.ok;
-}
-
 function updateSyncStatusUI() {
   const status = document.getElementById('sync-status');
   const input = document.getElementById('input-sync-url');
@@ -857,14 +861,15 @@ function updateSyncStatusUI() {
     status.classList.add('warn');
     return;
   }
-  status.textContent = '接続確認中…（初回は30秒ほどかかることがあります）';
+  status.textContent = '接続確認中…（Renderは起動に最大1分かかることがあります）';
   status.classList.add('warn');
-  testSyncConnection().then((ok) => {
+  testSyncConnection(5).then((ok) => {
     if (ok) {
       status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
       status.classList.remove('warn');
+      if (!globalSyncTimer) startGlobalSync();
     } else {
-      status.textContent = '同期サーバーに接続できません。RenderのDeployが成功しているか、URLを確認してください';
+      status.textContent = '同期サーバーに接続できません。「再試行」を押すか、1分待ってから再度お試しください';
       status.classList.add('warn');
     }
   });

@@ -138,6 +138,23 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'users' && parts[2] === 'list') {
+      const users = Object.values(data.users || {}).map(u => ({
+        id: u.id,
+        name: u.name,
+        createdAt: u.createdAt,
+        avatar: u.avatar || null,
+        title: u.title || null,
+        suspendedUntil: u.suspendedUntil || null,
+        banned: u.banned || false,
+        bannedUntil: u.bannedUntil || null,
+        premium: u.premium || false
+      }));
+      users.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      sendJson(res, 200, users);
+      return;
+    }
+
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'users' && parts[2]) {
       const user = (data.users && data.users[parts[2]]) || null;
       sendJson(res, 200, user);
