@@ -230,29 +230,39 @@ function createUser(name) {
 
 function getFriends(userId) {
   const data = getData();
+  const uid = String(userId);
   const friends = new Set();
   data.friendships.forEach(f => {
-    if (f.user1 === userId) friends.add(f.user2);
-    if (f.user2 === userId) friends.add(f.user1);
+    if (String(f.user1) === uid) friends.add(String(f.user2));
+    if (String(f.user2) === uid) friends.add(String(f.user1));
   });
-  return Array.from(friends).map(id => data.users[id]).filter(Boolean);
+  return Array.from(friends).map(id => {
+    const u = data.users[id];
+    if (u) return u;
+    return { id, name: 'ユーザー', createdAt: 0 };
+  });
 }
 
 function areFriends(id1, id2) {
+  const a = String(id1);
+  const b = String(id2);
   const data = getData();
   return data.friendships.some(f =>
-    (f.user1 === id1 && f.user2 === id2) || (f.user1 === id2 && f.user2 === id1)
+    (String(f.user1) === a && String(f.user2) === b) ||
+    (String(f.user1) === b && String(f.user2) === a)
   );
 }
 
 function addFriendship(id1, id2, options = {}) {
   const { skipCloud = false } = options;
-  if (id1 === id2 || areFriends(id1, id2)) return null;
+  const a = String(id1);
+  const b = String(id2);
+  if (a === b || areFriends(a, b)) return null;
   const data = getData();
-  data.friendships.push({ user1: id1, user2: id2, createdAt: Date.now() });
+  data.friendships.push({ user1: a, user2: b, createdAt: Date.now() });
   saveData(data);
-  const convId = getOrCreateDirectConv(id1, id2);
-  if (!skipCloud) cloudPushFriendship(id1, id2);
+  const convId = getOrCreateDirectConv(a, b);
+  if (!skipCloud) cloudPushFriendship(a, b);
   return convId;
 }
 
@@ -313,7 +323,8 @@ function decodeInvite(str) {
   if (!str) return null;
   const text = String(str).trim();
   const idx = text.indexOf(INVITE_PREFIX);
-  const raw = idx >= 0 ? text.slice(idx) : text;
+  if (idx < 0) return null;
+  const raw = text.slice(idx).split(/[\s\r\n]/)[0];
   if (!raw.startsWith(INVITE_PREFIX)) return null;
   try {
     let b64 = raw.slice(INVITE_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/');
@@ -350,17 +361,26 @@ function redeemFriendInvite(inviteStr, currentUserId) {
   return { success: true, user: targetUser };
 }
 
-function handleFriendInviteSuccess(result) {
+async function handleFriendInviteSuccess(result) {
   qrScanHandled = true;
   stopQrScanner();
   hideModal('modal-add-friend');
   const me = getCurrentUser();
   if (me && result.user) {
-    cloudPushFriendship(me.id, result.user.id);
-    if (getSyncUrl()) syncFriendships().then(() => refreshMainUI());
+    await cloudPushUser(me);
+    await cloudPushUser(result.user);
+    const pushed = await cloudPushFriendship(me.id, result.user.id);
+    const convId = getOrCreateDirectConv(me.id, result.user.id);
+    const conv = getData().conversations[convId];
+    if (conv) await cloudPushConversation(conv);
+    if (!pushed) {
+      showToast('友だちは追加しました。同期サーバーへの反映を再試行中…');
+    }
+    if (getSyncUrl()) await syncFriendships();
   }
   refreshMainUI();
   showToast(`${result.user.name}さんと友だちになりました！`);
+  document.querySelector('.tab[data-tab="friends"]')?.click();
 }
 
 function tryRedeemInviteCode(code) {
@@ -516,8 +536,15 @@ async function stopQrScanner() {
 function onQrScanSuccess(decodedText) {
   if (qrScanHandled) return;
   const code = String(decodedText || '').trim();
-  if (!code.includes(INVITE_PREFIX)) return;
+  if (!code.includes(INVITE_PREFIX)) {
+    showToast('友だち追加用のQRコードではありません');
+    return;
+  }
   const user = getCurrentUser();
+  if (!user) {
+    showToast('先にアカウントを作成してください');
+    return;
+  }
   const result = redeemFriendInvite(code, user.id);
   if (result.error) {
     showToast(result.error);
@@ -720,12 +747,17 @@ async function cloudFetchUser(userId) {
 }
 
 async function cloudPushFriendship(id1, id2) {
-  if (!getSyncUrl()) return;
-  const key = [id1, id2].sort().join('_');
-  await cloudRequest(`/api/friendships/${key}`, {
-    method: 'PUT',
-    body: JSON.stringify({ user1: id1, user2: id2, createdAt: Date.now() })
-  });
+  if (!getSyncUrl()) return false;
+  const key = [String(id1), String(id2)].sort().join('_');
+  for (let i = 0; i < 4; i++) {
+    const res = await cloudRequest(`/api/friendships/${key}`, {
+      method: 'PUT',
+      body: JSON.stringify({ user1: String(id1), user2: String(id2), createdAt: Date.now() })
+    }, 60000);
+    if (res && res.ok) return true;
+    if (i < 3) await new Promise(r => setTimeout(r, 3000));
+  }
+  return false;
 }
 
 async function cloudFetchFriendIds(userId) {

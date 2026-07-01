@@ -1433,3 +1433,86 @@ input:focus {
   color: var(--gray-500);
   font-weight: normal;
 }
+
+/* Text outline for visibility */
+:root {
+  --text-outline-black: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 3px #000;
+  --text-outline-white: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 3px #fff;
+}
+
+/* Dark text → white outline */
+body,
+.list-name,
+.list-preview,
+.notice-title,
+.notice-body,
+.notice-author,
+.notice-comment,
+.message.received .message-bubble,
+.message.received .message-sender,
+.chat-header-info h2,
+.chat-presence-status,
+.form-desc,
+.empty-state p,
+.menu-item,
+.profile-id,
+.qr-hint,
+.feedback-panel h3,
+.notice-type,
+.notice-date,
+.tab:not(.active),
+h2, h3,
+.invite-code-text,
+.file-name,
+.admin-not-friend,
+.presence-label {
+  text-shadow: var(--text-outline-white);
+}
+
+/* Light/white text → black outline */
+.btn-primary,
+.btn-call,
+.tab.active,
+.app-header h1,
+#header-title,
+.logo-large h1,
+.logo-large .tagline,
+.list-avatar,
+.profile-avatar:not(.has-image),
+.tab-badge,
+.admin-btn,
+.message.sent .message-bubble,
+.message.sent .message-sender,
+.message.sent .message-time,
+.message.sent .read-badge,
+.sticker-pack-label,
+.ban-message,
+.user-title-badge,
+.premium-check,
+.btn-send:not(:disabled),
+.icon-btn,
+.date-separator span,
+.toast {
+  text-shadow: var(--text-outline-black);
+}
+
+[data-theme="dark"] body,
+[data-theme="dark"] .list-name,
+[data-theme="dark"] .list-preview,
+[data-theme="dark"] .notice-title,
+[data-theme="dark"] .notice-body,
+[data-theme="dark"] .message.received .message-bubble,
+[data-theme="dark"] .menu-item,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] .tab:not(.active),
+[data-theme="dark"] .qr-hint,
+[data-theme="dark"] .form-desc {
+  text-shadow: var(--text-outline-black);
+}
+
+[data-theme="dark"] .message.sent .message-bubble,
+[data-theme="dark"] .btn-primary,
+[data-theme="dark"] .tab.active {
+  text-shadow: var(--text-outline-white);
+}
