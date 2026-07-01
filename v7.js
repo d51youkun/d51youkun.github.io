@@ -3,7 +3,7 @@
  */
 const THEME_KEY = 'bluechat_theme';
 const ACTIVITY_VERSION_KEY = 'bluechat_activity_version';
-const ACTIVITY_POLL_MS = 8000;
+const ACTIVITY_POLL_MS = 4000;
 const ANNOUNCE_READ_KEY = 'bluechat_ann_read';
 
 const RTC_CONFIG_V7 = {
@@ -158,15 +158,17 @@ function showBannedScreen() {
   document.getElementById('screen-banned')?.classList.remove('hidden');
 }
 
-function adminBanUser(userId, hours) {
+async function adminBanUser(userId, hours) {
   let user = getUser(userId);
-  if (!user) return;
+  if (!user) return false;
   user.banned = true;
   if (hours > 0) user.bannedUntil = Date.now() + hours * 60 * 60 * 1000;
   else delete user.bannedUntil;
   saveData(getData());
-  cloudPushUser(user);
-  showToast('アカウントを停止しました（全端末に反映）');
+  const ok = await cloudPushUser(user);
+  if (ok) showToast('アカウントを停止しました（全端末に反映）');
+  else showToast('Banを保存しましたがサーバー反映に失敗。再試行してください');
+  return ok;
 }
 
 async function adminBanUserAsync(userId, hours) {
@@ -176,17 +178,17 @@ async function adminBanUserAsync(userId, hours) {
     if (remote) { ensureLocalUser(remote); user = getUser(userId); }
   }
   if (!user) { showToast('ユーザーが見つかりません'); return; }
-  adminBanUser(userId, hours);
+  await adminBanUser(userId, hours);
 }
 
-function adminUnbanUser(userId) {
+async function adminUnbanUser(userId) {
   const user = getUser(userId);
   if (!user) return;
   user.banned = false;
   delete user.bannedUntil;
   delete user.suspendedUntil;
   saveData(getData());
-  cloudPushUser(user);
+  await cloudPushUser(user);
   showToast('停止を解除しました');
 }
 
@@ -199,36 +201,19 @@ function adminSetPremium(userId, premium) {
   showToast(premium ? 'プレミアムを付与しました' : 'プレミアムを解除しました');
 }
 
-function adminSuspendUserHours(userId, hours) {
+async function adminSuspendUserHours(userId, hours) {
   const user = getUser(userId);
   if (!user) return;
   user.suspendedUntil = Date.now() + hours * 60 * 60 * 1000;
   saveData(getData());
-  cloudPushUser(user);
+  await cloudPushUser(user);
   showToast(`${hours}時間停止しました`);
 }
 
 // ─── Sync on meaningful activity only (no constant reload) ───
 async function handleRemoteActivity() {
-  if (!getSyncUrl()) return;
-  await syncCurrentUserModeration();
-  const friendsAdded = await syncFriendships();
-  await syncUserConversationList();
-  const user = getCurrentUser();
-  let added = 0;
-  if (user) {
-    for (const conv of getUserConversations(user.id)) {
-      added += await syncConversation(conv.id);
-    }
-  }
-  if (typeof fetchFriendsPresence === 'function') await fetchFriendsPresence();
+  await syncAllConversations();
   if (currentTab === 'notices') await renderAnnouncements();
-  updateTabBadges();
-  if (added > 0 || friendsAdded > 0) {
-    refreshMainUI();
-    if (currentConvId) renderMessages(currentConvId);
-    renderChatList();
-  }
 }
 
 function startSyncVersionPolling() {

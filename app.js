@@ -303,6 +303,18 @@ function ensureLocalUser(userInfo) {
     data.users[userInfo.id].suspendedUntil = userInfo.suspendedUntil;
     saveData(data);
   }
+  if (userInfo.banned !== undefined) {
+    data.users[userInfo.id].banned = userInfo.banned;
+    saveData(data);
+  }
+  if (userInfo.bannedUntil !== undefined) {
+    data.users[userInfo.id].bannedUntil = userInfo.bannedUntil;
+    saveData(data);
+  }
+  if (userInfo.premium !== undefined) {
+    data.users[userInfo.id].premium = userInfo.premium;
+    saveData(data);
+  }
   return data.users[userInfo.id];
 }
 
@@ -690,13 +702,18 @@ function mergeRemoteMessage(convId, remoteMsg) {
 
 async function syncPushLocalMessages(convId) {
   if (!getSyncUrl() || !convId) return;
-  const data = getData();
-  const conv = data.conversations[convId];
+  const key = 'bluechat_last_push_' + convId;
+  const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
+  const pending = getMessages(convId).filter(m => (m.timestamp || 0) > lastPush);
+  if (!pending.length) return;
+  const conv = getData().conversations[convId];
   if (conv) await cloudPushConversation(conv);
-  const messages = getMessages(convId);
-  for (const msg of messages) {
+  let maxTs = lastPush;
+  for (const msg of pending) {
     await cloudPushMessage(convId, msg);
+    maxTs = Math.max(maxTs, msg.timestamp || 0);
   }
+  localStorage.setItem(key, String(maxTs));
 }
 
 async function syncConversation(convId) {
@@ -723,23 +740,29 @@ async function syncConversation(convId) {
 }
 
 async function cloudPushUser(user) {
-  if (!user || !user.id || !getSyncUrl()) return;
-  await cloudRequest(`/api/users/${user.id}`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      id: user.id,
-      name: user.name,
-      createdAt: user.createdAt || Date.now(),
-      avatar: user.avatar || null,
-      avatarUpdatedAt: user.avatarUpdatedAt || 0,
-      title: user.title || null,
-      suspendedUntil: user.suspendedUntil || null,
-      banned: user.banned || false,
-      bannedUntil: user.bannedUntil || null,
-      premium: user.premium || false,
-      passwordHash: user.passwordHash || null
-    })
-  });
+  if (!user || !user.id || !getSyncUrl()) return false;
+  const payload = {
+    id: user.id,
+    name: user.name,
+    createdAt: user.createdAt || Date.now(),
+    avatar: user.avatar || null,
+    avatarUpdatedAt: user.avatarUpdatedAt || 0,
+    title: user.title || null,
+    suspendedUntil: user.suspendedUntil || null,
+    banned: !!user.banned,
+    bannedUntil: user.bannedUntil || null,
+    premium: !!user.premium,
+    passwordHash: user.passwordHash || null
+  };
+  for (let i = 0; i < 4; i++) {
+    const res = await cloudRequest(`/api/users/${user.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }, 60000);
+    if (res && res.ok) return true;
+    if (i < 3) await new Promise(r => setTimeout(r, 2000));
+  }
+  return false;
 }
 
 async function cloudFetchUser(userId) {
@@ -826,6 +849,7 @@ async function syncAllConversations() {
   if (!getSyncUrl()) return;
   const user = getCurrentUser();
   if (!user) return;
+  if (typeof syncCurrentUserModeration === 'function') await syncCurrentUserModeration();
   const friendsAdded = await syncFriendships();
   await syncUserConversationList();
   const convs = getUserConversations(user.id);
@@ -833,10 +857,11 @@ async function syncAllConversations() {
   for (const conv of convs) {
     total += await syncConversation(conv.id);
   }
-  if (total > 0 || friendsAdded > 0) {
-    refreshMainUI();
-    if (currentConvId) renderMessages(currentConvId);
-  }
+  if (typeof updateTabBadges === 'function') updateTabBadges();
+  if (typeof fetchFriendsPresence === 'function') await fetchFriendsPresence();
+  refreshMainUI();
+  if (currentConvId) renderMessages(currentConvId);
+  return total + friendsAdded;
 }
 
 async function cloudSyncAfterSend(convId, msg) {
@@ -845,13 +870,16 @@ async function cloudSyncAfterSend(convId, msg) {
   const conv = data.conversations[convId];
   if (conv) await cloudPushConversation(conv);
   await cloudPushMessage(convId, msg);
+  const key = 'bluechat_last_push_' + convId;
+  const last = parseInt(localStorage.getItem(key) || '0', 10);
+  localStorage.setItem(key, String(Math.max(last, msg.timestamp || Date.now())));
 }
 
 function startGlobalSync() {
   stopGlobalSync();
   if (!getSyncUrl()) return;
   syncAllConversations();
-  globalSyncTimer = setInterval(syncAllConversations, 5000);
+  globalSyncTimer = setInterval(syncAllConversations, 4000);
 }
 
 function stopGlobalSync() {
@@ -899,11 +927,11 @@ function updateSyncStatusUI() {
     if (ok) {
       status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
       status.classList.remove('warn');
-      if (!globalSyncTimer) startGlobalSync();
     } else {
       status.textContent = '同期サーバーに接続できません。「再試行」を押すか、1分待ってから再度お試しください';
       status.classList.add('warn');
     }
+    if (!globalSyncTimer) startGlobalSync();
   });
 }
 

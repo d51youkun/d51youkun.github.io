@@ -1445,87 +1445,30 @@ input:focus {
   font-weight: normal;
 }
 
-/* Text outline for visibility */
-:root {
-  --text-outline-black: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 3px #000;
-  --text-outline-white: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 3px #fff;
+/* Back button visibility */
+.chat-header .icon-btn,
+#btn-back-chat {
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
-/* Dark text → white outline */
-body,
-.list-name,
-.list-preview,
-.notice-title,
-.notice-body,
-.notice-author,
-.notice-comment,
-.message.received .message-bubble,
-.message.received .message-sender,
-.chat-header-info h2,
-.chat-presence-status,
-.form-desc,
-.empty-state p,
-.menu-item,
-.profile-id,
-.qr-hint,
-.feedback-panel h3,
-.notice-type,
-.notice-date,
-.tab:not(.active),
-h2, h3,
-.invite-code-text,
-.file-name,
-.admin-not-friend,
-.presence-label {
-  text-shadow: var(--text-outline-white);
+.chat-header .icon-btn:active,
+#btn-back-chat:active {
+  background: rgba(0, 0, 0, 0.65);
 }
 
-/* Light/white text → black outline */
-.btn-primary,
-.btn-call,
-.tab.active,
-.app-header h1,
-#header-title,
-.logo-large h1,
-.logo-large .tagline,
-.list-avatar,
-.profile-avatar:not(.has-image),
-.tab-badge,
-.admin-btn,
-.message.sent .message-bubble,
-.message.sent .message-sender,
-.message.sent .message-time,
-.message.sent .read-badge,
-.sticker-pack-label,
-.ban-message,
-.user-title-badge,
-.premium-check,
-.btn-send:not(:disabled),
-.icon-btn,
-.date-separator span,
-.toast {
-  text-shadow: var(--text-outline-black);
-}
-
-[data-theme="dark"] body,
-[data-theme="dark"] .list-name,
-[data-theme="dark"] .list-preview,
-[data-theme="dark"] .notice-title,
-[data-theme="dark"] .notice-body,
-[data-theme="dark"] .message.received .message-bubble,
-[data-theme="dark"] .menu-item,
-[data-theme="dark"] h2,
-[data-theme="dark"] h3,
-[data-theme="dark"] .tab:not(.active),
-[data-theme="dark"] .qr-hint,
-[data-theme="dark"] .form-desc {
-  text-shadow: var(--text-outline-black);
-}
-
-[data-theme="dark"] .message.sent .message-bubble,
-[data-theme="dark"] .btn-primary,
-[data-theme="dark"] .tab.active {
-  text-shadow: var(--text-outline-white);
+[data-theme="dark"] .chat-header .icon-btn,
+[data-theme="dark"] #btn-back-chat {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: #fff;
+  color: #fff;
 }
 
   </style>
@@ -2303,6 +2246,18 @@ function ensureLocalUser(userInfo) {
     data.users[userInfo.id].suspendedUntil = userInfo.suspendedUntil;
     saveData(data);
   }
+  if (userInfo.banned !== undefined) {
+    data.users[userInfo.id].banned = userInfo.banned;
+    saveData(data);
+  }
+  if (userInfo.bannedUntil !== undefined) {
+    data.users[userInfo.id].bannedUntil = userInfo.bannedUntil;
+    saveData(data);
+  }
+  if (userInfo.premium !== undefined) {
+    data.users[userInfo.id].premium = userInfo.premium;
+    saveData(data);
+  }
   return data.users[userInfo.id];
 }
 
@@ -2690,13 +2645,18 @@ function mergeRemoteMessage(convId, remoteMsg) {
 
 async function syncPushLocalMessages(convId) {
   if (!getSyncUrl() || !convId) return;
-  const data = getData();
-  const conv = data.conversations[convId];
+  const key = 'bluechat_last_push_' + convId;
+  const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
+  const pending = getMessages(convId).filter(m => (m.timestamp || 0) > lastPush);
+  if (!pending.length) return;
+  const conv = getData().conversations[convId];
   if (conv) await cloudPushConversation(conv);
-  const messages = getMessages(convId);
-  for (const msg of messages) {
+  let maxTs = lastPush;
+  for (const msg of pending) {
     await cloudPushMessage(convId, msg);
+    maxTs = Math.max(maxTs, msg.timestamp || 0);
   }
+  localStorage.setItem(key, String(maxTs));
 }
 
 async function syncConversation(convId) {
@@ -2723,23 +2683,29 @@ async function syncConversation(convId) {
 }
 
 async function cloudPushUser(user) {
-  if (!user || !user.id || !getSyncUrl()) return;
-  await cloudRequest(`/api/users/${user.id}`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      id: user.id,
-      name: user.name,
-      createdAt: user.createdAt || Date.now(),
-      avatar: user.avatar || null,
-      avatarUpdatedAt: user.avatarUpdatedAt || 0,
-      title: user.title || null,
-      suspendedUntil: user.suspendedUntil || null,
-      banned: user.banned || false,
-      bannedUntil: user.bannedUntil || null,
-      premium: user.premium || false,
-      passwordHash: user.passwordHash || null
-    })
-  });
+  if (!user || !user.id || !getSyncUrl()) return false;
+  const payload = {
+    id: user.id,
+    name: user.name,
+    createdAt: user.createdAt || Date.now(),
+    avatar: user.avatar || null,
+    avatarUpdatedAt: user.avatarUpdatedAt || 0,
+    title: user.title || null,
+    suspendedUntil: user.suspendedUntil || null,
+    banned: !!user.banned,
+    bannedUntil: user.bannedUntil || null,
+    premium: !!user.premium,
+    passwordHash: user.passwordHash || null
+  };
+  for (let i = 0; i < 4; i++) {
+    const res = await cloudRequest(`/api/users/${user.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }, 60000);
+    if (res && res.ok) return true;
+    if (i < 3) await new Promise(r => setTimeout(r, 2000));
+  }
+  return false;
 }
 
 async function cloudFetchUser(userId) {
@@ -2826,6 +2792,7 @@ async function syncAllConversations() {
   if (!getSyncUrl()) return;
   const user = getCurrentUser();
   if (!user) return;
+  if (typeof syncCurrentUserModeration === 'function') await syncCurrentUserModeration();
   const friendsAdded = await syncFriendships();
   await syncUserConversationList();
   const convs = getUserConversations(user.id);
@@ -2833,10 +2800,11 @@ async function syncAllConversations() {
   for (const conv of convs) {
     total += await syncConversation(conv.id);
   }
-  if (total > 0 || friendsAdded > 0) {
-    refreshMainUI();
-    if (currentConvId) renderMessages(currentConvId);
-  }
+  if (typeof updateTabBadges === 'function') updateTabBadges();
+  if (typeof fetchFriendsPresence === 'function') await fetchFriendsPresence();
+  refreshMainUI();
+  if (currentConvId) renderMessages(currentConvId);
+  return total + friendsAdded;
 }
 
 async function cloudSyncAfterSend(convId, msg) {
@@ -2845,13 +2813,16 @@ async function cloudSyncAfterSend(convId, msg) {
   const conv = data.conversations[convId];
   if (conv) await cloudPushConversation(conv);
   await cloudPushMessage(convId, msg);
+  const key = 'bluechat_last_push_' + convId;
+  const last = parseInt(localStorage.getItem(key) || '0', 10);
+  localStorage.setItem(key, String(Math.max(last, msg.timestamp || Date.now())));
 }
 
 function startGlobalSync() {
   stopGlobalSync();
   if (!getSyncUrl()) return;
   syncAllConversations();
-  globalSyncTimer = setInterval(syncAllConversations, 5000);
+  globalSyncTimer = setInterval(syncAllConversations, 4000);
 }
 
 function stopGlobalSync() {
@@ -2899,11 +2870,11 @@ function updateSyncStatusUI() {
     if (ok) {
       status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
       status.classList.remove('warn');
-      if (!globalSyncTimer) startGlobalSync();
     } else {
       status.textContent = '同期サーバーに接続できません。「再試行」を押すか、1分待ってから再度お試しください';
       status.classList.add('warn');
     }
+    if (!globalSyncTimer) startGlobalSync();
   });
 }
 
@@ -6527,7 +6498,7 @@ onAppInit(() => {
  */
 const THEME_KEY = 'bluechat_theme';
 const ACTIVITY_VERSION_KEY = 'bluechat_activity_version';
-const ACTIVITY_POLL_MS = 8000;
+const ACTIVITY_POLL_MS = 4000;
 const ANNOUNCE_READ_KEY = 'bluechat_ann_read';
 
 const RTC_CONFIG_V7 = {
@@ -6682,15 +6653,17 @@ function showBannedScreen() {
   document.getElementById('screen-banned')?.classList.remove('hidden');
 }
 
-function adminBanUser(userId, hours) {
+async function adminBanUser(userId, hours) {
   let user = getUser(userId);
-  if (!user) return;
+  if (!user) return false;
   user.banned = true;
   if (hours > 0) user.bannedUntil = Date.now() + hours * 60 * 60 * 1000;
   else delete user.bannedUntil;
   saveData(getData());
-  cloudPushUser(user);
-  showToast('アカウントを停止しました（全端末に反映）');
+  const ok = await cloudPushUser(user);
+  if (ok) showToast('アカウントを停止しました（全端末に反映）');
+  else showToast('Banを保存しましたがサーバー反映に失敗。再試行してください');
+  return ok;
 }
 
 async function adminBanUserAsync(userId, hours) {
@@ -6700,17 +6673,17 @@ async function adminBanUserAsync(userId, hours) {
     if (remote) { ensureLocalUser(remote); user = getUser(userId); }
   }
   if (!user) { showToast('ユーザーが見つかりません'); return; }
-  adminBanUser(userId, hours);
+  await adminBanUser(userId, hours);
 }
 
-function adminUnbanUser(userId) {
+async function adminUnbanUser(userId) {
   const user = getUser(userId);
   if (!user) return;
   user.banned = false;
   delete user.bannedUntil;
   delete user.suspendedUntil;
   saveData(getData());
-  cloudPushUser(user);
+  await cloudPushUser(user);
   showToast('停止を解除しました');
 }
 
@@ -6723,36 +6696,19 @@ function adminSetPremium(userId, premium) {
   showToast(premium ? 'プレミアムを付与しました' : 'プレミアムを解除しました');
 }
 
-function adminSuspendUserHours(userId, hours) {
+async function adminSuspendUserHours(userId, hours) {
   const user = getUser(userId);
   if (!user) return;
   user.suspendedUntil = Date.now() + hours * 60 * 60 * 1000;
   saveData(getData());
-  cloudPushUser(user);
+  await cloudPushUser(user);
   showToast(`${hours}時間停止しました`);
 }
 
 // ─── Sync on meaningful activity only (no constant reload) ───
 async function handleRemoteActivity() {
-  if (!getSyncUrl()) return;
-  await syncCurrentUserModeration();
-  const friendsAdded = await syncFriendships();
-  await syncUserConversationList();
-  const user = getCurrentUser();
-  let added = 0;
-  if (user) {
-    for (const conv of getUserConversations(user.id)) {
-      added += await syncConversation(conv.id);
-    }
-  }
-  if (typeof fetchFriendsPresence === 'function') await fetchFriendsPresence();
+  await syncAllConversations();
   if (currentTab === 'notices') await renderAnnouncements();
-  updateTabBadges();
-  if (added > 0 || friendsAdded > 0) {
-    refreshMainUI();
-    if (currentConvId) renderMessages(currentConvId);
-    renderChatList();
-  }
 }
 
 function startSyncVersionPolling() {
