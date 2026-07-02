@@ -1,10 +1,16 @@
-/* BlueChat — notification click handler */
+/* BlueChat v10 — notification click + cache bust */
+const SW_VERSION = 'v10-2026-07-02';
+
 self.addEventListener('install', (e) => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim());
+  e.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {

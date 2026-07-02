@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#1a6fd4">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>BlueChat v10</title>
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
@@ -4573,8 +4576,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    const swUrl = new URL('sw.js', window.location.href).pathname;
-    await navigator.serviceWorker.register(swUrl);
+    await navigator.serviceWorker.register('sw.js?v=10');
   } catch (e) { /* ignore */ }
 }
 
@@ -7043,12 +7045,6 @@ stopGlobalSync = function () {
 };
 
 function initV6Features() {
-  const headerTitle = document.getElementById('header-title');
-  if (headerTitle) headerTitle.textContent = 'BlueChat v6';
-
-  const logoTitle = document.querySelector('.logo-large h1');
-  if (logoTitle) logoTitle.textContent = 'BlueChat v6';
-
   bindClick('btn-cloud-restore', () => showCloudRestoreModal());
   bindClick('btn-cloud-restore-onboarding', () => {
     const url = prompt('同期サーバーURL（空欄でデフォルト）', getEffectiveSyncUrl() || '');
@@ -7832,10 +7828,6 @@ pushMessage = function (convId, senderId, fields) {
 function initV7Features() {
   applyTheme(getTheme());
 
-  const headerTitle = document.getElementById('header-title');
-  if (headerTitle) headerTitle.textContent = 'BlueChat v7';
-  const logoTitle = document.querySelector('.logo-large h1');
-  if (logoTitle) logoTitle.textContent = 'BlueChat v7';
   const logoIcon = document.querySelector('.logo-icon');
   if (logoIcon) {
     logoIcon.innerHTML = '<img src="icon.png" alt="BlueChat" class="logo-icon-img">';
@@ -8462,8 +8454,9 @@ onAppInit(() => {
  * BlueChat v10 — 履歴同期・称号/プレミアム表示・スーパープレミアム・管理者認証
  */
 var APP_VERSION = 'v10';
+const BUILD_STAMP = '2026-07-02-v10';
 
-function applyV10Branding() {
+function applyAppBranding() {
   const title = 'BlueChat v10';
   document.title = title;
   const headerTitle = document.getElementById('header-title');
@@ -8473,8 +8466,14 @@ function applyV10Branding() {
 }
 
 onAppInit(() => {
-  applyV10Branding();
+  applyAppBranding();
 });
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', applyAppBranding);
+} else {
+  applyAppBranding();
+}
 
   </script>
 </body>

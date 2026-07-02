@@ -155,8 +155,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    const swUrl = new URL('sw.js', window.location.href).pathname;
-    await navigator.serviceWorker.register(swUrl);
+    await navigator.serviceWorker.register('sw.js?v=10');
   } catch (e) { /* ignore */ }
 }
 

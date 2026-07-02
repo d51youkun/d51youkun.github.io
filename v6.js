@@ -400,12 +400,6 @@ stopGlobalSync = function () {
 };
 
 function initV6Features() {
-  const headerTitle = document.getElementById('header-title');
-  if (headerTitle) headerTitle.textContent = 'BlueChat v6';
-
-  const logoTitle = document.querySelector('.logo-large h1');
-  if (logoTitle) logoTitle.textContent = 'BlueChat v6';
-
   bindClick('btn-cloud-restore', () => showCloudRestoreModal());
   bindClick('btn-cloud-restore-onboarding', () => {
     const url = prompt('同期サーバーURL（空欄でデフォルト）', getEffectiveSyncUrl() || '');

@@ -761,10 +761,6 @@ pushMessage = function (convId, senderId, fields) {
 function initV7Features() {
   applyTheme(getTheme());
 
-  const headerTitle = document.getElementById('header-title');
-  if (headerTitle) headerTitle.textContent = 'BlueChat v7';
-  const logoTitle = document.querySelector('.logo-large h1');
-  if (logoTitle) logoTitle.textContent = 'BlueChat v7';
   const logoIcon = document.querySelector('.logo-icon');
   if (logoIcon) {
     logoIcon.innerHTML = '<img src="icon.png" alt="BlueChat" class="logo-icon-img">';
