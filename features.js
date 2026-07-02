@@ -9,6 +9,7 @@ const STICKER_PACKS = [
 ];
 
 let callPollTimer = null;
+let callConnectTimeout = null;
 let peerConnection = null;
 let localStream = null;
 let callState = { active: false, type: null, remoteUserId: null, convId: null };
@@ -361,7 +362,12 @@ getMessageContentHtml = getMessageContentHtmlExt;
 const _mergeRemoteMessageOrig = mergeRemoteMessage;
 mergeRemoteMessage = function (convId, remoteMsg) {
   const added = _mergeRemoteMessageOrig(convId, remoteMsg);
-  if (added) onNewMessageReceived(convId, remoteMsg);
+  if (added) {
+    onNewMessageReceived(convId, remoteMsg);
+    if (currentScreen === 'chat' && currentConvId === convId) {
+      appendMessageToChat(remoteMsg, convId);
+    }
+  }
   return added;
 };
 
@@ -379,6 +385,7 @@ renderMessages = function (convId) {
   if (!user) return;
   const messages = getMessages(convId);
   const container = document.getElementById('messages-container');
+  if (!container) return;
   container.innerHTML = '';
   let lastDate = '';
   messages.forEach(msg => {
@@ -391,9 +398,12 @@ renderMessages = function (convId) {
       container.appendChild(sep);
     }
     const el = createMessageElement(msg, convId, user);
-    if (el) container.appendChild(el);
+    if (el) {
+      el.dataset.msgId = msg.id;
+      container.appendChild(el);
+    }
   });
-  scrollMessagesToBottom();
+  scrollMessagesToBottom(true);
 };
 
 // Patch chat sync to include reads
@@ -503,7 +513,8 @@ function importTransferBackup(backup) {
     }
     throw e;
   }
-  if (backup.syncUrl) setSyncUrl(backup.syncUrl);
+  if (backup.syncUrl && !localStorage.getItem(SYNC_CONFIGURED_KEY)) setSyncUrl(backup.syncUrl);
+  localStorage.removeItem(ACTIVITY_VERSION_KEY);
 }
 
 async function createTransferSession() {
@@ -620,10 +631,11 @@ function updateCallButtons(convId) {
 async function sendCallSignal(toUserId, type, payload) {
   const user = getCurrentUser();
   if (!user || !getEffectiveSyncUrl()) return;
-  await cloudRequest('/api/call/signal', {
+  const req = typeof cloudRequestExt === 'function' ? cloudRequestExt : cloudRequest;
+  await req('/api/call/signal', {
     method: 'POST',
     body: JSON.stringify({ from: user.id, to: toUserId, type, payload, timestamp: Date.now() })
-  });
+  }, 60000);
 }
 
 function getOtherUserIdInConv(convId) {
@@ -639,6 +651,80 @@ function showCallOverlay(title, sub) {
   document.getElementById('modal-call').classList.remove('hidden');
 }
 
+function updateCallOverlaySub(sub) {
+  const el = document.getElementById('call-overlay-sub');
+  if (el) el.textContent = sub || '';
+}
+
+function normalizeSdp(sdp) {
+  if (!sdp) return null;
+  if (typeof sdp === 'object' && sdp.type && sdp.sdp) return sdp;
+  return sdp;
+}
+
+function rewindCallSignalSince() {
+  lastSignalTs = Math.min(lastSignalTs, Date.now() - 30000);
+}
+
+function clearCallConnectTimeout() {
+  if (callConnectTimeout) {
+    clearTimeout(callConnectTimeout);
+    callConnectTimeout = null;
+  }
+}
+
+function startCallConnectTimeout(callType) {
+  clearCallConnectTimeout();
+  callConnectTimeout = setTimeout(() => {
+    if (!peerConnection || !callState.active) return;
+    const ice = peerConnection.iceConnectionState;
+    if (ice === 'connected' || ice === 'completed') return;
+    updateCallOverlaySub('接続に失敗しました');
+    showToast('通話の接続がタイムアウトしました');
+    setTimeout(() => endCall(), 2000);
+  }, 35000);
+}
+
+function setupCallConnectionHandlers(pc, callType) {
+  const connectedLabel = callType === 'video' ? 'ビデオ通話中' : '音声通話中';
+  const onConnected = () => {
+    updateCallOverlaySub(connectedLabel);
+    clearCallConnectTimeout();
+  };
+  pc.oniceconnectionstatechange = () => {
+    const s = pc.iceConnectionState;
+    if (s === 'connected' || s === 'completed') onConnected();
+    else if (s === 'failed') {
+      updateCallOverlaySub('接続に失敗しました');
+      showToast('通話の接続に失敗しました');
+      setTimeout(() => endCall(), 2000);
+    } else if (s === 'checking' || s === 'new') {
+      updateCallOverlaySub('接続中…');
+    }
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') onConnected();
+    else if (pc.connectionState === 'failed') {
+      showToast('通話を確立できませんでした');
+      setTimeout(() => endCall(), 2000);
+    }
+  };
+}
+
+function attachCallPeerHandlers(pc, remoteUserId, callType) {
+  setupCallConnectionHandlers(pc, callType);
+  pc.ontrack = (e) => {
+    const remoteV = document.getElementById('call-remote-video');
+    if (remoteV) {
+      remoteV.srcObject = e.streams[0];
+      remoteV.classList.toggle('hidden', callType !== 'video');
+    }
+  };
+  pc.onicecandidate = (e) => {
+    if (e.candidate) sendCallSignal(remoteUserId, 'ice', { candidate: e.candidate.toJSON() });
+  };
+}
+
 function hideCallOverlay() {
   document.getElementById('modal-call').classList.add('hidden');
   const localV = document.getElementById('call-local-video');
@@ -648,6 +734,7 @@ function hideCallOverlay() {
 }
 
 async function endCall() {
+  clearCallConnectTimeout();
   if (callState.remoteUserId) {
     await sendCallSignal(callState.remoteUserId, 'hangup', {});
   }
@@ -727,22 +814,16 @@ async function acceptIncomingOffer(sig) {
     }
   }
 
-  peerConnection.ontrack = (e) => {
-    const remoteV = document.getElementById('call-remote-video');
-    if (remoteV) {
-      remoteV.srcObject = e.streams[0];
-      remoteV.classList.toggle('hidden', callType !== 'video');
-    }
-  };
-  peerConnection.onicecandidate = (e) => {
-    if (e.candidate) sendCallSignal(sig.from, 'ice', { candidate: e.candidate });
-  };
+  attachCallPeerHandlers(peerConnection, sig.from, callType);
 
-  await peerConnection.setRemoteDescription(sig.payload.sdp);
+  await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
   await sendCallSignal(sig.from, 'answer', { sdp: answer });
-  showCallOverlay(callType === 'video' ? 'ビデオ通話中' : '音声通話中', '');
+  if (typeof flushIceCandidates === 'function') await flushIceCandidates(peerConnection);
+  rewindCallSignalSince();
+  showCallOverlay(callType === 'video' ? 'ビデオ通話中' : '音声通話中', '接続中…');
+  startCallConnectTimeout(callType);
   startCallPolling();
 }
 
@@ -789,21 +870,14 @@ async function startCall(type) {
     localV.classList.remove('hidden');
   } else if (localV) localV.classList.add('hidden');
 
-  peerConnection.ontrack = (e) => {
-    const remoteV = document.getElementById('call-remote-video');
-    if (remoteV) {
-      remoteV.srcObject = e.streams[0];
-      remoteV.classList.toggle('hidden', type !== 'video');
-    }
-  };
-  peerConnection.onicecandidate = (e) => {
-    if (e.candidate) sendCallSignal(remoteId, 'ice', { candidate: e.candidate });
-  };
+  attachCallPeerHandlers(peerConnection, remoteId, type);
 
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
   await sendCallSignal(remoteId, 'offer', { sdp: offer, callType: type });
+  rewindCallSignalSince();
   showCallOverlay(type === 'video' ? 'ビデオ通話中' : '音声通話中', '接続中…');
+  startCallConnectTimeout(type);
   startCallPolling();
   showToast('発信中…');
 }
@@ -828,9 +902,11 @@ async function handleCallSignal(sig) {
     return;
   }
 
-  if (sig.type === 'answer' && peerConnection) {
-    await peerConnection.setRemoteDescription(sig.payload.sdp);
-  } else if (sig.type === 'ice' && peerConnection && sig.payload.candidate) {
+  if (sig.type === 'answer' && peerConnection && !peerConnection.remoteDescription) {
+    await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
+    if (typeof flushIceCandidates === 'function') await flushIceCandidates(peerConnection);
+  } else if (sig.type === 'ice' && peerConnection && sig.payload?.candidate) {
+    if (!peerConnection.remoteDescription) return;
     try {
       await peerConnection.addIceCandidate(sig.payload.candidate);
     } catch (e) { /* ignore */ }
@@ -840,10 +916,11 @@ async function handleCallSignal(sig) {
 let lastSignalTs = 0;
 function startCallPolling() {
   stopCallPolling();
+  const req = typeof cloudRequestExt === 'function' ? cloudRequestExt : cloudRequest;
   const poll = async () => {
     const user = getCurrentUser();
-    if (!user || !getSyncUrl()) return;
-    const signals = await cloudRequest(`/api/call/signals/${user.id}?since=${lastSignalTs}`);
+    if (!user || !getEffectiveSyncUrl() || !callState.active) return;
+    const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 60000);
     if (Array.isArray(signals)) {
       for (const sig of signals) {
         lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
@@ -852,7 +929,7 @@ function startCallPolling() {
     }
   };
   poll();
-  callPollTimer = setInterval(poll, 1500);
+  callPollTimer = setInterval(poll, 800);
 }
 
 function stopCallPolling() {
@@ -864,23 +941,22 @@ function stopCallPolling() {
 
 // Global signal poll for incoming calls
 function startGlobalCallPolling() {
+  const req = typeof cloudRequestExt === 'function' ? cloudRequestExt : cloudRequest;
   setInterval(async () => {
     const user = getCurrentUser();
     if (!user || !getEffectiveSyncUrl()) return;
-    if (callState.active && !pendingIncomingCall) return;
-    const signals = await cloudRequest(`/api/call/signals/${user.id}?since=${lastSignalTs}`);
+    if (callState.active) return;
+    const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 60000);
     if (!Array.isArray(signals)) return;
     for (const sig of signals) {
       lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
       if (sig.type === 'offer' && !callState.active) {
         await handleCallSignal(sig);
-      } else if (callState.active) {
-        await handleCallSignal(sig);
       } else if (sig.type === 'hangup' && pendingIncomingCall) {
         await handleCallSignal(sig);
       }
     }
-  }, 2000);
+  }, 1500);
 }
 
 // ─── Feature init ────────────────────────────────────────
@@ -929,8 +1005,8 @@ function initExtendedFeatures() {
         showToast('動画ファイルを選択してください');
         return;
       }
-      if (file.size > 15 * 1024 * 1024) {
-        showToast('15MB以下の動画を選択してください');
+      if (file.size > 1024 * 1024 * 1024) {
+        showToast('1GB以下の動画を選択してください');
         return;
       }
       try {
@@ -1045,9 +1121,15 @@ renderAdminUsers = function () {
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
       </div>`;
-    item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
+    item.querySelector('.admin-btn-delete').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (confirm(`「${user.name}」を削除しますか？`)) {
+      if (!confirm(`「${user.name}」を削除しますか？`)) return;
+      if (typeof adminDeleteUser === 'function') {
+        if (await adminDeleteUser(user.id)) {
+          renderAdminUsers();
+          showToast('ユーザーを削除しました');
+        }
+      } else {
         deleteUser(user.id);
         renderAdminUsers();
         showToast('ユーザーを削除しました');
@@ -1115,6 +1197,25 @@ function setupGlobalClickDelegation() {
     },
     'btn-start-transfer-camera': () => startQrScannerForTransfer(),
     'btn-stop-transfer-camera': () => stopTransferScanner(),
+    'btn-redeem-transfer-code': () => {
+      const code = document.getElementById('input-transfer-code')?.value?.trim() || '';
+      if (!code) { showToast('引き継ぎコードを入力してください'); return; }
+      if (typeof redeemTransferCode !== 'function') return;
+      showToast('引き継ぎ中…');
+      redeemTransferCode(code).then(result => {
+        if (result.error) {
+          showToast(result.error);
+          return;
+        }
+        hideModal('modal-transfer-scan');
+        showScreen('main');
+        refreshMainUI();
+        startGlobalSync();
+        if (typeof startPresenceHeartbeat === 'function') startPresenceHeartbeat();
+        if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
+        showToast('引き継ぎが完了しました！');
+      });
+    },
     'btn-line-sticker-shop': () => window.open(LINE_STICKER_SHOP_URL, '_blank'),
     'btn-admin-logout': () => {
       adminLoggedIn = false;

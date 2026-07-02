@@ -1583,12 +1583,30 @@ textarea::placeholder {
 }
 
 /* Force all text: light=black, dark=white (overrides every rule above) */
-html:not([data-theme="dark"]) body * {
+html:not([data-theme="dark"]) body *:not(.message-bubble):not(.message-sender):not(.message-time):not(.read-badge):not(.btn-download-image):not(.message-file-link) {
   color: #000000 !important;
 }
 
-html[data-theme="dark"] body * {
+html[data-theme="dark"] body *:not(.message-bubble):not(.message-sender):not(.message-time):not(.read-badge):not(.btn-download-image):not(.message-file-link) {
   color: #ffffff !important;
+}
+
+.message.sent .message-bubble,
+.message.sent .message-sender,
+.message.sent .message-time,
+.message.sent .read-badge,
+.message.sent .btn-download-image,
+.message.sent .message-file-link {
+  color: #ffffff !important;
+}
+
+.message.received .message-bubble,
+.message.received .message-sender {
+  color: var(--gray-900) !important;
+}
+
+.message.received .message-time {
+  color: var(--gray-500) !important;
 }
 
 html:not([data-theme="dark"]) body input::placeholder,

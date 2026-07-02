@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#1a6fd4">
-  <title>BlueChat v8</title>
+  <title>BlueChat v9</title>
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <style>
@@ -1594,12 +1594,30 @@ textarea::placeholder {
 }
 
 /* Force all text: light=black, dark=white (overrides every rule above) */
-html:not([data-theme="dark"]) body * {
+html:not([data-theme="dark"]) body *:not(.message-bubble):not(.message-sender):not(.message-time):not(.read-badge):not(.btn-download-image):not(.message-file-link) {
   color: #000000 !important;
 }
 
-html[data-theme="dark"] body * {
+html[data-theme="dark"] body *:not(.message-bubble):not(.message-sender):not(.message-time):not(.read-badge):not(.btn-download-image):not(.message-file-link) {
   color: #ffffff !important;
+}
+
+.message.sent .message-bubble,
+.message.sent .message-sender,
+.message.sent .message-time,
+.message.sent .read-badge,
+.message.sent .btn-download-image,
+.message.sent .message-file-link {
+  color: #ffffff !important;
+}
+
+.message.received .message-bubble,
+.message.received .message-sender {
+  color: var(--gray-900) !important;
+}
+
+.message.received .message-time {
+  color: var(--gray-500) !important;
 }
 
 html:not([data-theme="dark"]) body input::placeholder,
@@ -1667,11 +1685,11 @@ html[data-theme="dark"] body textarea::placeholder {
         <p class="tagline">シンプルなチャットアプリ</p>
       </div>
       <div class="onboarding-form">
-        <p class="form-desc">お名前を入力してください。<br>アカウント情報はこのデバイスにのみ保存されます。</p>
+        <p class="form-desc">お名前を入力してください。<br>別のブラウザや端末で使っていた場合は、下の「復元」から同じアカウントを読み込めます。</p>
         <input type="text" id="input-name" placeholder="名前を入力" maxlength="20" autocomplete="off">
         <button id="btn-start" class="btn-primary">はじめる</button>
-        <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:12px">引き継ぎ（QRスキャン）</button>
-        <button type="button" id="btn-cloud-restore-onboarding" class="btn-secondary" style="margin-top:8px">クラウドから復元</button>
+        <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:12px">引き継ぎ（QR / コード）</button>
+        <button type="button" id="btn-cloud-restore-onboarding" class="btn-secondary" style="margin-top:8px">あとから復元（ユーザーID）</button>
       </div>
       <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
     </div>
@@ -1798,7 +1816,7 @@ html[data-theme="dark"] body textarea::placeholder {
         </button>
         <button type="button" id="btn-cloud-restore" class="menu-item">
           <span class="menu-icon">☁️</span>
-          <span>クラウドから復元</span>
+          <span>あとから復元（ユーザーID）</span>
         </button>
         <button id="btn-reset-data" class="menu-item danger">
           <span class="menu-icon">🗑️</span>
@@ -2061,7 +2079,7 @@ html[data-theme="dark"] body textarea::placeholder {
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <h3>引き継ぎQR</h3>
-      <p>新しい端末で「引き継ぎ」を選び、このQRをスキャンしてください。有効期限24時間。データはクラウドにも7日間保存されます。</p>
+      <p>別のブラウザや端末で「引き継ぎ」を選び、このQRをスキャンするか、下のコードを入力してください。QRは24時間有効。クラウドバックアップは30日間保存されます。</p>
       <div id="transfer-qr-canvas" class="qr-canvas-wrap"></div>
       <p id="transfer-code-text" class="invite-code-text"></p>
       <button class="btn-close-modal">閉じる</button>
@@ -2073,12 +2091,18 @@ html[data-theme="dark"] body textarea::placeholder {
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <h3>引き継ぎ</h3>
-      <p>古い端末の引き継ぎQRをスキャンしてください</p>
+      <p>古い端末の引き継ぎQRをスキャンするか、コードを直接入力してください</p>
       <div id="qr-reader-transfer-wrap" class="qr-reader-wrap">
         <div id="qr-reader-transfer"></div>
       </div>
       <button type="button" id="btn-start-transfer-camera" class="btn-primary">カメラを起動</button>
       <button type="button" id="btn-stop-transfer-camera" class="btn-secondary btn-sm">停止</button>
+      <div class="sticker-import" style="margin-top:16px">
+        <p class="form-label">引き継ぎコードを入力</p>
+        <input type="text" id="input-transfer-code" placeholder="bluechat-transfer:..." class="sync-settings input-url" autocomplete="off">
+        <button type="button" id="btn-redeem-transfer-code" class="btn-secondary btn-sm">コードで引き継ぐ</button>
+      </div>
+      <p class="qr-hint" style="margin-top:12px">QRの期限が切れた場合は、マイページの「クラウドから復元」（ユーザーID）も使えます（30日間保存）。</p>
       <button class="btn-close-modal">閉じる</button>
     </div>
   </div>
@@ -2126,6 +2150,7 @@ const CODE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 const INVITE_PREFIX = 'bc:';
 const INVITE_PREFIX_LEGACY = 'bluechat:';
 const SYNC_URL_KEY = 'bluechat_sync_url';
+const SYNC_CONFIGURED_KEY = 'bluechat_sync_configured';
 const DEFAULT_SYNC_URL = 'https://bluechat-sync.onrender.com';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
@@ -2779,8 +2804,12 @@ function getSyncUrl() {
 
 function setSyncUrl(url) {
   const trimmed = (url || '').trim().replace(/\/$/, '');
-  if (trimmed) localStorage.setItem(SYNC_URL_KEY, trimmed);
-  else localStorage.removeItem(SYNC_URL_KEY);
+  if (trimmed) {
+    localStorage.setItem(SYNC_URL_KEY, trimmed);
+    localStorage.setItem(SYNC_CONFIGURED_KEY, '1');
+  } else {
+    localStorage.removeItem(SYNC_URL_KEY);
+  }
 }
 
 function initSyncFromQuery() {
@@ -2790,7 +2819,8 @@ function initSyncFromQuery() {
     setSyncUrl(sync);
     return;
   }
-  if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__' && !localStorage.getItem(SYNC_URL_KEY)) {
+  if (localStorage.getItem(SYNC_CONFIGURED_KEY)) return;
+  if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
     setSyncUrl(DEFAULT_SYNC_URL);
   }
 }
@@ -2839,20 +2869,65 @@ async function cloudDeleteMessage(convId, msgId) {
   return !!(res && res.ok);
 }
 
+const PENDING_MSG_KEY = 'bluechat_pending_msgs';
+
+function getPendingMessageIds(convId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(PENDING_MSG_KEY) || '{}');
+    return new Set(all[convId] || []);
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function trackPendingMessage(convId, msgId) {
+  if (!convId || !msgId) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(PENDING_MSG_KEY) || '{}');
+    if (!all[convId]) all[convId] = [];
+    if (!all[convId].includes(msgId)) all[convId].push(msgId);
+    localStorage.setItem(PENDING_MSG_KEY, JSON.stringify(all));
+  } catch (e) { /* ignore */ }
+}
+
+function untrackPendingMessage(convId, msgId) {
+  if (!convId || !msgId) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(PENDING_MSG_KEY) || '{}');
+    if (!all[convId]) return;
+    all[convId] = all[convId].filter(id => id !== msgId);
+    if (!all[convId].length) delete all[convId];
+    localStorage.setItem(PENDING_MSG_KEY, JSON.stringify(all));
+  } catch (e) { /* ignore */ }
+}
+
+function markMessagePushed(convId, msg) {
+  if (!convId || !msg) return;
+  untrackPendingMessage(convId, msg.id);
+  const key = 'bluechat_last_push_' + convId;
+  const last = parseInt(localStorage.getItem(key) || '0', 10);
+  localStorage.setItem(key, String(Math.max(last, msg.timestamp || Date.now())));
+}
+
 async function syncMessageDeletions(convId) {
   if (!getSyncUrl() || !convId) return;
   const ids = await cloudRequest(`/api/messages/${convId}/ids`);
-  if (!Array.isArray(ids) || ids.length === 0) return;
+  if (!Array.isArray(ids)) return;
 
   const data = getData();
   if (!data.messages[convId] || !data.messages[convId].length) return;
 
   const idSet = new Set(ids);
+  const pendingIds = getPendingMessageIds(convId);
   const key = 'bluechat_last_push_' + convId;
   const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
   const before = data.messages[convId].length;
   data.messages[convId] = data.messages[convId].filter(m => {
-    if (idSet.has(m.id)) return true;
+    if (pendingIds.has(m.id)) return true;
+    if (idSet.has(m.id)) {
+      untrackPendingMessage(convId, m.id);
+      return true;
+    }
     return (m.timestamp || 0) > lastPush;
   });
   if (data.messages[convId].length !== before) {
@@ -2862,11 +2937,16 @@ async function syncMessageDeletions(convId) {
 }
 
 async function cloudPushMessage(convId, msg) {
-  if (!getSyncUrl()) return;
-  await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
+  if (!getSyncUrl()) return false;
+  const res = await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
     method: 'PUT',
     body: JSON.stringify(msg)
   });
+  if (res && res.ok !== false) {
+    markMessagePushed(convId, msg);
+    return true;
+  }
+  return false;
 }
 
 async function cloudFetchMessages(convId, since = 0) {
@@ -2905,16 +2985,16 @@ async function syncPushLocalMessages(convId) {
   if (!getSyncUrl() || !convId) return;
   const key = 'bluechat_last_push_' + convId;
   const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
-  const pending = getMessages(convId).filter(m => (m.timestamp || 0) > lastPush);
+  const pendingIds = getPendingMessageIds(convId);
+  const pending = getMessages(convId).filter(m =>
+    pendingIds.has(m.id) || (m.timestamp || 0) > lastPush
+  );
   if (!pending.length) return;
   const conv = getData().conversations[convId];
   if (conv) await cloudPushConversation(conv);
-  let maxTs = lastPush;
   for (const msg of pending) {
     await cloudPushMessage(convId, msg);
-    maxTs = Math.max(maxTs, msg.timestamp || 0);
   }
-  localStorage.setItem(key, String(maxTs));
 }
 
 async function syncConversation(convId) {
@@ -3006,19 +3086,18 @@ async function syncFriendships() {
       const before = getUser(friendId)?.avatar;
       ensureLocalUser(remoteUser);
       if (getUser(friendId)?.avatar !== before) avatarsUpdated = true;
-      if (remoteUser.title !== undefined || remoteUser.suspendedUntil || remoteUser.banned !== undefined || remoteUser.premium !== undefined) {
-        const u = getUser(friendId);
-        if (u) {
-          if (remoteUser.title !== undefined) {
-            if (remoteUser.title && remoteUser.title.text) u.title = remoteUser.title;
-            else delete u.title;
-          }
-          if (remoteUser.suspendedUntil) u.suspendedUntil = remoteUser.suspendedUntil;
-          if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
-          if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
-          if (remoteUser.premium !== undefined) u.premium = remoteUser.premium;
-          saveData(getData());
+      const u = getUser(friendId);
+      if (u) {
+        if (remoteUser.title !== undefined) {
+          if (remoteUser.title && remoteUser.title.text) u.title = remoteUser.title;
+          else delete u.title;
         }
+        if (remoteUser.suspendedUntil !== undefined) u.suspendedUntil = remoteUser.suspendedUntil;
+        if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
+        if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
+        if (remoteUser.premium !== undefined) u.premium = remoteUser.premium;
+        if (remoteUser.name) u.name = remoteUser.name;
+        saveData(getData());
       }
     }
     if (!areFriends(user.id, friendId)) {
@@ -3080,13 +3159,11 @@ function refreshUIAfterSync() {
 
 async function cloudSyncAfterSend(convId, msg) {
   if (!getSyncUrl()) return;
+  trackPendingMessage(convId, msg.id);
   const data = getData();
   const conv = data.conversations[convId];
   if (conv) await cloudPushConversation(conv);
   await cloudPushMessage(convId, msg);
-  const key = 'bluechat_last_push_' + convId;
-  const last = parseInt(localStorage.getItem(key) || '0', 10);
-  localStorage.setItem(key, String(Math.max(last, msg.timestamp || Date.now())));
 }
 
 function startGlobalSync() {
@@ -3106,15 +3183,13 @@ function stopGlobalSync() {
 function startChatSync(convId) {
   stopChatSync();
   if (!getSyncUrl() || !convId) return;
-  syncConversation(convId).then((added) => {
-    if (added > 0 && currentConvId === convId) renderMessages(convId);
+  syncConversation(convId).then(() => {
+    if (currentConvId === convId) renderMessages(convId);
   });
   chatSyncTimer = setInterval(async () => {
-    const added = await syncConversation(convId);
-    if (added > 0) {
-      if (currentConvId === convId) renderMessages(convId);
-      renderChatList();
-    }
+    await syncConversation(convId);
+    if (currentConvId === convId) renderMessages(convId);
+    renderChatList();
   }, 2000);
 }
 
@@ -3125,7 +3200,9 @@ function stopChatSync() {
   }
 }
 
-function updateSyncStatusUI() {
+let syncStatusChecked = false;
+
+function updateSyncStatusUI(forceCheck) {
   const status = document.getElementById('sync-status');
   const input = document.getElementById('input-sync-url');
   if (!status || !input) return;
@@ -3135,9 +3212,16 @@ function updateSyncStatusUI() {
     status.classList.add('warn');
     return;
   }
+  if (!forceCheck && syncStatusChecked) {
+    status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
+    status.classList.remove('warn');
+    if (!globalSyncTimer) startGlobalSync();
+    return;
+  }
   status.textContent = '接続確認中…（Renderは起動に最大1分かかることがあります）';
   status.classList.add('warn');
   testSyncConnection(5).then((ok) => {
+    syncStatusChecked = !!ok;
     if (ok) {
       status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
       status.classList.remove('warn');
@@ -3261,6 +3345,7 @@ function pushMessage(convId, senderId, msgData) {
   conv.lastMessageSenderId = senderId;
   try {
     saveData(data);
+    if (getSyncUrl()) trackPendingMessage(convId, msg.id);
     cloudSyncAfterSend(convId, msg);
     return msg;
   } catch (e) {
@@ -3388,7 +3473,8 @@ function scrollMessagesToBottom() {
 function appendMessageToChat(msg, convId) {
   const user = getCurrentUser();
   const container = document.getElementById('messages-container');
-  if (!user || !container) return;
+  if (!user || !container || !msg) return;
+  if (container.querySelector(`[data-msg-id="${msg.id}"]`)) return;
 
   const messages = getMessages(convId);
   const prev = messages.length > 1 ? messages[messages.length - 2] : null;
@@ -3403,7 +3489,10 @@ function appendMessageToChat(msg, convId) {
   }
 
   const el = createMessageElement(msg, convId, user);
-  if (el) container.appendChild(el);
+  if (el) {
+    el.dataset.msgId = msg.id;
+    container.appendChild(el);
+  }
   scrollMessagesToBottom(true);
 }
 
@@ -3563,6 +3652,7 @@ function renderMessages(convId) {
   if (!user) return;
   const messages = getMessages(convId);
   const container = document.getElementById('messages-container');
+  if (!container) return;
   container.innerHTML = '';
 
   let lastDate = '';
@@ -3577,7 +3667,10 @@ function renderMessages(convId) {
     }
 
     const el = createMessageElement(msg, convId, user);
-    if (el) container.appendChild(el);
+    if (el) {
+      el.dataset.msgId = msg.id;
+      container.appendChild(el);
+    }
   });
 }
 
@@ -3697,9 +3790,16 @@ function renderAdminUsers() {
       e.stopPropagation();
       showAdminUserConversations(user.id);
     });
-    item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
+    item.querySelector('.admin-btn-delete').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (confirm(`「${user.name}」を削除しますか？関連する会話も削除されます。`)) {
+      if (!confirm(`「${user.name}」を削除しますか？関連する会話も削除されます。`)) return;
+      if (typeof adminDeleteUser === 'function') {
+        if (await adminDeleteUser(user.id)) {
+          renderAdminUsers();
+          renderAdminConversations();
+          showToast('ユーザーを削除しました');
+        }
+      } else {
         deleteUser(user.id);
         renderAdminUsers();
         renderAdminConversations();
@@ -4192,8 +4292,10 @@ function init() {
     setSyncUrl(url);
     stopGlobalSync();
     stopChatSync();
+    syncStatusChecked = false;
     if (url) {
       const ok = await testSyncConnection();
+      syncStatusChecked = !!ok;
       if (ok) {
         showToast('同期サーバーを設定しました');
         startGlobalSync();
@@ -4203,9 +4305,10 @@ function init() {
         showToast('同期サーバーに接続できません');
       }
     } else {
+      localStorage.removeItem(SYNC_CONFIGURED_KEY);
       showToast('同期をオフにしました');
     }
-    updateSyncStatusUI();
+    updateSyncStatusUI(true);
   });
 
   // Profile image
@@ -4280,6 +4383,7 @@ const STICKER_PACKS = [
 ];
 
 let callPollTimer = null;
+let callConnectTimeout = null;
 let peerConnection = null;
 let localStream = null;
 let callState = { active: false, type: null, remoteUserId: null, convId: null };
@@ -4632,7 +4736,12 @@ getMessageContentHtml = getMessageContentHtmlExt;
 const _mergeRemoteMessageOrig = mergeRemoteMessage;
 mergeRemoteMessage = function (convId, remoteMsg) {
   const added = _mergeRemoteMessageOrig(convId, remoteMsg);
-  if (added) onNewMessageReceived(convId, remoteMsg);
+  if (added) {
+    onNewMessageReceived(convId, remoteMsg);
+    if (currentScreen === 'chat' && currentConvId === convId) {
+      appendMessageToChat(remoteMsg, convId);
+    }
+  }
   return added;
 };
 
@@ -4650,6 +4759,7 @@ renderMessages = function (convId) {
   if (!user) return;
   const messages = getMessages(convId);
   const container = document.getElementById('messages-container');
+  if (!container) return;
   container.innerHTML = '';
   let lastDate = '';
   messages.forEach(msg => {
@@ -4662,9 +4772,12 @@ renderMessages = function (convId) {
       container.appendChild(sep);
     }
     const el = createMessageElement(msg, convId, user);
-    if (el) container.appendChild(el);
+    if (el) {
+      el.dataset.msgId = msg.id;
+      container.appendChild(el);
+    }
   });
-  scrollMessagesToBottom();
+  scrollMessagesToBottom(true);
 };
 
 // Patch chat sync to include reads
@@ -4774,7 +4887,8 @@ function importTransferBackup(backup) {
     }
     throw e;
   }
-  if (backup.syncUrl) setSyncUrl(backup.syncUrl);
+  if (backup.syncUrl && !localStorage.getItem(SYNC_CONFIGURED_KEY)) setSyncUrl(backup.syncUrl);
+  localStorage.removeItem(ACTIVITY_VERSION_KEY);
 }
 
 async function createTransferSession() {
@@ -4891,10 +5005,11 @@ function updateCallButtons(convId) {
 async function sendCallSignal(toUserId, type, payload) {
   const user = getCurrentUser();
   if (!user || !getEffectiveSyncUrl()) return;
-  await cloudRequest('/api/call/signal', {
+  const req = typeof cloudRequestExt === 'function' ? cloudRequestExt : cloudRequest;
+  await req('/api/call/signal', {
     method: 'POST',
     body: JSON.stringify({ from: user.id, to: toUserId, type, payload, timestamp: Date.now() })
-  });
+  }, 60000);
 }
 
 function getOtherUserIdInConv(convId) {
@@ -4910,6 +5025,80 @@ function showCallOverlay(title, sub) {
   document.getElementById('modal-call').classList.remove('hidden');
 }
 
+function updateCallOverlaySub(sub) {
+  const el = document.getElementById('call-overlay-sub');
+  if (el) el.textContent = sub || '';
+}
+
+function normalizeSdp(sdp) {
+  if (!sdp) return null;
+  if (typeof sdp === 'object' && sdp.type && sdp.sdp) return sdp;
+  return sdp;
+}
+
+function rewindCallSignalSince() {
+  lastSignalTs = Math.min(lastSignalTs, Date.now() - 30000);
+}
+
+function clearCallConnectTimeout() {
+  if (callConnectTimeout) {
+    clearTimeout(callConnectTimeout);
+    callConnectTimeout = null;
+  }
+}
+
+function startCallConnectTimeout(callType) {
+  clearCallConnectTimeout();
+  callConnectTimeout = setTimeout(() => {
+    if (!peerConnection || !callState.active) return;
+    const ice = peerConnection.iceConnectionState;
+    if (ice === 'connected' || ice === 'completed') return;
+    updateCallOverlaySub('接続に失敗しました');
+    showToast('通話の接続がタイムアウトしました');
+    setTimeout(() => endCall(), 2000);
+  }, 35000);
+}
+
+function setupCallConnectionHandlers(pc, callType) {
+  const connectedLabel = callType === 'video' ? 'ビデオ通話中' : '音声通話中';
+  const onConnected = () => {
+    updateCallOverlaySub(connectedLabel);
+    clearCallConnectTimeout();
+  };
+  pc.oniceconnectionstatechange = () => {
+    const s = pc.iceConnectionState;
+    if (s === 'connected' || s === 'completed') onConnected();
+    else if (s === 'failed') {
+      updateCallOverlaySub('接続に失敗しました');
+      showToast('通話の接続に失敗しました');
+      setTimeout(() => endCall(), 2000);
+    } else if (s === 'checking' || s === 'new') {
+      updateCallOverlaySub('接続中…');
+    }
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') onConnected();
+    else if (pc.connectionState === 'failed') {
+      showToast('通話を確立できませんでした');
+      setTimeout(() => endCall(), 2000);
+    }
+  };
+}
+
+function attachCallPeerHandlers(pc, remoteUserId, callType) {
+  setupCallConnectionHandlers(pc, callType);
+  pc.ontrack = (e) => {
+    const remoteV = document.getElementById('call-remote-video');
+    if (remoteV) {
+      remoteV.srcObject = e.streams[0];
+      remoteV.classList.toggle('hidden', callType !== 'video');
+    }
+  };
+  pc.onicecandidate = (e) => {
+    if (e.candidate) sendCallSignal(remoteUserId, 'ice', { candidate: e.candidate.toJSON() });
+  };
+}
+
 function hideCallOverlay() {
   document.getElementById('modal-call').classList.add('hidden');
   const localV = document.getElementById('call-local-video');
@@ -4919,6 +5108,7 @@ function hideCallOverlay() {
 }
 
 async function endCall() {
+  clearCallConnectTimeout();
   if (callState.remoteUserId) {
     await sendCallSignal(callState.remoteUserId, 'hangup', {});
   }
@@ -4998,22 +5188,16 @@ async function acceptIncomingOffer(sig) {
     }
   }
 
-  peerConnection.ontrack = (e) => {
-    const remoteV = document.getElementById('call-remote-video');
-    if (remoteV) {
-      remoteV.srcObject = e.streams[0];
-      remoteV.classList.toggle('hidden', callType !== 'video');
-    }
-  };
-  peerConnection.onicecandidate = (e) => {
-    if (e.candidate) sendCallSignal(sig.from, 'ice', { candidate: e.candidate });
-  };
+  attachCallPeerHandlers(peerConnection, sig.from, callType);
 
-  await peerConnection.setRemoteDescription(sig.payload.sdp);
+  await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
   await sendCallSignal(sig.from, 'answer', { sdp: answer });
-  showCallOverlay(callType === 'video' ? 'ビデオ通話中' : '音声通話中', '');
+  if (typeof flushIceCandidates === 'function') await flushIceCandidates(peerConnection);
+  rewindCallSignalSince();
+  showCallOverlay(callType === 'video' ? 'ビデオ通話中' : '音声通話中', '接続中…');
+  startCallConnectTimeout(callType);
   startCallPolling();
 }
 
@@ -5060,21 +5244,14 @@ async function startCall(type) {
     localV.classList.remove('hidden');
   } else if (localV) localV.classList.add('hidden');
 
-  peerConnection.ontrack = (e) => {
-    const remoteV = document.getElementById('call-remote-video');
-    if (remoteV) {
-      remoteV.srcObject = e.streams[0];
-      remoteV.classList.toggle('hidden', type !== 'video');
-    }
-  };
-  peerConnection.onicecandidate = (e) => {
-    if (e.candidate) sendCallSignal(remoteId, 'ice', { candidate: e.candidate });
-  };
+  attachCallPeerHandlers(peerConnection, remoteId, type);
 
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
   await sendCallSignal(remoteId, 'offer', { sdp: offer, callType: type });
+  rewindCallSignalSince();
   showCallOverlay(type === 'video' ? 'ビデオ通話中' : '音声通話中', '接続中…');
+  startCallConnectTimeout(type);
   startCallPolling();
   showToast('発信中…');
 }
@@ -5099,9 +5276,11 @@ async function handleCallSignal(sig) {
     return;
   }
 
-  if (sig.type === 'answer' && peerConnection) {
-    await peerConnection.setRemoteDescription(sig.payload.sdp);
-  } else if (sig.type === 'ice' && peerConnection && sig.payload.candidate) {
+  if (sig.type === 'answer' && peerConnection && !peerConnection.remoteDescription) {
+    await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
+    if (typeof flushIceCandidates === 'function') await flushIceCandidates(peerConnection);
+  } else if (sig.type === 'ice' && peerConnection && sig.payload?.candidate) {
+    if (!peerConnection.remoteDescription) return;
     try {
       await peerConnection.addIceCandidate(sig.payload.candidate);
     } catch (e) { /* ignore */ }
@@ -5111,10 +5290,11 @@ async function handleCallSignal(sig) {
 let lastSignalTs = 0;
 function startCallPolling() {
   stopCallPolling();
+  const req = typeof cloudRequestExt === 'function' ? cloudRequestExt : cloudRequest;
   const poll = async () => {
     const user = getCurrentUser();
-    if (!user || !getSyncUrl()) return;
-    const signals = await cloudRequest(`/api/call/signals/${user.id}?since=${lastSignalTs}`);
+    if (!user || !getEffectiveSyncUrl() || !callState.active) return;
+    const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 60000);
     if (Array.isArray(signals)) {
       for (const sig of signals) {
         lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
@@ -5123,7 +5303,7 @@ function startCallPolling() {
     }
   };
   poll();
-  callPollTimer = setInterval(poll, 1500);
+  callPollTimer = setInterval(poll, 800);
 }
 
 function stopCallPolling() {
@@ -5135,23 +5315,22 @@ function stopCallPolling() {
 
 // Global signal poll for incoming calls
 function startGlobalCallPolling() {
+  const req = typeof cloudRequestExt === 'function' ? cloudRequestExt : cloudRequest;
   setInterval(async () => {
     const user = getCurrentUser();
     if (!user || !getEffectiveSyncUrl()) return;
-    if (callState.active && !pendingIncomingCall) return;
-    const signals = await cloudRequest(`/api/call/signals/${user.id}?since=${lastSignalTs}`);
+    if (callState.active) return;
+    const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 60000);
     if (!Array.isArray(signals)) return;
     for (const sig of signals) {
       lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
       if (sig.type === 'offer' && !callState.active) {
         await handleCallSignal(sig);
-      } else if (callState.active) {
-        await handleCallSignal(sig);
       } else if (sig.type === 'hangup' && pendingIncomingCall) {
         await handleCallSignal(sig);
       }
     }
-  }, 2000);
+  }, 1500);
 }
 
 // ─── Feature init ────────────────────────────────────────
@@ -5200,8 +5379,8 @@ function initExtendedFeatures() {
         showToast('動画ファイルを選択してください');
         return;
       }
-      if (file.size > 15 * 1024 * 1024) {
-        showToast('15MB以下の動画を選択してください');
+      if (file.size > 1024 * 1024 * 1024) {
+        showToast('1GB以下の動画を選択してください');
         return;
       }
       try {
@@ -5316,9 +5495,15 @@ renderAdminUsers = function () {
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
       </div>`;
-    item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
+    item.querySelector('.admin-btn-delete').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (confirm(`「${user.name}」を削除しますか？`)) {
+      if (!confirm(`「${user.name}」を削除しますか？`)) return;
+      if (typeof adminDeleteUser === 'function') {
+        if (await adminDeleteUser(user.id)) {
+          renderAdminUsers();
+          showToast('ユーザーを削除しました');
+        }
+      } else {
         deleteUser(user.id);
         renderAdminUsers();
         showToast('ユーザーを削除しました');
@@ -5386,6 +5571,25 @@ function setupGlobalClickDelegation() {
     },
     'btn-start-transfer-camera': () => startQrScannerForTransfer(),
     'btn-stop-transfer-camera': () => stopTransferScanner(),
+    'btn-redeem-transfer-code': () => {
+      const code = document.getElementById('input-transfer-code')?.value?.trim() || '';
+      if (!code) { showToast('引き継ぎコードを入力してください'); return; }
+      if (typeof redeemTransferCode !== 'function') return;
+      showToast('引き継ぎ中…');
+      redeemTransferCode(code).then(result => {
+        if (result.error) {
+          showToast(result.error);
+          return;
+        }
+        hideModal('modal-transfer-scan');
+        showScreen('main');
+        refreshMainUI();
+        startGlobalSync();
+        if (typeof startPresenceHeartbeat === 'function') startPresenceHeartbeat();
+        if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
+        showToast('引き継ぎが完了しました！');
+      });
+    },
     'btn-line-sticker-shop': () => window.open(LINE_STICKER_SHOP_URL, '_blank'),
     'btn-admin-logout': () => {
       adminLoggedIn = false;
@@ -6106,10 +6310,9 @@ async function submitFeedback(type, text) {
     timestamp: Date.now()
   };
 
-  const result = await cloudRequest('/api/feedback', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
+  const result = await (typeof cloudRequestExt === 'function'
+    ? cloudRequestExt('/api/feedback', { method: 'POST', body: JSON.stringify(payload) }, 60000)
+    : cloudRequest('/api/feedback', { method: 'POST', body: JSON.stringify(payload) }));
 
   if (!result || !result.ok) {
     showToast('送信に失敗しました。同期サーバーとRenderの更新を確認してください');
@@ -6269,9 +6472,15 @@ renderAdminUsers = function () {
         e.stopPropagation();
         renderSuperAdminTitlePanel(user.id);
       });
-      item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
+      item.querySelector('.admin-btn-delete').addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (confirm(`「${user.name}」を削除しますか？`)) {
+        if (!confirm(`「${user.name}」を削除しますか？`)) return;
+        if (typeof adminDeleteUser === 'function') {
+          if (await adminDeleteUser(user.id)) {
+            renderAdminUsers();
+            showToast('ユーザーを削除しました');
+          }
+        } else {
           deleteUser(user.id);
           renderAdminUsers();
           showToast('ユーザーを削除しました');
@@ -6369,7 +6578,7 @@ onAppInit(() => {
  * BlueChat v6 — クラウド復元・同期改善・オンライン表示・LINEスタンプ修正
  */
 var APP_VERSION = 'v6';
-const CLOUD_BACKUP_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const CLOUD_BACKUP_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const CLOUD_BACKUP_DIRECT_MAX = 350000;
 const PRESENCE_ONLINE_MS = 90000;
 const PRESENCE_HEARTBEAT_MS = 30000;
@@ -6436,7 +6645,7 @@ async function restoreFromCloudBackup(userId, password) {
 }
 
 function showCloudRestoreModal() {
-  const userId = prompt('復元するアカウントのユーザーIDを入力してください\n（マイページに表示されています）');
+  const userId = prompt('復元するアカウントのユーザーIDを入力してください\n（マイページに表示されています）\n\n別ブラウザで使っていた場合も、同じIDで復元できます');
   if (!userId || !userId.trim()) return;
   const password = prompt('引き継ぎパスワード（設定していない場合は空欄でOK）');
   if (password === null) return;
@@ -6597,6 +6806,8 @@ async function importLineStickerPackV6(url) {
     stickers: result.stickers.map(s => ({ type: 'image', src: s.url, emoji: s.emoji || '🎨' }))
   };
   saveCustomStickerPack(pack);
+  if (typeof pushUserStickerPacksToServer === 'function') pushUserStickerPacksToServer().catch(() => {});
+  if (typeof uploadCloudBackup === 'function') uploadCloudBackup().catch(() => {});
   showToast(`スタンプ「${pack.name}」を追加しました（${pack.stickers.length}個）`);
   return pack;
 }
@@ -6804,7 +7015,16 @@ const RTC_CONFIG_V7 = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
-    { urls: 'stun:global.stun.twilio.com:3478' }
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ],
   iceCandidatePoolSize: 10
 };
@@ -7006,7 +7226,11 @@ async function adminSuspendUserHours(userId, hours) {
 // ─── Sync on meaningful activity only (no constant reload) ───
 async function handleRemoteActivity() {
   await syncAllConversations();
+  if (typeof syncCurrentUserModeration === 'function') await syncCurrentUserModeration();
+  if (typeof syncUserDataAcrossBrowsers === 'function') await syncUserDataAcrossBrowsers();
   if (currentTab === 'notices') await renderAnnouncements();
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+  else refreshMainUI();
 }
 
 function startSyncVersionPolling() {
@@ -7016,12 +7240,12 @@ function startSyncVersionPolling() {
     const res = await cloudRequest('/api/activity-version');
     if (!res || res.version === undefined) return;
     const last = parseInt(localStorage.getItem(ACTIVITY_VERSION_KEY) || '0', 10);
-    if (last > 0 && res.version > last) {
+    if (res.version > last) {
       localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
       await handleRemoteActivity();
       return;
     }
-    localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
+    if (last === 0) localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
   };
   poll();
   syncVersionTimer = setInterval(poll, ACTIVITY_POLL_MS);
@@ -7047,10 +7271,13 @@ function markAnnouncementRead(annId) {
 
 async function fetchAnnouncements() {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return [];
+  const syncBase = typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl();
+  if (!user || !syncBase) return [];
   const groups = getUserConversations(user.id).filter(c => c.type === 'group').map(c => c.id);
   const url = `/api/announcements?userId=${encodeURIComponent(user.id)}&groupIds=${encodeURIComponent(groups.join(','))}`;
-  const list = await cloudRequest(url);
+  const list = await (typeof cloudRequestExt === 'function'
+    ? cloudRequestExt(url)
+    : cloudRequest(url));
   return Array.isArray(list) ? list : [];
 }
 
@@ -7375,9 +7602,15 @@ handleCallSignal = async function (sig) {
     return;
   }
   await _handleCallSignalV7(sig);
-  if (peerConnection && (sig.type === 'answer' || (sig.type === 'offer' && callState.active))) {
+  if (peerConnection && sig.type === 'answer' && peerConnection.remoteDescription) {
     await flushIceCandidates(peerConnection);
   }
+};
+
+const _endCallV7 = endCall;
+endCall = async function () {
+  iceCandidateQueue.length = 0;
+  return _endCallV7();
 };
 
 // ─── Notification guide for unsupported devices ────────────
@@ -7503,7 +7736,7 @@ function initV7Features() {
   bindClick('btn-notify-guide', () => showNotificationGuide());
   bindClick('btn-admin-post-notice', () => showAdminPostNoticeModal());
   bindClick('btn-refresh-notices', () => renderAnnouncements());
-  bindClick('btn-retry-sync', () => updateSyncStatusUI());
+  bindClick('btn-retry-sync', () => updateSyncStatusUI(true));
   bindClick('btn-admin-refresh-users', () => renderAdminUsers());
 
   const adminSearch = document.getElementById('input-admin-user-search');
@@ -7715,11 +7948,215 @@ function bindChatsTabOnMainOpen() {
   }
 }
 
+// ─── Sticker sync across browsers + cloud merge ───────────
+const STICKER_SYNC_TS_KEY = 'bluechat_stickers_sync_ts';
+const CLOUD_MERGE_TS_KEY = 'bluechat_cloud_merged_at';
+
+function mergeStickerPackLists(local, remote) {
+  const byId = new Map();
+  (local || []).forEach(p => { if (p && p.id) byId.set(p.id, p); });
+  (remote || []).forEach(p => { if (p && p.id) byId.set(p.id, p); });
+  return [...byId.values()];
+}
+
+async function pushUserStickerPacksToServer() {
+  const user = getCurrentUser();
+  if (!user || !getEffectiveSyncUrl()) return false;
+  const packs = typeof getCustomStickerPacks === 'function' ? getCustomStickerPacks() : [];
+  const updatedAt = Date.now();
+  const result = await cloudRequestExt(`/api/user-stickers/${user.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ packs, updatedAt })
+  });
+  if (result && result.ok !== false) {
+    localStorage.setItem(STICKER_SYNC_TS_KEY, String(updatedAt));
+    return true;
+  }
+  return false;
+}
+
+async function pullUserStickerPacksFromServer() {
+  const user = getCurrentUser();
+  if (!user || !getEffectiveSyncUrl()) return;
+  const remote = await cloudRequestExt(`/api/user-stickers/${user.id}`);
+  if (!remote || !Array.isArray(remote.packs)) return;
+  const data = getData();
+  const localPacks = data.customStickerPacks || [];
+  const merged = mergeStickerPackLists(localPacks, remote.packs);
+  const localTs = parseInt(localStorage.getItem(STICKER_SYNC_TS_KEY) || '0', 10);
+  const remoteTs = remote.updatedAt || 0;
+  if (JSON.stringify(merged) !== JSON.stringify(localPacks)) {
+    data.customStickerPacks = merged;
+    saveData(data);
+    if (typeof renderStickerPicker === 'function') renderStickerPicker();
+  }
+  if (remoteTs > localTs) {
+    localStorage.setItem(STICKER_SYNC_TS_KEY, String(remoteTs));
+  } else if (localTs > remoteTs) {
+    await pushUserStickerPacksToServer();
+  }
+}
+
+async function tryAutoCloudStickerMerge() {
+  const user = getCurrentUser();
+  if (!user || !getEffectiveSyncUrl() || typeof fetchCloudBackup !== 'function') return;
+  const remote = await fetchCloudBackup(user.id);
+  if (!remote || !remote.backup || !remote.backup.data) return;
+  const lastMerged = parseInt(localStorage.getItem(CLOUD_MERGE_TS_KEY) || '0', 10);
+  if ((remote.updatedAt || 0) <= lastMerged) return;
+  const remotePacks = remote.backup.data.customStickerPacks || [];
+  if (remotePacks.length) {
+    const data = getData();
+    const merged = mergeStickerPackLists(data.customStickerPacks || [], remotePacks);
+    if (JSON.stringify(merged) !== JSON.stringify(data.customStickerPacks || [])) {
+      data.customStickerPacks = merged;
+      saveData(data);
+      if (typeof renderStickerPicker === 'function') renderStickerPicker();
+    }
+    await pushUserStickerPacksToServer();
+  }
+  localStorage.setItem(CLOUD_MERGE_TS_KEY, String(remote.updatedAt || Date.now()));
+}
+
+async function syncUserDataAcrossBrowsers() {
+  await pullUserStickerPacksFromServer();
+  await tryAutoCloudStickerMerge();
+}
+
+if (typeof saveCustomStickerPack === 'function') {
+  const _saveCustomStickerPackV8 = saveCustomStickerPack;
+  saveCustomStickerPack = function (pack) {
+    _saveCustomStickerPackV8(pack);
+    pushUserStickerPacksToServer().catch(() => {});
+    if (typeof uploadCloudBackup === 'function') uploadCloudBackup().catch(() => {});
+  };
+}
+
+if (typeof deleteCustomStickerPack === 'function') {
+  const _deleteCustomStickerPackV8 = deleteCustomStickerPack;
+  deleteCustomStickerPack = function (packId) {
+    _deleteCustomStickerPackV8(packId);
+    pushUserStickerPacksToServer().catch(() => {});
+    if (typeof uploadCloudBackup === 'function') uploadCloudBackup().catch(() => {});
+  };
+}
+
+const _startGlobalSyncV8 = startGlobalSync;
+startGlobalSync = function () {
+  _startGlobalSyncV8();
+  syncUserDataAcrossBrowsers().catch(() => {});
+};
+
 onAppInit(() => {
   applyV8Branding();
   bindChatsTabOnMainOpen();
   requestAnimationFrame(showChatsTab);
-  repairAllConversationHistory();
+  const user = getCurrentUser();
+  if (user && getEffectiveSyncUrl()) {
+    syncUserDataAcrossBrowsers().catch(() => {});
+    if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
+  }
+});
+
+
+/**
+ * BlueChat v9 — 同期・称号・通話・管理者削除・配信の修正
+ */
+var APP_VERSION = 'v9';
+
+const TITLE_MAX_LEN = 10;
+
+function applyV9Branding() {
+  const title = 'BlueChat v9';
+  document.title = title;
+  const headerTitle = document.getElementById('header-title');
+  if (headerTitle) headerTitle.textContent = title;
+  const logoTitle = document.querySelector('.logo-large h1');
+  if (logoTitle) logoTitle.textContent = title;
+}
+
+function normalizeTitleText(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.length > TITLE_MAX_LEN) {
+    showToast(`称号は${TITLE_MAX_LEN}文字までです`);
+    return trimmed.slice(0, TITLE_MAX_LEN);
+  }
+  return trimmed;
+}
+
+async function adminDeleteUser(userId) {
+  const uid = String(userId);
+  if (getEffectiveSyncUrl()) {
+    const res = await cloudRequestExt(`/api/users/${uid}`, { method: 'DELETE' }, 60000);
+    if (!res || !res.ok) {
+      showToast('サーバーからの削除に失敗しました');
+      return false;
+    }
+  }
+  deleteUser(uid);
+  return true;
+}
+
+async function repairConversationHistoryOnce() {
+  const user = getCurrentUser();
+  if (!user || !getEffectiveSyncUrl()) return;
+  const key = 'bluechat_history_repaired_' + user.id;
+  if (localStorage.getItem(key)) return;
+  const convs = getUserConversations(user.id);
+  for (const conv of convs) {
+    await syncConversation(conv.id);
+  }
+  localStorage.setItem(key, '1');
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+}
+
+const _setUserTitleV9 = setUserTitle;
+setUserTitle = async function (userId, text, color) {
+  return _setUserTitleV9(userId, normalizeTitleText(text), color);
+};
+
+renderSuperAdminTitlePanel = async function (userId) {
+  const user = getUser(userId);
+  if (!user) return;
+  const hint = user.title?.text
+    ? `現在の称号: ${user.title.text}（空欄で削除・${TITLE_MAX_LEN}文字まで）`
+    : `称号なし（${TITLE_MAX_LEN}文字まで）`;
+  const text = prompt(`${hint}\n\n称号の文字`, user.title?.text || '');
+  if (text === null) return;
+  const normalized = normalizeTitleText(text);
+  if (text.trim() && !normalized) return;
+  let color = user.title?.color || '#1a6fd4';
+  if (normalized) {
+    const picked = await pickTitleColor(color);
+    if (picked === null) return;
+    color = picked;
+  }
+  const ok = await setUserTitle(userId, normalized, color);
+  renderAdminUsers();
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+  else refreshMainUI();
+  showToast(ok ? '称号を更新しました（全端末に反映）' : '称号を保存しましたがサーバー反映に失敗しました');
+};
+
+// 称号色: 既存 + ゴールド / シルバー / ゴールドブルー / シルバーブルー
+TITLE_COLOR_PALETTE.push(
+  { name: 'ゴールド', color: '#d4af37' },
+  { name: 'シルバー', color: '#c0c0c0' },
+  { name: 'ゴールドブルー', color: '#3d7ea6' },
+  { name: 'シルバーブルー', color: '#7eb8da' }
+);
+
+const _importTransferBackupV9 = importTransferBackup;
+importTransferBackup = function (backup) {
+  _importTransferBackupV9(backup);
+  localStorage.removeItem(ACTIVITY_VERSION_KEY);
+  localStorage.removeItem('bluechat_history_repaired_' + (getCurrentUser()?.id || ''));
+};
+
+onAppInit(() => {
+  applyV9Branding();
+  repairConversationHistoryOnce();
 });
 
   </script>

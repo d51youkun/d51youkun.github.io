@@ -168,9 +168,112 @@ function bindChatsTabOnMainOpen() {
   }
 }
 
+// ─── Sticker sync across browsers + cloud merge ───────────
+const STICKER_SYNC_TS_KEY = 'bluechat_stickers_sync_ts';
+const CLOUD_MERGE_TS_KEY = 'bluechat_cloud_merged_at';
+
+function mergeStickerPackLists(local, remote) {
+  const byId = new Map();
+  (local || []).forEach(p => { if (p && p.id) byId.set(p.id, p); });
+  (remote || []).forEach(p => { if (p && p.id) byId.set(p.id, p); });
+  return [...byId.values()];
+}
+
+async function pushUserStickerPacksToServer() {
+  const user = getCurrentUser();
+  if (!user || !getEffectiveSyncUrl()) return false;
+  const packs = typeof getCustomStickerPacks === 'function' ? getCustomStickerPacks() : [];
+  const updatedAt = Date.now();
+  const result = await cloudRequestExt(`/api/user-stickers/${user.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ packs, updatedAt })
+  });
+  if (result && result.ok !== false) {
+    localStorage.setItem(STICKER_SYNC_TS_KEY, String(updatedAt));
+    return true;
+  }
+  return false;
+}
+
+async function pullUserStickerPacksFromServer() {
+  const user = getCurrentUser();
+  if (!user || !getEffectiveSyncUrl()) return;
+  const remote = await cloudRequestExt(`/api/user-stickers/${user.id}`);
+  if (!remote || !Array.isArray(remote.packs)) return;
+  const data = getData();
+  const localPacks = data.customStickerPacks || [];
+  const merged = mergeStickerPackLists(localPacks, remote.packs);
+  const localTs = parseInt(localStorage.getItem(STICKER_SYNC_TS_KEY) || '0', 10);
+  const remoteTs = remote.updatedAt || 0;
+  if (JSON.stringify(merged) !== JSON.stringify(localPacks)) {
+    data.customStickerPacks = merged;
+    saveData(data);
+    if (typeof renderStickerPicker === 'function') renderStickerPicker();
+  }
+  if (remoteTs > localTs) {
+    localStorage.setItem(STICKER_SYNC_TS_KEY, String(remoteTs));
+  } else if (localTs > remoteTs) {
+    await pushUserStickerPacksToServer();
+  }
+}
+
+async function tryAutoCloudStickerMerge() {
+  const user = getCurrentUser();
+  if (!user || !getEffectiveSyncUrl() || typeof fetchCloudBackup !== 'function') return;
+  const remote = await fetchCloudBackup(user.id);
+  if (!remote || !remote.backup || !remote.backup.data) return;
+  const lastMerged = parseInt(localStorage.getItem(CLOUD_MERGE_TS_KEY) || '0', 10);
+  if ((remote.updatedAt || 0) <= lastMerged) return;
+  const remotePacks = remote.backup.data.customStickerPacks || [];
+  if (remotePacks.length) {
+    const data = getData();
+    const merged = mergeStickerPackLists(data.customStickerPacks || [], remotePacks);
+    if (JSON.stringify(merged) !== JSON.stringify(data.customStickerPacks || [])) {
+      data.customStickerPacks = merged;
+      saveData(data);
+      if (typeof renderStickerPicker === 'function') renderStickerPicker();
+    }
+    await pushUserStickerPacksToServer();
+  }
+  localStorage.setItem(CLOUD_MERGE_TS_KEY, String(remote.updatedAt || Date.now()));
+}
+
+async function syncUserDataAcrossBrowsers() {
+  await pullUserStickerPacksFromServer();
+  await tryAutoCloudStickerMerge();
+}
+
+if (typeof saveCustomStickerPack === 'function') {
+  const _saveCustomStickerPackV8 = saveCustomStickerPack;
+  saveCustomStickerPack = function (pack) {
+    _saveCustomStickerPackV8(pack);
+    pushUserStickerPacksToServer().catch(() => {});
+    if (typeof uploadCloudBackup === 'function') uploadCloudBackup().catch(() => {});
+  };
+}
+
+if (typeof deleteCustomStickerPack === 'function') {
+  const _deleteCustomStickerPackV8 = deleteCustomStickerPack;
+  deleteCustomStickerPack = function (packId) {
+    _deleteCustomStickerPackV8(packId);
+    pushUserStickerPacksToServer().catch(() => {});
+    if (typeof uploadCloudBackup === 'function') uploadCloudBackup().catch(() => {});
+  };
+}
+
+const _startGlobalSyncV8 = startGlobalSync;
+startGlobalSync = function () {
+  _startGlobalSyncV8();
+  syncUserDataAcrossBrowsers().catch(() => {});
+};
+
 onAppInit(() => {
   applyV8Branding();
   bindChatsTabOnMainOpen();
   requestAnimationFrame(showChatsTab);
-  repairAllConversationHistory();
+  const user = getCurrentUser();
+  if (user && getEffectiveSyncUrl()) {
+    syncUserDataAcrossBrowsers().catch(() => {});
+    if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
+  }
 });

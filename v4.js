@@ -642,10 +642,9 @@ async function submitFeedback(type, text) {
     timestamp: Date.now()
   };
 
-  const result = await cloudRequest('/api/feedback', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
+  const result = await (typeof cloudRequestExt === 'function'
+    ? cloudRequestExt('/api/feedback', { method: 'POST', body: JSON.stringify(payload) }, 60000)
+    : cloudRequest('/api/feedback', { method: 'POST', body: JSON.stringify(payload) }));
 
   if (!result || !result.ok) {
     showToast('送信に失敗しました。同期サーバーとRenderの更新を確認してください');
@@ -805,9 +804,15 @@ renderAdminUsers = function () {
         e.stopPropagation();
         renderSuperAdminTitlePanel(user.id);
       });
-      item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
+      item.querySelector('.admin-btn-delete').addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (confirm(`「${user.name}」を削除しますか？`)) {
+        if (!confirm(`「${user.name}」を削除しますか？`)) return;
+        if (typeof adminDeleteUser === 'function') {
+          if (await adminDeleteUser(user.id)) {
+            renderAdminUsers();
+            showToast('ユーザーを削除しました');
+          }
+        } else {
           deleteUser(user.id);
           renderAdminUsers();
           showToast('ユーザーを削除しました');

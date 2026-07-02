@@ -17,11 +17,11 @@
         <p class="tagline">シンプルなチャットアプリ</p>
       </div>
       <div class="onboarding-form">
-        <p class="form-desc">お名前を入力してください。<br>アカウント情報はこのデバイスにのみ保存されます。</p>
+        <p class="form-desc">お名前を入力してください。<br>別のブラウザや端末で使っていた場合は、下の「復元」から同じアカウントを読み込めます。</p>
         <input type="text" id="input-name" placeholder="名前を入力" maxlength="20" autocomplete="off">
         <button id="btn-start" class="btn-primary">はじめる</button>
-        <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:12px">引き継ぎ（QRスキャン）</button>
-        <button type="button" id="btn-cloud-restore-onboarding" class="btn-secondary" style="margin-top:8px">クラウドから復元</button>
+        <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:12px">引き継ぎ（QR / コード）</button>
+        <button type="button" id="btn-cloud-restore-onboarding" class="btn-secondary" style="margin-top:8px">あとから復元（ユーザーID）</button>
       </div>
       <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
     </div>
@@ -148,7 +148,7 @@
         </button>
         <button type="button" id="btn-cloud-restore" class="menu-item">
           <span class="menu-icon">☁️</span>
-          <span>クラウドから復元</span>
+          <span>あとから復元（ユーザーID）</span>
         </button>
         <button id="btn-reset-data" class="menu-item danger">
           <span class="menu-icon">🗑️</span>
@@ -411,7 +411,7 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <h3>引き継ぎQR</h3>
-      <p>新しい端末で「引き継ぎ」を選び、このQRをスキャンしてください。有効期限24時間。データはクラウドにも7日間保存されます。</p>
+      <p>別のブラウザや端末で「引き継ぎ」を選び、このQRをスキャンするか、下のコードを入力してください。QRは24時間有効。クラウドバックアップは30日間保存されます。</p>
       <div id="transfer-qr-canvas" class="qr-canvas-wrap"></div>
       <p id="transfer-code-text" class="invite-code-text"></p>
       <button class="btn-close-modal">閉じる</button>
@@ -423,12 +423,18 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <h3>引き継ぎ</h3>
-      <p>古い端末の引き継ぎQRをスキャンしてください</p>
+      <p>古い端末の引き継ぎQRをスキャンするか、コードを直接入力してください</p>
       <div id="qr-reader-transfer-wrap" class="qr-reader-wrap">
         <div id="qr-reader-transfer"></div>
       </div>
       <button type="button" id="btn-start-transfer-camera" class="btn-primary">カメラを起動</button>
       <button type="button" id="btn-stop-transfer-camera" class="btn-secondary btn-sm">停止</button>
+      <div class="sticker-import" style="margin-top:16px">
+        <p class="form-label">引き継ぎコードを入力</p>
+        <input type="text" id="input-transfer-code" placeholder="bluechat-transfer:..." class="sync-settings input-url" autocomplete="off">
+        <button type="button" id="btn-redeem-transfer-code" class="btn-secondary btn-sm">コードで引き継ぐ</button>
+      </div>
+      <p class="qr-hint" style="margin-top:12px">QRの期限が切れた場合は、マイページの「クラウドから復元」（ユーザーID）も使えます（30日間保存）。</p>
       <button class="btn-close-modal">閉じる</button>
     </div>
   </div>

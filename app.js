@@ -9,6 +9,7 @@ const CODE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 const INVITE_PREFIX = 'bc:';
 const INVITE_PREFIX_LEGACY = 'bluechat:';
 const SYNC_URL_KEY = 'bluechat_sync_url';
+const SYNC_CONFIGURED_KEY = 'bluechat_sync_configured';
 const DEFAULT_SYNC_URL = '__DEFAULT_SYNC_URL__';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
@@ -662,8 +663,12 @@ function getSyncUrl() {
 
 function setSyncUrl(url) {
   const trimmed = (url || '').trim().replace(/\/$/, '');
-  if (trimmed) localStorage.setItem(SYNC_URL_KEY, trimmed);
-  else localStorage.removeItem(SYNC_URL_KEY);
+  if (trimmed) {
+    localStorage.setItem(SYNC_URL_KEY, trimmed);
+    localStorage.setItem(SYNC_CONFIGURED_KEY, '1');
+  } else {
+    localStorage.removeItem(SYNC_URL_KEY);
+  }
 }
 
 function initSyncFromQuery() {
@@ -673,7 +678,8 @@ function initSyncFromQuery() {
     setSyncUrl(sync);
     return;
   }
-  if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__' && !localStorage.getItem(SYNC_URL_KEY)) {
+  if (localStorage.getItem(SYNC_CONFIGURED_KEY)) return;
+  if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
     setSyncUrl(DEFAULT_SYNC_URL);
   }
 }
@@ -722,20 +728,65 @@ async function cloudDeleteMessage(convId, msgId) {
   return !!(res && res.ok);
 }
 
+const PENDING_MSG_KEY = 'bluechat_pending_msgs';
+
+function getPendingMessageIds(convId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(PENDING_MSG_KEY) || '{}');
+    return new Set(all[convId] || []);
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function trackPendingMessage(convId, msgId) {
+  if (!convId || !msgId) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(PENDING_MSG_KEY) || '{}');
+    if (!all[convId]) all[convId] = [];
+    if (!all[convId].includes(msgId)) all[convId].push(msgId);
+    localStorage.setItem(PENDING_MSG_KEY, JSON.stringify(all));
+  } catch (e) { /* ignore */ }
+}
+
+function untrackPendingMessage(convId, msgId) {
+  if (!convId || !msgId) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(PENDING_MSG_KEY) || '{}');
+    if (!all[convId]) return;
+    all[convId] = all[convId].filter(id => id !== msgId);
+    if (!all[convId].length) delete all[convId];
+    localStorage.setItem(PENDING_MSG_KEY, JSON.stringify(all));
+  } catch (e) { /* ignore */ }
+}
+
+function markMessagePushed(convId, msg) {
+  if (!convId || !msg) return;
+  untrackPendingMessage(convId, msg.id);
+  const key = 'bluechat_last_push_' + convId;
+  const last = parseInt(localStorage.getItem(key) || '0', 10);
+  localStorage.setItem(key, String(Math.max(last, msg.timestamp || Date.now())));
+}
+
 async function syncMessageDeletions(convId) {
   if (!getSyncUrl() || !convId) return;
   const ids = await cloudRequest(`/api/messages/${convId}/ids`);
-  if (!Array.isArray(ids) || ids.length === 0) return;
+  if (!Array.isArray(ids)) return;
 
   const data = getData();
   if (!data.messages[convId] || !data.messages[convId].length) return;
 
   const idSet = new Set(ids);
+  const pendingIds = getPendingMessageIds(convId);
   const key = 'bluechat_last_push_' + convId;
   const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
   const before = data.messages[convId].length;
   data.messages[convId] = data.messages[convId].filter(m => {
-    if (idSet.has(m.id)) return true;
+    if (pendingIds.has(m.id)) return true;
+    if (idSet.has(m.id)) {
+      untrackPendingMessage(convId, m.id);
+      return true;
+    }
     return (m.timestamp || 0) > lastPush;
   });
   if (data.messages[convId].length !== before) {
@@ -745,11 +796,16 @@ async function syncMessageDeletions(convId) {
 }
 
 async function cloudPushMessage(convId, msg) {
-  if (!getSyncUrl()) return;
-  await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
+  if (!getSyncUrl()) return false;
+  const res = await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
     method: 'PUT',
     body: JSON.stringify(msg)
   });
+  if (res && res.ok !== false) {
+    markMessagePushed(convId, msg);
+    return true;
+  }
+  return false;
 }
 
 async function cloudFetchMessages(convId, since = 0) {
@@ -788,16 +844,16 @@ async function syncPushLocalMessages(convId) {
   if (!getSyncUrl() || !convId) return;
   const key = 'bluechat_last_push_' + convId;
   const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
-  const pending = getMessages(convId).filter(m => (m.timestamp || 0) > lastPush);
+  const pendingIds = getPendingMessageIds(convId);
+  const pending = getMessages(convId).filter(m =>
+    pendingIds.has(m.id) || (m.timestamp || 0) > lastPush
+  );
   if (!pending.length) return;
   const conv = getData().conversations[convId];
   if (conv) await cloudPushConversation(conv);
-  let maxTs = lastPush;
   for (const msg of pending) {
     await cloudPushMessage(convId, msg);
-    maxTs = Math.max(maxTs, msg.timestamp || 0);
   }
-  localStorage.setItem(key, String(maxTs));
 }
 
 async function syncConversation(convId) {
@@ -889,19 +945,18 @@ async function syncFriendships() {
       const before = getUser(friendId)?.avatar;
       ensureLocalUser(remoteUser);
       if (getUser(friendId)?.avatar !== before) avatarsUpdated = true;
-      if (remoteUser.title !== undefined || remoteUser.suspendedUntil || remoteUser.banned !== undefined || remoteUser.premium !== undefined) {
-        const u = getUser(friendId);
-        if (u) {
-          if (remoteUser.title !== undefined) {
-            if (remoteUser.title && remoteUser.title.text) u.title = remoteUser.title;
-            else delete u.title;
-          }
-          if (remoteUser.suspendedUntil) u.suspendedUntil = remoteUser.suspendedUntil;
-          if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
-          if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
-          if (remoteUser.premium !== undefined) u.premium = remoteUser.premium;
-          saveData(getData());
+      const u = getUser(friendId);
+      if (u) {
+        if (remoteUser.title !== undefined) {
+          if (remoteUser.title && remoteUser.title.text) u.title = remoteUser.title;
+          else delete u.title;
         }
+        if (remoteUser.suspendedUntil !== undefined) u.suspendedUntil = remoteUser.suspendedUntil;
+        if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
+        if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
+        if (remoteUser.premium !== undefined) u.premium = remoteUser.premium;
+        if (remoteUser.name) u.name = remoteUser.name;
+        saveData(getData());
       }
     }
     if (!areFriends(user.id, friendId)) {
@@ -963,13 +1018,11 @@ function refreshUIAfterSync() {
 
 async function cloudSyncAfterSend(convId, msg) {
   if (!getSyncUrl()) return;
+  trackPendingMessage(convId, msg.id);
   const data = getData();
   const conv = data.conversations[convId];
   if (conv) await cloudPushConversation(conv);
   await cloudPushMessage(convId, msg);
-  const key = 'bluechat_last_push_' + convId;
-  const last = parseInt(localStorage.getItem(key) || '0', 10);
-  localStorage.setItem(key, String(Math.max(last, msg.timestamp || Date.now())));
 }
 
 function startGlobalSync() {
@@ -989,15 +1042,13 @@ function stopGlobalSync() {
 function startChatSync(convId) {
   stopChatSync();
   if (!getSyncUrl() || !convId) return;
-  syncConversation(convId).then((added) => {
-    if (added > 0 && currentConvId === convId) renderMessages(convId);
+  syncConversation(convId).then(() => {
+    if (currentConvId === convId) renderMessages(convId);
   });
   chatSyncTimer = setInterval(async () => {
-    const added = await syncConversation(convId);
-    if (added > 0) {
-      if (currentConvId === convId) renderMessages(convId);
-      renderChatList();
-    }
+    await syncConversation(convId);
+    if (currentConvId === convId) renderMessages(convId);
+    renderChatList();
   }, 2000);
 }
 
@@ -1008,7 +1059,9 @@ function stopChatSync() {
   }
 }
 
-function updateSyncStatusUI() {
+let syncStatusChecked = false;
+
+function updateSyncStatusUI(forceCheck) {
   const status = document.getElementById('sync-status');
   const input = document.getElementById('input-sync-url');
   if (!status || !input) return;
@@ -1018,9 +1071,16 @@ function updateSyncStatusUI() {
     status.classList.add('warn');
     return;
   }
+  if (!forceCheck && syncStatusChecked) {
+    status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
+    status.classList.remove('warn');
+    if (!globalSyncTimer) startGlobalSync();
+    return;
+  }
   status.textContent = '接続確認中…（Renderは起動に最大1分かかることがあります）';
   status.classList.add('warn');
   testSyncConnection(5).then((ok) => {
+    syncStatusChecked = !!ok;
     if (ok) {
       status.textContent = '✓ 同期サーバーに接続済み — 他の端末にもメッセージが届きます';
       status.classList.remove('warn');
@@ -1144,6 +1204,7 @@ function pushMessage(convId, senderId, msgData) {
   conv.lastMessageSenderId = senderId;
   try {
     saveData(data);
+    if (getSyncUrl()) trackPendingMessage(convId, msg.id);
     cloudSyncAfterSend(convId, msg);
     return msg;
   } catch (e) {
@@ -1271,7 +1332,8 @@ function scrollMessagesToBottom() {
 function appendMessageToChat(msg, convId) {
   const user = getCurrentUser();
   const container = document.getElementById('messages-container');
-  if (!user || !container) return;
+  if (!user || !container || !msg) return;
+  if (container.querySelector(`[data-msg-id="${msg.id}"]`)) return;
 
   const messages = getMessages(convId);
   const prev = messages.length > 1 ? messages[messages.length - 2] : null;
@@ -1286,7 +1348,10 @@ function appendMessageToChat(msg, convId) {
   }
 
   const el = createMessageElement(msg, convId, user);
-  if (el) container.appendChild(el);
+  if (el) {
+    el.dataset.msgId = msg.id;
+    container.appendChild(el);
+  }
   scrollMessagesToBottom(true);
 }
 
@@ -1446,6 +1511,7 @@ function renderMessages(convId) {
   if (!user) return;
   const messages = getMessages(convId);
   const container = document.getElementById('messages-container');
+  if (!container) return;
   container.innerHTML = '';
 
   let lastDate = '';
@@ -1460,7 +1526,10 @@ function renderMessages(convId) {
     }
 
     const el = createMessageElement(msg, convId, user);
-    if (el) container.appendChild(el);
+    if (el) {
+      el.dataset.msgId = msg.id;
+      container.appendChild(el);
+    }
   });
 }
 
@@ -1580,9 +1649,16 @@ function renderAdminUsers() {
       e.stopPropagation();
       showAdminUserConversations(user.id);
     });
-    item.querySelector('.admin-btn-delete').addEventListener('click', (e) => {
+    item.querySelector('.admin-btn-delete').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (confirm(`「${user.name}」を削除しますか？関連する会話も削除されます。`)) {
+      if (!confirm(`「${user.name}」を削除しますか？関連する会話も削除されます。`)) return;
+      if (typeof adminDeleteUser === 'function') {
+        if (await adminDeleteUser(user.id)) {
+          renderAdminUsers();
+          renderAdminConversations();
+          showToast('ユーザーを削除しました');
+        }
+      } else {
         deleteUser(user.id);
         renderAdminUsers();
         renderAdminConversations();
@@ -2075,8 +2151,10 @@ function init() {
     setSyncUrl(url);
     stopGlobalSync();
     stopChatSync();
+    syncStatusChecked = false;
     if (url) {
       const ok = await testSyncConnection();
+      syncStatusChecked = !!ok;
       if (ok) {
         showToast('同期サーバーを設定しました');
         startGlobalSync();
@@ -2086,9 +2164,10 @@ function init() {
         showToast('同期サーバーに接続できません');
       }
     } else {
+      localStorage.removeItem(SYNC_CONFIGURED_KEY);
       showToast('同期をオフにしました');
     }
-    updateSyncStatusUI();
+    updateSyncStatusUI(true);
   });
 
   // Profile image

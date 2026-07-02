@@ -192,6 +192,48 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'users' && parts[2]) {
+      const userId = String(parts[2]);
+      if (data.users) delete data.users[userId];
+      if (data.userFriendships && data.userFriendships[userId]) delete data.userFriendships[userId];
+      if (data.cloudBackups && data.cloudBackups[userId]) delete data.cloudBackups[userId];
+      if (data.userStickers && data.userStickers[userId]) delete data.userStickers[userId];
+      if (data.presence && data.presence[userId]) delete data.presence[userId];
+      if (data.announcementReads && data.announcementReads[userId]) delete data.announcementReads[userId];
+      Object.keys(data.friendships || {}).forEach(key => {
+        const f = data.friendships[key];
+        if (f && (String(f.user1) === userId || String(f.user2) === userId)) delete data.friendships[key];
+      });
+      if (data.userConversations && data.userConversations[userId]) delete data.userConversations[userId];
+      Object.keys(data.userConversations || {}).forEach(uid => {
+        if (data.userConversations[uid] && data.userConversations[uid][userId]) {
+          delete data.userConversations[uid][userId];
+        }
+      });
+      Object.keys(data.conversations || {}).forEach(convId => {
+        const conv = data.conversations[convId];
+        if (!conv || !conv.members) return;
+        if (conv.members.map(String).includes(userId)) {
+          conv.members = conv.members.filter(m => String(m) !== userId);
+          if (conv.members.length === 0) {
+            delete data.conversations[convId];
+            if (data.messages && data.messages[convId]) delete data.messages[convId];
+            if (data.userConversations) {
+              Object.keys(data.userConversations).forEach(uid => {
+                if (data.userConversations[uid][convId]) delete data.userConversations[uid][convId];
+              });
+            }
+          }
+        }
+      });
+      Object.keys(data.callSignals || {}).forEach(uid => {
+        if (String(uid) === userId) delete data.callSignals[uid];
+      });
+      saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'friendships' && parts[2]) {
       const body = await readBody(req);
       const id1 = body.user1;
@@ -291,13 +333,31 @@ const server = http.createServer(async (req, res) => {
 
     // Cloud backup (7-day retention, restore anytime)
     if (!data.cloudBackups) data.cloudBackups = {};
+    // User sticker packs (sync across browsers on same account)
+    if (!data.userStickers) data.userStickers = {};
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'user-stickers' && parts[2]) {
+      const body = await readBody(req);
+      data.userStickers[parts[2]] = {
+        packs: body.packs || [],
+        updatedAt: body.updatedAt || Date.now()
+      };
+      saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'user-stickers' && parts[2]) {
+      const entry = data.userStickers[parts[2]] || { packs: [], updatedAt: 0 };
+      sendJson(res, 200, entry);
+      return;
+    }
+
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'cloud-backup' && parts[2]) {
       const body = await readBody(req);
       const userId = parts[2];
       data.cloudBackups[userId] = {
         backup: body.backup,
         updatedAt: body.updatedAt || Date.now(),
-        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
       };
       saveData(data);
       sendJson(res, 200, { ok: true });
@@ -335,63 +395,50 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'line-stickers' && parts[2]) {
       const productId = parts[2];
       const https = require('https');
-      const fetchText = (fetchUrl) => new Promise((resolve, reject) => {
-        https.get(fetchUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }, (resp) => {
+      const fetchJson = (fetchUrl) => new Promise((resolve, reject) => {
+        https.get(fetchUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            Accept: 'application/json'
+          }
+        }, (resp) => {
           let d = '';
           resp.on('data', c => { d += c; });
-          resp.on('end', () => resolve(d));
+          resp.on('end', () => {
+            if (resp.statusCode && resp.statusCode >= 400) {
+              reject(new Error('HTTP ' + resp.statusCode));
+              return;
+            }
+            try { resolve(JSON.parse(d)); } catch (e) { reject(e); }
+          });
         }).on('error', reject);
       });
-      const extractStickerIds = (html) => {
-        const ids = new Set();
-        const patterns = [
-          /stickershop\/v1\/sticker\/(\d+)/g,
-          /"stickerId"\s*:\s*(\d+)/g,
-          /"sticker_id"\s*:\s*(\d+)/g,
-          /stickerId=(\d+)/g
-        ];
-        patterns.forEach(p => {
-          let m;
-          while ((m = p.exec(html)) !== null) ids.add(m[1]);
-        });
-        const nextMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
-        if (nextMatch) {
-          try {
-            const json = JSON.parse(nextMatch[1]);
-            const str = JSON.stringify(json);
-            const re = /"stickerId"\s*:\s*(\d+)/g;
-            let m;
-            while ((m = re.exec(str)) !== null) ids.add(m[1]);
-          } catch (e) { /* ignore */ }
-        }
-        return [...ids];
-      };
-      const pageUrls = [
-        `https://store.line.me/stickershop/product/${productId}/ja`,
-        `https://store.line.me/stickershop/product/${productId}/en`,
-        `https://store.line.me/stickershop/product/${productId}`
+      const metaUrls = [
+        `https://stickershop.line-scdn.net/stickershop/v1/product/${productId}/iphone/productInfo.meta`,
+        `https://stickershop.line-scdn.net/stickershop/v1/product/${productId}/android/productInfo.meta`
       ];
       try {
-        let html = '';
-        let ids = [];
-        for (const pageUrl of pageUrls) {
+        let meta = null;
+        for (const metaUrl of metaUrls) {
           try {
-            html = await fetchText(pageUrl);
-            ids = extractStickerIds(html);
-            if (ids.length) break;
+            meta = await fetchJson(metaUrl);
+            if (meta && Array.isArray(meta.stickers) && meta.stickers.length) break;
           } catch (e) { /* try next */ }
         }
-        if (!ids.length) {
-          sendJson(res, 404, { error: 'スタンプIDを取得できませんでした。URLまたは商品IDを確認してください', stickers: [] });
+        if (!meta || !Array.isArray(meta.stickers) || !meta.stickers.length) {
+          sendJson(res, 404, {
+            error: 'スタンプ情報を取得できませんでした。商品IDまたはURLを確認してください',
+            stickers: []
+          });
           return;
         }
-        const stickers = ids.slice(0, 40).map(id => ({
-          id,
-          url: `https://stickershop.line-scdn.net/stickershop/v1/sticker/${id}/android/sticker.png`,
+        const titleObj = meta.title || {};
+        const name = titleObj.ja || titleObj.en || titleObj['zh-Hant'] || ('LINE ' + productId);
+        const stickers = meta.stickers.slice(0, 40).map(s => ({
+          id: String(s.id),
+          url: `https://stickershop.line-scdn.net/stickershop/v1/sticker/${s.id}/android/sticker.png`,
           emoji: '🎨'
         }));
-        const nameMatch = html.match(/<title>([^<]+)<\/title>/i);
-        const name = nameMatch ? nameMatch[1].replace(/LINE STORE|スタンプ・絵文字ショップ/gi, '').trim() : ('LINE ' + productId);
         sendJson(res, 200, { name, stickers, productId });
       } catch (e) {
         sendJson(res, 500, { error: e.message || '取得エラー', stickers: [] });
@@ -417,10 +464,14 @@ const server = http.createServer(async (req, res) => {
       const groupIds = (url.searchParams.get('groupIds') || '').split(',').filter(Boolean);
       let list = [...data.announcements];
       if (userId) {
+        const uid = String(userId);
+        const groupSet = new Set(groupIds.map(String));
         list = list.filter(a => {
           if (a.type === 'global') return true;
-          if (a.type === 'personal') return (a.targetUserIds || []).includes(userId);
-          if (a.type === 'group') return groupIds.includes(a.groupId);
+          if (a.type === 'personal') {
+            return (a.targetUserIds || []).some(id => String(id) === uid);
+          }
+          if (a.type === 'group') return groupSet.has(String(a.groupId));
           return false;
         });
       }
@@ -516,7 +567,7 @@ const server = http.createServer(async (req, res) => {
       };
       data.feedback.push(entry);
       if (data.feedback.length > 500) data.feedback = data.feedback.slice(-200);
-      saveData(data);
+      saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, id: entry.id });
       return;
     }

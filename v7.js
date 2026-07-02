@@ -11,7 +11,16 @@ const RTC_CONFIG_V7 = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
-    { urls: 'stun:global.stun.twilio.com:3478' }
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ],
   iceCandidatePoolSize: 10
 };
@@ -213,7 +222,11 @@ async function adminSuspendUserHours(userId, hours) {
 // ─── Sync on meaningful activity only (no constant reload) ───
 async function handleRemoteActivity() {
   await syncAllConversations();
+  if (typeof syncCurrentUserModeration === 'function') await syncCurrentUserModeration();
+  if (typeof syncUserDataAcrossBrowsers === 'function') await syncUserDataAcrossBrowsers();
   if (currentTab === 'notices') await renderAnnouncements();
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+  else refreshMainUI();
 }
 
 function startSyncVersionPolling() {
@@ -223,12 +236,12 @@ function startSyncVersionPolling() {
     const res = await cloudRequest('/api/activity-version');
     if (!res || res.version === undefined) return;
     const last = parseInt(localStorage.getItem(ACTIVITY_VERSION_KEY) || '0', 10);
-    if (last > 0 && res.version > last) {
+    if (res.version > last) {
       localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
       await handleRemoteActivity();
       return;
     }
-    localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
+    if (last === 0) localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
   };
   poll();
   syncVersionTimer = setInterval(poll, ACTIVITY_POLL_MS);
@@ -254,10 +267,13 @@ function markAnnouncementRead(annId) {
 
 async function fetchAnnouncements() {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return [];
+  const syncBase = typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl();
+  if (!user || !syncBase) return [];
   const groups = getUserConversations(user.id).filter(c => c.type === 'group').map(c => c.id);
   const url = `/api/announcements?userId=${encodeURIComponent(user.id)}&groupIds=${encodeURIComponent(groups.join(','))}`;
-  const list = await cloudRequest(url);
+  const list = await (typeof cloudRequestExt === 'function'
+    ? cloudRequestExt(url)
+    : cloudRequest(url));
   return Array.isArray(list) ? list : [];
 }
 
@@ -582,9 +598,15 @@ handleCallSignal = async function (sig) {
     return;
   }
   await _handleCallSignalV7(sig);
-  if (peerConnection && (sig.type === 'answer' || (sig.type === 'offer' && callState.active))) {
+  if (peerConnection && sig.type === 'answer' && peerConnection.remoteDescription) {
     await flushIceCandidates(peerConnection);
   }
+};
+
+const _endCallV7 = endCall;
+endCall = async function () {
+  iceCandidateQueue.length = 0;
+  return _endCallV7();
 };
 
 // ─── Notification guide for unsupported devices ────────────
@@ -710,7 +732,7 @@ function initV7Features() {
   bindClick('btn-notify-guide', () => showNotificationGuide());
   bindClick('btn-admin-post-notice', () => showAdminPostNoticeModal());
   bindClick('btn-refresh-notices', () => renderAnnouncements());
-  bindClick('btn-retry-sync', () => updateSyncStatusUI());
+  bindClick('btn-retry-sync', () => updateSyncStatusUI(true));
   bindClick('btn-admin-refresh-users', () => renderAdminUsers());
 
   const adminSearch = document.getElementById('input-admin-user-search');

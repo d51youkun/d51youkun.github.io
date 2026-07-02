@@ -2,7 +2,7 @@
  * BlueChat v6 — クラウド復元・同期改善・オンライン表示・LINEスタンプ修正
  */
 var APP_VERSION = 'v6';
-const CLOUD_BACKUP_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const CLOUD_BACKUP_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const CLOUD_BACKUP_DIRECT_MAX = 350000;
 const PRESENCE_ONLINE_MS = 90000;
 const PRESENCE_HEARTBEAT_MS = 30000;
@@ -69,7 +69,7 @@ async function restoreFromCloudBackup(userId, password) {
 }
 
 function showCloudRestoreModal() {
-  const userId = prompt('復元するアカウントのユーザーIDを入力してください\n（マイページに表示されています）');
+  const userId = prompt('復元するアカウントのユーザーIDを入力してください\n（マイページに表示されています）\n\n別ブラウザで使っていた場合も、同じIDで復元できます');
   if (!userId || !userId.trim()) return;
   const password = prompt('引き継ぎパスワード（設定していない場合は空欄でOK）');
   if (password === null) return;
@@ -230,6 +230,8 @@ async function importLineStickerPackV6(url) {
     stickers: result.stickers.map(s => ({ type: 'image', src: s.url, emoji: s.emoji || '🎨' }))
   };
   saveCustomStickerPack(pack);
+  if (typeof pushUserStickerPacksToServer === 'function') pushUserStickerPacksToServer().catch(() => {});
+  if (typeof uploadCloudBackup === 'function') uploadCloudBackup().catch(() => {});
   showToast(`スタンプ「${pack.name}」を追加しました（${pack.stickers.length}個）`);
   return pack;
 }
