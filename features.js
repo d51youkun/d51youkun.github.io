@@ -194,28 +194,39 @@ function saveAdminToken(token) {
 }
 
 async function adminCloudRequest(path, options = {}, timeoutMs = 120000) {
-  const base = getEffectiveSyncUrl();
-  if (!base) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(base + path, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Admin-Token': getAdminToken(),
-        ...(options.headers || {})
+  const candidates = typeof getSyncUrlCandidates === 'function'
+    ? getSyncUrlCandidates()
+    : [getEffectiveSyncUrl()].filter(Boolean);
+  if (!candidates.length) return null;
+
+  for (let i = 0; i < candidates.length; i++) {
+    if (typeof isMixedContentBlocked === 'function' && isMixedContentBlocked(candidates[i])) continue;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(candidates[i] + path, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': getAdminToken(),
+          ...(options.headers || {})
+        }
+      });
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (i > 0 && typeof SYNC_URL_KEY !== 'undefined' && typeof SYNC_URL_DELIMITER !== 'undefined') {
+        const promoted = [candidates[i], ...candidates.filter((_, idx) => idx !== i)];
+        localStorage.setItem(SYNC_URL_KEY, promoted.join(SYNC_URL_DELIMITER));
       }
-    });
-    if (!res.ok) return null;
-    const text = await res.text();
-    return text ? JSON.parse(text) : null;
-  } catch (e) {
-    return null;
-  } finally {
-    clearTimeout(timer);
+      return text ? JSON.parse(text) : null;
+    } catch (e) {
+      // try next candidate
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  return null;
 }
 
 async function pullServerSyncBundle(userId) {
@@ -310,53 +321,67 @@ async function redeemTransferCodeExt(code) {
 }
 
 async function verifyAdminCredentialsAsync(email, password) {
-  const base = getEffectiveSyncUrl();
-  if (!base) {
+  const candidates = typeof getSyncUrlCandidates === 'function'
+    ? getSyncUrlCandidates()
+    : [getEffectiveSyncUrl()].filter(Boolean);
+  if (!candidates.length) {
     showToast('管理者ログインには同期サーバーの設定が必要です');
     return null;
   }
-  try {
-    const res = await fetch(base + '/api/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: String(email || '').trim(),
-        password: String(password || '')
-      })
-    });
-    if (res.status === 401) return null;
-    if (!res.ok) {
-      showToast('認証サーバーに接続できません');
-      return null;
+  for (const base of candidates) {
+    if (typeof isMixedContentBlocked === 'function' && isMixedContentBlocked(base)) continue;
+    try {
+      const res = await fetch(base + '/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: String(email || '').trim(),
+          password: String(password || '')
+        })
+      });
+      if (res.status === 401) return null;
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.token) saveAdminToken(data.token);
+      return data.role ? { role: data.role, token: data.token } : null;
+    } catch (e) {
+      // try next candidate
     }
-    const data = await res.json();
-    if (data.token) saveAdminToken(data.token);
-    return data.role ? { role: data.role, token: data.token } : null;
-  } catch (e) {
-    showToast('認証サーバーに接続できません');
-    return null;
   }
+  showToast('認証サーバーに接続できません');
+  return null;
 }
 
 async function cloudRequestExt(path, options = {}, timeoutMs = 45000) {
-  const base = getEffectiveSyncUrl();
-  if (!base) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(base + path, {
-      ...options,
-      signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
-    });
-    if (!res.ok) return null;
-    const text = await res.text();
-    return text ? JSON.parse(text) : null;
-  } catch (e) {
-    return null;
-  } finally {
-    clearTimeout(timer);
+  const candidates = typeof getSyncUrlCandidates === 'function'
+    ? getSyncUrlCandidates()
+    : [getEffectiveSyncUrl()].filter(Boolean);
+  if (!candidates.length) return null;
+
+  for (let i = 0; i < candidates.length; i++) {
+    if (typeof isMixedContentBlocked === 'function' && isMixedContentBlocked(candidates[i])) continue;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(candidates[i] + path, {
+        ...options,
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+      });
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (i > 0 && typeof SYNC_URL_KEY !== 'undefined' && typeof SYNC_URL_DELIMITER !== 'undefined') {
+        const promoted = [candidates[i], ...candidates.filter((_, idx) => idx !== i)];
+        localStorage.setItem(SYNC_URL_KEY, promoted.join(SYNC_URL_DELIMITER));
+      }
+      return text ? JSON.parse(text) : null;
+    } catch (e) {
+      // try next candidate
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  return null;
 }
 
 function loadAdminSession() {

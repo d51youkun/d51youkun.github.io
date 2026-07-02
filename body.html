@@ -121,9 +121,10 @@
         </div>
         <div class="sync-settings">
           <p class="form-label">他の端末と同期</p>
-          <input type="url" id="input-sync-url" placeholder="https://bluechat-sync.onrender.com" autocomplete="off">
+          <input type="text" id="input-sync-url" placeholder="https://bluechat-sync.onrender.com または 192.168.1.5:8766" autocomplete="off" inputmode="url">
           <button type="button" id="btn-save-sync" class="btn-secondary btn-sm">同期サーバーを保存</button>
           <button type="button" id="btn-retry-sync" class="btn-secondary btn-sm">再試行</button>
+          <p class="qr-hint" id="sync-url-hint">ドメイン・IPどちらでもOK。複数ある場合はカンマ区切り</p>
           <p class="qr-hint" id="sync-status"></p>
         </div>
         <button type="button" id="btn-enable-notify" class="menu-item">

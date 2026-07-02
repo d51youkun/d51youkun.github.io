@@ -8,7 +8,10 @@ const INVITE_PREFIX = 'bc:';
 const INVITE_PREFIX_LEGACY = 'bluechat:';
 const SYNC_URL_KEY = 'bluechat_sync_url';
 const SYNC_CONFIGURED_KEY = 'bluechat_sync_configured';
+const SYNC_URL_DELIMITER = ',';
+const LOCAL_SYNC_DEFAULT_PORT = 8766;
 const DEFAULT_SYNC_URL = '__DEFAULT_SYNC_URL__';
+const SYNC_ALTERNATE_URLS = __SYNC_ALTERNATE_URLS__;
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
 const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
@@ -655,23 +658,112 @@ function getDirectConvId(id1, id2) {
 }
 
 // ─── Cloud Sync ────────────────────────────────────────────
-function getSyncUrl() {
-  const stored = (localStorage.getItem(SYNC_URL_KEY) || '').replace(/\/$/, '');
-  if (stored) return stored;
-  if (typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
-    return DEFAULT_SYNC_URL;
+function parseIpv4Octets(host) {
+  const m = String(host || '').match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return null;
+  const octets = m.slice(1, 5).map(Number);
+  return octets.some(o => o > 255) ? null : octets;
+}
+
+function isPrivateIpv4(octets) {
+  if (!octets) return false;
+  const [a, b] = octets;
+  if (a === 10 || a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  return false;
+}
+
+function normalizeSyncUrl(url) {
+  let s = String(url || '').trim().replace(/\/+$/, '');
+  if (!s) return '';
+
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) {
+    const hostPart = s.split('/')[0];
+    const ipv4 = hostPart.match(/^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d+))?$/);
+    if (ipv4) {
+      const octets = parseIpv4Octets(ipv4[1]);
+      if (!octets) return '';
+      const port = ipv4[2] || (isPrivateIpv4(octets) ? String(LOCAL_SYNC_DEFAULT_PORT) : '443');
+      const proto = isPrivateIpv4(octets) ? 'http' : 'https';
+      s = `${proto}://${ipv4[1]}:${port}`;
+    } else if (/^localhost(?::\d+)?$/i.test(hostPart)) {
+      const port = hostPart.includes(':') ? hostPart.split(':')[1] : String(LOCAL_SYNC_DEFAULT_PORT);
+      s = `http://localhost:${port}`;
+    } else {
+      s = `https://${s}`;
+    }
   }
-  return '';
+
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+    if (u.pathname && u.pathname !== '/') return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
+    return u.origin;
+  } catch (e) {
+    return '';
+  }
+}
+
+function parseSyncUrlInput(raw) {
+  return String(raw || '')
+    .split(SYNC_URL_DELIMITER)
+    .map(part => normalizeSyncUrl(part.trim()))
+    .filter(Boolean);
+}
+
+function getSyncUrlCandidates() {
+  const stored = localStorage.getItem(SYNC_URL_KEY) || '';
+  const urls = [];
+  const add = (value) => {
+    const normalized = normalizeSyncUrl(value);
+    if (normalized && !urls.includes(normalized)) urls.push(normalized);
+  };
+
+  if (stored) {
+    stored.split(SYNC_URL_DELIMITER).forEach(part => add(part.trim()));
+  } else if (typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+    add(DEFAULT_SYNC_URL);
+  }
+
+  if (Array.isArray(SYNC_ALTERNATE_URLS)) {
+    SYNC_ALTERNATE_URLS.forEach(add);
+  }
+
+  return urls;
+}
+
+function getSyncUrl() {
+  const candidates = getSyncUrlCandidates();
+  return candidates[0] || '';
 }
 
 function setSyncUrl(url) {
-  const trimmed = (url || '').trim().replace(/\/$/, '');
-  if (trimmed) {
-    localStorage.setItem(SYNC_URL_KEY, trimmed);
+  const normalized = parseSyncUrlInput(url);
+  if (normalized.length) {
+    localStorage.setItem(SYNC_URL_KEY, normalized.join(SYNC_URL_DELIMITER));
     localStorage.setItem(SYNC_CONFIGURED_KEY, '1');
   } else {
     localStorage.removeItem(SYNC_URL_KEY);
   }
+}
+
+function isMixedContentBlocked(syncUrl) {
+  if (location.protocol !== 'https:') return false;
+  try {
+    const u = new URL(syncUrl);
+    return u.protocol === 'http:' && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1';
+  } catch (e) {
+    return false;
+  }
+}
+
+function getSyncUrlFormatHint() {
+  const blocked = getSyncUrlCandidates().find(isMixedContentBlocked);
+  if (blocked) {
+    return '※ HTTPSページからローカルIP(http://)には接続できません。同じWi-FiではPCの http://(PCのIP):8765 で開くか、Renderのドメインを使ってください';
+  }
+  return 'ドメイン・IPどちらでもOK（例: https://bluechat-sync.onrender.com または 192.168.1.5:8766）。複数はカンマ区切り。Render送信元IP: 74.220.48.0/24, 74.220.56.0/24';
 }
 
 function initSyncFromQuery() {
@@ -687,9 +779,7 @@ function initSyncFromQuery() {
   }
 }
 
-async function cloudRequest(path, options = {}, timeoutMs = 45000) {
-  const base = typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl();
-  if (!base) return null;
+async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -706,6 +796,28 @@ async function cloudRequest(path, options = {}, timeoutMs = 45000) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function cloudRequest(path, options = {}, timeoutMs = 45000) {
+  const candidates = typeof getSyncUrlCandidates === 'function'
+    ? getSyncUrlCandidates()
+    : [typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl()].filter(Boolean);
+  if (!candidates.length) return null;
+
+  let lastResult = null;
+  for (let i = 0; i < candidates.length; i++) {
+    if (isMixedContentBlocked(candidates[i])) continue;
+    const result = await cloudRequestToBase(candidates[i], path, options, timeoutMs);
+    if (result !== null) {
+      if (i > 0) {
+        const promoted = [candidates[i], ...candidates.filter((_, idx) => idx !== i)];
+        localStorage.setItem(SYNC_URL_KEY, promoted.join(SYNC_URL_DELIMITER));
+      }
+      return result;
+    }
+    lastResult = result;
+  }
+  return lastResult;
 }
 
 async function testSyncConnection(retries = 5) {
@@ -1076,10 +1188,18 @@ let syncStatusChecked = false;
 function updateSyncStatusUI(forceCheck) {
   const status = document.getElementById('sync-status');
   const input = document.getElementById('input-sync-url');
+  const hint = document.getElementById('sync-url-hint');
   if (!status || !input) return;
-  input.value = getSyncUrl();
+  input.value = getSyncUrlCandidates().join(SYNC_URL_DELIMITER + ' ');
+  if (hint) hint.textContent = getSyncUrlFormatHint();
   if (!getSyncUrl()) {
-    status.textContent = '未設定 — 他の端末とメッセージを共有するには同期サーバーURLを入力してください';
+    status.textContent = '未設定 — ドメインまたはIPアドレスを入力してください';
+    status.classList.add('warn');
+    return;
+  }
+  const mixedBlocked = getSyncUrlCandidates().every(isMixedContentBlocked);
+  if (mixedBlocked) {
+    status.textContent = 'ローカルIP(http://)はこのページ(HTTPS)から接続できません';
     status.classList.add('warn');
     return;
   }
@@ -2156,12 +2276,22 @@ function init() {
   });
 
   document.getElementById('btn-save-sync').addEventListener('click', async () => {
-    const url = document.getElementById('input-sync-url').value.trim();
-    setSyncUrl(url);
+    const raw = document.getElementById('input-sync-url').value.trim();
+    const parsed = parseSyncUrlInput(raw);
+    if (raw && !parsed.length) {
+      showToast('URLまたはIPアドレスの形式が正しくありません');
+      return;
+    }
+    setSyncUrl(raw);
     stopGlobalSync();
     stopChatSync();
     syncStatusChecked = false;
-    if (url) {
+    if (parsed.length) {
+      if (parsed.every(isMixedContentBlocked)) {
+        showToast('ローカルIPはHTTPSページから使えません');
+        updateSyncStatusUI(true);
+        return;
+      }
       const ok = await testSyncConnection();
       syncStatusChecked = !!ok;
       if (ok) {

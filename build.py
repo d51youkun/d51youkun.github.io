@@ -33,13 +33,19 @@ def read(name: str) -> str:
 def get_app_js() -> str:
     app_js = read("app.js")
     sync_url = ""
+    alternates = []
     try:
-        sync_url = json.loads(read("sync-config.json")).get("url", "").strip()
+        cfg = json.loads(read("sync-config.json"))
+        sync_url = cfg.get("url", "").strip()
+        alternates = cfg.get("alternates", [])
+        if not isinstance(alternates, list):
+            alternates = []
     except (json.JSONDecodeError, OSError):
         pass
     if not sync_url:
         sync_url = "https://bluechat-sync.onrender.com"
-    return app_js.replace("__DEFAULT_SYNC_URL__", sync_url, 1)
+    app_js = app_js.replace("__DEFAULT_SYNC_URL__", sync_url, 1)
+    return app_js.replace("__SYNC_ALTERNATE_URLS__", json.dumps(alternates), 1)
 
 
 def get_merged_js() -> str:

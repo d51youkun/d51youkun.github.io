@@ -1,3 +1,5 @@
 {
-  "url": "https://bluechat-sync.onrender.com"
+  "url": "https://bluechat-sync.onrender.com",
+  "alternates": [],
+  "renderOutboundIpRanges": ["74.220.48.0/24", "74.220.56.0/24"]
 }
