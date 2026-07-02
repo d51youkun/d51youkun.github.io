@@ -1461,6 +1461,8 @@ input:focus {
 .admin-btn-unban { background: #22c55e; color: #fff; }
 .admin-btn-premium { background: #1a6fd4; color: #fff; }
 .admin-btn-suspend { background: #f59e0b; color: #fff; }
+.admin-btn-friend { background: #22c55e; color: #fff; }
+.admin-btn-friend:disabled { opacity: 0.55; cursor: default; }
 
 .admin-search-input {
   flex: 1;
@@ -1557,7 +1559,7 @@ body :where(
 .btn-primary, .btn-secondary, .btn-send, .btn-attach, .btn-call,
 .btn-text-link, .btn-download-image, .message-file-link,
 .admin-btn, .admin-btn-view, .admin-btn-delete, .admin-btn-ban,
-.admin-btn-unban, .admin-btn-premium, .admin-btn-super-premium, .admin-btn-suspend, .admin-btn-title,
+.admin-btn-unban, .admin-btn-premium, .admin-btn-super-premium, .admin-btn-suspend, .admin-btn-friend, .admin-btn-title,
 .icon-btn, #btn-back-chat,
 .chat-header-info h2, #header-title, #chat-title, #chat-subtitle,
 .form-label, .form-desc, .profile-id, .qr-hint, .admin-search-input,
@@ -1875,6 +1877,7 @@ html[data-theme="dark"] body textarea::placeholder {
           <input type="text" id="input-admin-user-search" class="admin-search-input" placeholder="名前またはIDで検索">
           <button type="button" id="btn-admin-refresh-users" class="btn-secondary btn-sm">サーバーから更新</button>
           <button type="button" id="btn-admin-title-presets" class="btn-secondary btn-sm">称号を管理</button>
+          <button type="button" id="btn-admin-force-friend" class="btn-secondary btn-sm">強制友だち</button>
         </div>
         <div id="main-admin-user-list" class="list"></div>
         <div id="main-admin-empty-users" class="empty-state hidden"><p>登録ユーザーがいません</p></div>
@@ -6524,19 +6527,40 @@ renderAdminUsers = function () {
       const item = document.createElement('div');
       item.className = 'list-item';
       const meId = getCurrentUser()?.id;
-      const friendMark = String(user.id) === String(meId)
+      const isSelf = String(user.id) === String(meId);
+      const isFriend = meId && areFriends(meId, user.id);
+      const friendMark = isSelf
         ? ' <span class="admin-self">(自分)</span>'
-        : (areFriends(meId, user.id) ? '' : ' <span class="admin-not-friend">(未友だち)</span>');
+        : (isFriend ? '' : ' <span class="admin-not-friend">(未友だち)</span>');
+      const friendBtnHtml = (!isSelf && adminRole === 'super')
+        ? `<button class="admin-btn admin-btn-friend" data-user-id="${user.id}" ${isFriend ? 'disabled' : ''}>${isFriend ? '友だち済' : '友だち追加'}</button>`
+        : '';
       item.innerHTML = `
       ${avatarHtml(user)}
       <div class="list-info">
         <div class="list-name">${displayNameHtml(user)}${friendMark}</div>
         <div class="list-preview">ID: ${user.id}</div>
         <div class="admin-user-actions">
+          ${friendBtnHtml}
           <button class="admin-btn admin-btn-title" data-user-id="${user.id}">${user.title?.text ? '称号変更' : '称号'}</button>
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
       </div>`;
+      const friendBtn = item.querySelector('.admin-btn-friend');
+      if (friendBtn && !friendBtn.disabled) {
+        friendBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const me = getCurrentUser();
+          if (!me) {
+            showToast('先にチャットアカウントでログインしてください');
+            return;
+          }
+          if (!confirm(`「${user.name}」を友だちに追加しますか？（QR不要）`)) return;
+          if (typeof adminForceFriendship === 'function') {
+            await adminForceFriendship(me.id, user.id);
+          }
+        });
+      }
       item.querySelector('.admin-btn-title').addEventListener('click', (e) => {
         e.stopPropagation();
         renderSuperAdminTitlePanel(user.id);
@@ -8465,8 +8489,72 @@ function applyAppBranding() {
   if (logoTitle) logoTitle.textContent = title;
 }
 
+async function adminForceFriendship(userId1, userId2) {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return false;
+  }
+  const a = String(userId1 || '').trim();
+  const b = String(userId2 || '').trim();
+  if (!a || !b) {
+    showToast('ユーザーIDを入力してください');
+    return false;
+  }
+  if (a === b) {
+    showToast('同じユーザーは友だちにできません');
+    return false;
+  }
+
+  if (getEffectiveSyncUrl()) {
+    for (const uid of [a, b]) {
+      if (!getUser(uid)) {
+        const remote = await cloudFetchUser(uid);
+        if (remote && remote.id) ensureLocalUser(remote);
+      }
+    }
+  }
+  if (!getUser(a) || !getUser(b)) {
+    showToast('ユーザーが見つかりません');
+    return false;
+  }
+  if (areFriends(a, b)) {
+    showToast('すでに友だちです');
+    renderAdminUsers();
+    return true;
+  }
+
+  const convId = addFriendship(a, b);
+  if (getEffectiveSyncUrl()) {
+    await cloudPushFriendship(a, b);
+    const conv = convId ? getData().conversations[convId] : null;
+    if (conv) await cloudPushConversation(conv);
+  }
+
+  const u1 = getUser(a);
+  const u2 = getUser(b);
+  showToast(`「${u1?.name || a}」と「${u2?.name || b}」を友だちにしました`);
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+  else refreshMainUI();
+  renderAdminUsers();
+  return true;
+}
+
+function showAdminForceFriendPairDialog() {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return;
+  }
+  const id1 = prompt('ユーザー1のID（友だちにする側）');
+  if (id1 === null || !id1.trim()) return;
+  const id2 = prompt('ユーザー2のID（友だちにされる側）');
+  if (id2 === null || !id2.trim()) return;
+  if (!confirm('QRなしでこの2人を友だちにしますか？')) return;
+  adminForceFriendship(id1.trim(), id2.trim());
+}
+
 onAppInit(() => {
   applyAppBranding();
+  bindClick('btn-admin-force-friend', () => showAdminForceFriendPairDialog());
 });
 
 if (document.readyState === 'loading') {

@@ -774,19 +774,40 @@ renderAdminUsers = function () {
       const item = document.createElement('div');
       item.className = 'list-item';
       const meId = getCurrentUser()?.id;
-      const friendMark = String(user.id) === String(meId)
+      const isSelf = String(user.id) === String(meId);
+      const isFriend = meId && areFriends(meId, user.id);
+      const friendMark = isSelf
         ? ' <span class="admin-self">(自分)</span>'
-        : (areFriends(meId, user.id) ? '' : ' <span class="admin-not-friend">(未友だち)</span>');
+        : (isFriend ? '' : ' <span class="admin-not-friend">(未友だち)</span>');
+      const friendBtnHtml = (!isSelf && adminRole === 'super')
+        ? `<button class="admin-btn admin-btn-friend" data-user-id="${user.id}" ${isFriend ? 'disabled' : ''}>${isFriend ? '友だち済' : '友だち追加'}</button>`
+        : '';
       item.innerHTML = `
       ${avatarHtml(user)}
       <div class="list-info">
         <div class="list-name">${displayNameHtml(user)}${friendMark}</div>
         <div class="list-preview">ID: ${user.id}</div>
         <div class="admin-user-actions">
+          ${friendBtnHtml}
           <button class="admin-btn admin-btn-title" data-user-id="${user.id}">${user.title?.text ? '称号変更' : '称号'}</button>
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
       </div>`;
+      const friendBtn = item.querySelector('.admin-btn-friend');
+      if (friendBtn && !friendBtn.disabled) {
+        friendBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const me = getCurrentUser();
+          if (!me) {
+            showToast('先にチャットアカウントでログインしてください');
+            return;
+          }
+          if (!confirm(`「${user.name}」を友だちに追加しますか？（QR不要）`)) return;
+          if (typeof adminForceFriendship === 'function') {
+            await adminForceFriendship(me.id, user.id);
+          }
+        });
+      }
       item.querySelector('.admin-btn-title').addEventListener('click', (e) => {
         e.stopPropagation();
         renderSuperAdminTitlePanel(user.id);
