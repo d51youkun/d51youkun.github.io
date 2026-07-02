@@ -1449,6 +1449,8 @@ input:focus {
 .admin-btn-suspend { background: #f59e0b; color: #fff; }
 .admin-btn-friend { background: #22c55e; color: #fff; }
 .admin-btn-friend:disabled { opacity: 0.55; cursor: default; }
+.admin-btn-issue-transfer { background: #7c3aed; color: #fff; }
+.admin-btn-restore-user { background: #0ea5e9; color: #fff; }
 
 .admin-search-input {
   flex: 1;
@@ -1545,7 +1547,7 @@ body :where(
 .btn-primary, .btn-secondary, .btn-send, .btn-attach, .btn-call,
 .btn-text-link, .btn-download-image, .message-file-link,
 .admin-btn, .admin-btn-view, .admin-btn-delete, .admin-btn-ban,
-.admin-btn-unban, .admin-btn-premium, .admin-btn-super-premium, .admin-btn-suspend, .admin-btn-friend, .admin-btn-title,
+.admin-btn-unban, .admin-btn-premium, .admin-btn-super-premium, .admin-btn-suspend, .admin-btn-friend, .admin-btn-issue-transfer, .admin-btn-restore-user, .admin-btn-title,
 .icon-btn, #btn-back-chat,
 .chat-header-info h2, #header-title, #chat-title, #chat-subtitle,
 .form-label, .form-desc, .profile-id, .qr-hint, .admin-search-input,

@@ -443,7 +443,8 @@ openChat = function (convId) {
 performAdminLogin = function () {
   const email = document.getElementById('input-admin-email').value;
   const password = document.getElementById('input-admin-password').value;
-  verifyAdminCredentialsAsync(email, password).then((role) => {
+  verifyAdminCredentialsAsync(email, password).then((auth) => {
+    const role = auth && auth.role ? auth.role : null;
     if (!role) {
       if (getEffectiveSyncUrl()) showToast('メールアドレスまたはパスワードが正しくありません');
       return;
@@ -789,6 +790,8 @@ renderAdminUsers = function () {
         <div class="list-preview">ID: ${user.id}</div>
         <div class="admin-user-actions">
           ${friendBtnHtml}
+          <button class="admin-btn admin-btn-issue-transfer" data-user-id="${user.id}">引き継ぎ発行</button>
+          <button class="admin-btn admin-btn-restore-user" data-user-id="${user.id}">端末に復元</button>
           <button class="admin-btn admin-btn-title" data-user-id="${user.id}">${user.title?.text ? '称号変更' : '称号'}</button>
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
@@ -811,6 +814,14 @@ renderAdminUsers = function () {
       item.querySelector('.admin-btn-title').addEventListener('click', (e) => {
         e.stopPropagation();
         renderSuperAdminTitlePanel(user.id);
+      });
+      item.querySelector('.admin-btn-issue-transfer')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof adminIssueTransferForUser === 'function') adminIssueTransferForUser(user.id);
+      });
+      item.querySelector('.admin-btn-restore-user')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof adminRestoreUserToDevice === 'function') adminRestoreUserToDevice(user.id);
       });
       item.querySelector('.admin-btn-delete').addEventListener('click', async (e) => {
         e.stopPropagation();

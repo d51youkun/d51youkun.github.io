@@ -76,9 +76,85 @@ function showAdminForceFriendPairDialog() {
   adminForceFriendship(id1.trim(), id2.trim());
 }
 
+async function adminIssueTransferForUser(userId) {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return;
+  }
+  ensureSyncUrlForRestore();
+  const user = getUser(userId);
+  const name = user ? user.name : userId;
+  if (!confirm(`「${name}」の引き継ぎコードを発行しますか？\n（QR不要・72時間有効）`)) return;
+
+  const res = await adminCloudRequest('/api/admin/issue-transfer', {
+    method: 'POST',
+    body: JSON.stringify({ userId: String(userId), hours: 72 })
+  });
+  if (!res || !res.ok) {
+    showToast('引き継ぎコードの発行に失敗しました（サーバーデータがない可能性）');
+    return;
+  }
+
+  const msg = [
+    `引き継ぎコードを発行しました（${name}）`,
+    '',
+    `短縮コード: ${res.shortCode}`,
+    '',
+    `長いコード:`,
+    res.code,
+    '',
+    '新しい端末の「引き継ぎ」画面で入力してください'
+  ].join('\n');
+  alert(msg);
+  try {
+    await navigator.clipboard.writeText(res.shortCode || res.code);
+    showToast('短縮コードをコピーしました');
+  } catch (e) {
+    showToast('コードをメモしてください');
+  }
+}
+
+async function adminRestoreUserToDevice(userId) {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return;
+  }
+  const user = getUser(userId);
+  const name = user ? user.name : userId;
+  if (!confirm(`「${name}」のデータをこの端末に復元しますか？`)) return;
+  const password = prompt('引き継ぎパスワード（未設定なら空欄）');
+  if (password === null) return;
+  showToast('サーバーから復元中…');
+  const result = await restoreAccountByUserId(userId, password);
+  finishAccountRestore(result);
+}
+
+async function adminForceGlobalSync() {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return;
+  }
+  ensureSyncUrlForRestore();
+  const res = await adminCloudRequest('/api/admin/force-sync', { method: 'POST', body: '{}' });
+  if (!res || !res.ok) {
+    showToast('強制同期に失敗しました（再ログインしてください）');
+    return;
+  }
+  localStorage.removeItem(ACTIVITY_VERSION_KEY);
+  if (typeof syncAllConversations === 'function') await syncAllConversations();
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+  showToast('全端末への同期を通知しました');
+}
+
 onAppInit(() => {
   applyAppBranding();
+  ensureSyncUrlForRestore();
   bindClick('btn-admin-force-friend', () => showAdminForceFriendPairDialog());
+  bindClick('btn-admin-force-sync', () => adminForceGlobalSync());
+  const user = getCurrentUser();
+  if (user && getEffectiveSyncUrl() && typeof uploadCloudBackup === 'function') {
+    uploadCloudBackup().catch(() => {});
+  }
 });
 
 if (document.readyState === 'loading') {

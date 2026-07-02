@@ -6,6 +6,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8766;
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -45,11 +46,119 @@ function verifyAdminLogin(email, password) {
   return null;
 }
 
+function issueAdminSession(data, role) {
+  if (!data.adminSessions) data.adminSessions = {};
+  const token = crypto.randomBytes(24).toString('hex');
+  data.adminSessions[token] = { role, expiresAt: Date.now() + 86400000 };
+  Object.keys(data.adminSessions).forEach(k => {
+    if (data.adminSessions[k].expiresAt < Date.now()) delete data.adminSessions[k];
+  });
+  return token;
+}
+
+function verifyAdminSession(data, token, needSuper) {
+  if (!token || !data.adminSessions) return null;
+  const s = data.adminSessions[token];
+  if (!s || s.expiresAt < Date.now()) return null;
+  if (needSuper && s.role !== 'super') return null;
+  return s.role;
+}
+
+function friendshipListForUser(data, userId) {
+  const uid = String(userId);
+  const out = [];
+  const seen = new Set();
+  const add = (f) => {
+    if (!f || !f.user1 || !f.user2) return;
+    const key = [String(f.user1), String(f.user2)].sort().join('_');
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      user1: String(f.user1),
+      user2: String(f.user2),
+      createdAt: f.createdAt || Date.now()
+    });
+  };
+  const raw = data.friendships || {};
+  if (Array.isArray(raw)) raw.forEach(add);
+  else Object.values(raw).forEach(f => {
+    if (String(f.user1) === uid || String(f.user2) === uid) add(f);
+  });
+  const ufs = (data.userFriendships && data.userFriendships[uid]) || {};
+  Object.keys(ufs).forEach(fid => add({ user1: uid, user2: fid, createdAt: Date.now() }));
+  return out;
+}
+
+function buildUserSyncBundle(data, userId) {
+  const uid = String(userId);
+  const user = data.users && data.users[uid];
+  if (!user) return null;
+
+  const convIds = Object.keys((data.userConversations && data.userConversations[uid]) || {});
+  const conversations = {};
+  const messages = {};
+  const users = { [uid]: user };
+  const readReceipts = {};
+
+  convIds.forEach(convId => {
+    const conv = data.conversations && data.conversations[convId];
+    if (!conv) return;
+    conversations[convId] = conv;
+    (conv.members || []).forEach(mid => {
+      if (data.users[mid]) users[String(mid)] = data.users[mid];
+    });
+    const convMsgs = (data.messages && data.messages[convId]) || {};
+    messages[convId] = Array.isArray(convMsgs)
+      ? convMsgs
+      : Object.values(convMsgs).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    if (data.readReceipts && data.readReceipts[convId]) {
+      readReceipts[convId] = data.readReceipts[convId];
+    }
+  });
+
+  return {
+    version: 2,
+    exportedAt: Date.now(),
+    syncUrl: null,
+    data: {
+      currentUserId: uid,
+      users,
+      friendCodes: {},
+      friendships: friendshipListForUser(data, uid),
+      conversations,
+      messages,
+      readReceipts,
+      customStickerPacks: (data.userStickers && data.userStickers[uid] && data.userStickers[uid].packs) || [],
+      titlePresets: data.titlePresets || []
+    }
+  };
+}
+
+function createTransferEntry(data, backup, hours) {
+  if (!data.transfers) data.transfers = {};
+  if (!data.shortTransfers) data.shortTransfers = {};
+  const token = Date.now().toString(36) + crypto.randomBytes(8).toString('hex');
+  const expiresAt = Date.now() + (hours || 24) * 60 * 60 * 1000;
+  data.transfers[token] = {
+    backup,
+    expiresAt,
+    consumed: false,
+    createdAt: Date.now()
+  };
+  let shortCode = '';
+  for (let i = 0; i < 8; i++) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    shortCode += chars[Math.floor(Math.random() * chars.length)];
+  }
+  data.shortTransfers[shortCode] = { token, expiresAt };
+  return { token, shortCode, code: 'bluechat-transfer:' + token, expiresAt };
+}
+
 function loadData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (e) {
-    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {}, announcements: [], announcementReads: {}, activityVersion: 0 };
+    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, shortTransfers: {}, adminSessions: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {}, announcements: [], announcementReads: {}, activityVersion: 0, titlePresets: [] };
   }
 }
 
@@ -82,7 +191,7 @@ function sendJson(res, status, data) {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token'
   });
   res.end(JSON.stringify(data));
 }
@@ -92,7 +201,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token'
     });
     res.end();
     return;
@@ -124,11 +233,84 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 401, { error: 'invalid' });
         return;
       }
-      sendJson(res, 200, { ok: true, role });
+      const data = loadData();
+      const token = issueAdminSession(data, role);
+      saveData(data);
+      sendJson(res, 200, { ok: true, role, token });
       return;
     }
 
     const data = loadData();
+
+    const adminToken = req.headers['x-admin-token'] || req.headers['X-Admin-Token'] || '';
+    const adminRoleFromToken = verifyAdminSession(data, adminToken, false);
+
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'force-sync') {
+      if (!adminRoleFromToken) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+      saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true, version: data.activityVersion || 0 });
+      return;
+    }
+
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'issue-transfer') {
+      if (verifyAdminSession(data, adminToken, true) !== 'super') {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+      const body = await readBody(req);
+      const userId = String(body.userId || '').trim();
+      if (!userId) {
+        sendJson(res, 400, { error: 'userId required' });
+        return;
+      }
+      let backup = (data.cloudBackups && data.cloudBackups[userId] && data.cloudBackups[userId].backup) || null;
+      if (!backup || !backup.data) {
+        backup = buildUserSyncBundle(data, userId);
+      }
+      if (!backup || !backup.data) {
+        sendJson(res, 404, { error: 'no_data' });
+        return;
+      }
+      const entry = createTransferEntry(data, backup, body.hours || 72);
+      saveData(data);
+      sendJson(res, 200, {
+        ok: true,
+        code: entry.code,
+        shortCode: entry.shortCode,
+        expiresAt: entry.expiresAt
+      });
+      return;
+    }
+
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'user' && parts[2] && parts[3] === 'sync-bundle') {
+      const userId = parts[2];
+      const bundle = buildUserSyncBundle(data, userId);
+      if (!bundle) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      sendJson(res, 200, bundle);
+      return;
+    }
+
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'transfer-short' && parts[2]) {
+      const short = String(parts[2] || '').trim().toUpperCase();
+      const ref = (data.shortTransfers && data.shortTransfers[short]) || null;
+      if (!ref || Date.now() > ref.expiresAt) {
+        sendJson(res, 404, { error: 'expired' });
+        return;
+      }
+      const t = data.transfers && data.transfers[ref.token];
+      if (!t || Date.now() > t.expiresAt) {
+        sendJson(res, 404, { error: 'expired' });
+        return;
+      }
+      sendJson(res, 200, { code: 'bluechat-transfer:' + ref.token, backup: t.backup });
+      return;
+    }
 
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'conversations' && parts[2]) {
       const conv = await readBody(req);

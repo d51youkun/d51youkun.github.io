@@ -176,6 +176,139 @@ function getEffectiveSyncUrl() {
   return '';
 }
 
+const ADMIN_TOKEN_KEY = 'bluechat_admin_token';
+
+function ensureSyncUrlForRestore() {
+  if (!getSyncUrl() && typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+    setSyncUrl(DEFAULT_SYNC_URL);
+  }
+}
+
+function getAdminToken() {
+  return localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+}
+
+function saveAdminToken(token) {
+  if (token) localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  else localStorage.removeItem(ADMIN_TOKEN_KEY);
+}
+
+async function adminCloudRequest(path, options = {}, timeoutMs = 120000) {
+  const base = getEffectiveSyncUrl();
+  if (!base) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(base + path, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Token': getAdminToken(),
+        ...(options.headers || {})
+      }
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function pullServerSyncBundle(userId) {
+  ensureSyncUrlForRestore();
+  if (!getEffectiveSyncUrl()) return null;
+  return cloudRequestExt(`/api/user/${encodeURIComponent(userId)}/sync-bundle`, {}, 120000);
+}
+
+async function restoreAccountByUserId(userId, password) {
+  const uid = String(userId || '').trim();
+  if (!uid) return { error: 'ユーザーIDを入力してください' };
+  ensureSyncUrlForRestore();
+  if (!getEffectiveSyncUrl()) {
+    return { error: '同期サーバーに接続できません。マイページでURLを確認してください' };
+  }
+
+  const cloud = await fetchCloudBackup(uid);
+  if (cloud && cloud.backup && cloud.backup.data) {
+    const backup = cloud.backup;
+    if (backup.passwordHash) {
+      if (password === null || password === undefined) return { error: 'パスワードが必要です' };
+      if (backup.passwordHash !== simpleHash(password || '')) {
+        return { error: 'パスワードが正しくありません' };
+      }
+    }
+    try {
+      importTransferBackup(backup);
+      return { success: true, source: 'cloud' };
+    } catch (e) {
+      return { error: e.message || 'クラウド復元に失敗しました' };
+    }
+  }
+
+  const bundle = await pullServerSyncBundle(uid);
+  if (bundle && bundle.data) {
+    try {
+      importTransferBackup(bundle);
+      return { success: true, source: 'server' };
+    } catch (e) {
+      return { error: e.message || 'サーバーからの復元に失敗しました' };
+    }
+  }
+
+  return { error: 'バックアップが見つかりません。古い端末で一度アプリを開いてください' };
+}
+
+function finishAccountRestore(result) {
+  if (result.error) {
+    showToast(result.error);
+    return false;
+  }
+  hideModal('modal-transfer-scan');
+  stopTransferScanner();
+  showScreen('main');
+  refreshMainUI();
+  startGlobalSync();
+  if (typeof startPresenceHeartbeat === 'function') startPresenceHeartbeat();
+  if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
+  showToast('引き継ぎが完了しました！');
+  return true;
+}
+
+async function redeemTransferCodeExt(code) {
+  const raw = String(code || '').trim();
+  if (!raw) return { error: 'コードを入力してください' };
+  ensureSyncUrlForRestore();
+
+  let transferCode = raw;
+  if (!raw.includes(TRANSFER_PREFIX)) {
+    const short = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (short.length >= 6 && short.length <= 12) {
+      const shortRes = await cloudRequestExt(`/api/transfer-short/${encodeURIComponent(short)}`, {}, 120000);
+      if (shortRes && shortRes.code) transferCode = shortRes.code;
+      else if (shortRes && shortRes.backup) {
+        try {
+          importTransferBackup(shortRes.backup);
+          return { success: true };
+        } catch (e) {
+          return { error: e.message || '復元に失敗しました' };
+        }
+      }
+    }
+    if (!transferCode.includes(TRANSFER_PREFIX) && /^[a-z0-9]{10,}$/i.test(raw)) {
+      transferCode = TRANSFER_PREFIX + raw;
+    }
+  }
+
+  if (typeof redeemTransferCode === 'function') {
+    return redeemTransferCode(transferCode);
+  }
+  return { error: '引き継ぎ機能が利用できません' };
+}
+
 async function verifyAdminCredentialsAsync(email, password) {
   const base = getEffectiveSyncUrl();
   if (!base) {
@@ -197,7 +330,8 @@ async function verifyAdminCredentialsAsync(email, password) {
       return null;
     }
     const data = await res.json();
-    return data.role || null;
+    if (data.token) saveAdminToken(data.token);
+    return data.role ? { role: data.role, token: data.token } : null;
   } catch (e) {
     showToast('認証サーバーに接続できません');
     return null;
@@ -661,14 +795,26 @@ function handleTransferRedeemResult(result) {
 }
 
 function openTransferScanModal() {
+  ensureSyncUrlForRestore();
   if (typeof stopQrScanner === 'function') stopQrScanner();
   stopTransferScanner();
   transferScanHandled = false;
   qrScanHandled = false;
-  const input = document.getElementById('input-transfer-code');
-  if (input) input.value = '';
   showModal('modal-transfer-scan');
   setTimeout(() => startQrScannerForTransfer(), 350);
+}
+
+function restoreByUserIdFromModal() {
+  ensureSyncUrlForRestore();
+  const userId = document.getElementById('input-transfer-user-id')?.value?.trim() || '';
+  if (!userId) {
+    showToast('ユーザーIDを入力してください');
+    return;
+  }
+  const password = prompt('引き継ぎパスワード（未設定なら空欄でOK）');
+  if (password === null) return;
+  showToast('サーバーから復元中…');
+  restoreAccountByUserId(userId, password).then(finishAccountRestore);
 }
 
 async function startQrScannerForTransfer() {
@@ -738,7 +884,7 @@ function onTransferScanSuccess(decodedText) {
   qrScanHandled = true;
   stopTransferScanner();
   showToast('引き継ぎ中…');
-  redeemTransferCode(code).then(handleTransferRedeemResult);
+  redeemTransferCodeExt(code).then(handleTransferRedeemResult);
 }
 
 // ─── WebRTC calls ────────────────────────────────────────
@@ -1296,15 +1442,16 @@ function setupGlobalClickDelegation() {
     'btn-redeem-transfer-code': () => {
       const code = document.getElementById('input-transfer-code')?.value?.trim() || '';
       if (!code) { showToast('引き継ぎコードを入力してください'); return; }
-      if (typeof redeemTransferCode !== 'function') return;
       stopTransferScanner();
       showToast('引き継ぎ中…');
-      redeemTransferCode(code).then(handleTransferRedeemResult);
+      redeemTransferCodeExt(code).then(handleTransferRedeemResult);
     },
+    'btn-restore-by-user-id': () => restoreByUserIdFromModal(),
     'btn-line-sticker-shop': () => window.open(LINE_STICKER_SHOP_URL, '_blank'),
     'btn-admin-logout': () => {
       adminLoggedIn = false;
       adminRole = null;
+      saveAdminToken('');
       saveAdminSession();
       updateAdminTabVisibility();
       document.querySelector('.tab[data-tab="chats"]')?.click();
@@ -1313,6 +1460,7 @@ function setupGlobalClickDelegation() {
     'btn-admin-logout-mod': () => {
       adminLoggedIn = false;
       adminRole = null;
+      saveAdminToken('');
       saveAdminSession();
       updateAdminTabVisibility();
       document.querySelector('.tab[data-tab="chats"]')?.click();

@@ -69,23 +69,13 @@ async function restoreFromCloudBackup(userId, password) {
 }
 
 function showCloudRestoreModal() {
-  const userId = prompt('復元するアカウントのユーザーIDを入力してください\n（マイページに表示されています）\n\n別ブラウザで使っていた場合も、同じIDで復元できます');
+  ensureSyncUrlForRestore();
+  const userId = prompt('復元するアカウントのユーザーIDを入力してください\n（マイページに表示されています）');
   if (!userId || !userId.trim()) return;
   const password = prompt('引き継ぎパスワード（設定していない場合は空欄でOK）');
   if (password === null) return;
-  showToast('クラウドから復元中…');
-  restoreFromCloudBackup(userId.trim(), password).then(result => {
-    if (result.error) {
-      showToast(result.error);
-      return;
-    }
-    showScreen('main');
-    refreshMainUI();
-    startGlobalSync();
-    startPresenceHeartbeat();
-    scheduleCloudBackup();
-    showToast('クラウドから復元しました！');
-  });
+  showToast('サーバーから復元中…');
+  restoreAccountByUserId(userId.trim(), password).then(finishAccountRestore);
 }
 
 async function createTransferSessionV6() {
@@ -140,6 +130,7 @@ async function createTransferSessionV6() {
 createTransferSession = createTransferSessionV6;
 
 async function redeemTransferCodeV6(code) {
+  ensureSyncUrlForRestore();
   const raw = String(code || '').trim();
   const idx = raw.indexOf(TRANSFER_PREFIX);
   if (idx < 0) return { error: '無効な引き継ぎコードです' };
@@ -379,8 +370,7 @@ stopGlobalSync = function () {
 function initV6Features() {
   bindClick('btn-cloud-restore', () => showCloudRestoreModal());
   bindClick('btn-cloud-restore-onboarding', () => {
-    const url = prompt('同期サーバーURL（空欄でデフォルト）', getEffectiveSyncUrl() || '');
-    if (url !== null && url.trim()) setSyncUrl(url.trim());
+    ensureSyncUrlForRestore();
     showCloudRestoreModal();
   });
 

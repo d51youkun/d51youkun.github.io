@@ -688,7 +688,7 @@ function initSyncFromQuery() {
 }
 
 async function cloudRequest(path, options = {}, timeoutMs = 45000) {
-  const base = getSyncUrl();
+  const base = typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl();
   if (!base) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

@@ -1463,6 +1463,8 @@ input:focus {
 .admin-btn-suspend { background: #f59e0b; color: #fff; }
 .admin-btn-friend { background: #22c55e; color: #fff; }
 .admin-btn-friend:disabled { opacity: 0.55; cursor: default; }
+.admin-btn-issue-transfer { background: #7c3aed; color: #fff; }
+.admin-btn-restore-user { background: #0ea5e9; color: #fff; }
 
 .admin-search-input {
   flex: 1;
@@ -1559,7 +1561,7 @@ body :where(
 .btn-primary, .btn-secondary, .btn-send, .btn-attach, .btn-call,
 .btn-text-link, .btn-download-image, .message-file-link,
 .admin-btn, .admin-btn-view, .admin-btn-delete, .admin-btn-ban,
-.admin-btn-unban, .admin-btn-premium, .admin-btn-super-premium, .admin-btn-suspend, .admin-btn-friend, .admin-btn-title,
+.admin-btn-unban, .admin-btn-premium, .admin-btn-super-premium, .admin-btn-suspend, .admin-btn-friend, .admin-btn-issue-transfer, .admin-btn-restore-user, .admin-btn-title,
 .icon-btn, #btn-back-chat,
 .chat-header-info h2, #header-title, #chat-title, #chat-subtitle,
 .form-label, .form-desc, .profile-id, .qr-hint, .admin-search-input,
@@ -1878,6 +1880,7 @@ html[data-theme="dark"] body textarea::placeholder {
           <button type="button" id="btn-admin-refresh-users" class="btn-secondary btn-sm">サーバーから更新</button>
           <button type="button" id="btn-admin-title-presets" class="btn-secondary btn-sm">称号を管理</button>
           <button type="button" id="btn-admin-force-friend" class="btn-secondary btn-sm">強制友だち</button>
+          <button type="button" id="btn-admin-force-sync" class="btn-secondary btn-sm">強制同期</button>
         </div>
         <div id="main-admin-user-list" class="list"></div>
         <div id="main-admin-empty-users" class="empty-state hidden"><p>登録ユーザーがいません</p></div>
@@ -2132,7 +2135,13 @@ html[data-theme="dark"] body textarea::placeholder {
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <h3>引き継ぎ</h3>
-      <p>古い端末の引き継ぎQRをスキャンするか、コードを直接入力してください</p>
+      <p><strong>おすすめ:</strong> ユーザーIDで復元（QR不要）</p>
+      <div class="sticker-import" style="margin-bottom:16px">
+        <p class="form-label">ユーザーIDで引き継ぎ</p>
+        <input type="text" id="input-transfer-user-id" placeholder="マイページに表示されるID" class="sync-settings input-url" autocomplete="off">
+        <button type="button" id="btn-restore-by-user-id" class="btn-primary btn-sm">IDで引き継ぐ</button>
+      </div>
+      <p class="qr-hint">または QR / コードで引き継ぎ</p>
       <div id="qr-reader-transfer-wrap" class="qr-reader-wrap">
         <div id="qr-reader-transfer"></div>
       </div>
@@ -2140,7 +2149,7 @@ html[data-theme="dark"] body textarea::placeholder {
       <button type="button" id="btn-stop-transfer-camera" class="btn-secondary btn-sm">停止</button>
       <div class="sticker-import" style="margin-top:16px">
         <p class="form-label">引き継ぎコードを入力</p>
-        <input type="text" id="input-transfer-code" placeholder="bluechat-transfer:..." class="sync-settings input-url" autocomplete="off">
+        <input type="text" id="input-transfer-code" placeholder="bluechat-transfer:... または短縮コード" class="sync-settings input-url" autocomplete="off">
         <button type="button" id="btn-redeem-transfer-code" class="btn-secondary btn-sm">コードで引き継ぐ</button>
       </div>
       <p class="qr-hint" style="margin-top:12px">QRの期限が切れた場合は、マイページの「クラウドから復元」（ユーザーID）も使えます（30日間保存）。</p>
@@ -2870,7 +2879,7 @@ function initSyncFromQuery() {
 }
 
 async function cloudRequest(path, options = {}, timeoutMs = 45000) {
-  const base = getSyncUrl();
+  const base = typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl();
   if (!base) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -4600,6 +4609,139 @@ function getEffectiveSyncUrl() {
   return '';
 }
 
+const ADMIN_TOKEN_KEY = 'bluechat_admin_token';
+
+function ensureSyncUrlForRestore() {
+  if (!getSyncUrl() && typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+    setSyncUrl(DEFAULT_SYNC_URL);
+  }
+}
+
+function getAdminToken() {
+  return localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+}
+
+function saveAdminToken(token) {
+  if (token) localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  else localStorage.removeItem(ADMIN_TOKEN_KEY);
+}
+
+async function adminCloudRequest(path, options = {}, timeoutMs = 120000) {
+  const base = getEffectiveSyncUrl();
+  if (!base) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(base + path, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Token': getAdminToken(),
+        ...(options.headers || {})
+      }
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function pullServerSyncBundle(userId) {
+  ensureSyncUrlForRestore();
+  if (!getEffectiveSyncUrl()) return null;
+  return cloudRequestExt(`/api/user/${encodeURIComponent(userId)}/sync-bundle`, {}, 120000);
+}
+
+async function restoreAccountByUserId(userId, password) {
+  const uid = String(userId || '').trim();
+  if (!uid) return { error: 'ユーザーIDを入力してください' };
+  ensureSyncUrlForRestore();
+  if (!getEffectiveSyncUrl()) {
+    return { error: '同期サーバーに接続できません。マイページでURLを確認してください' };
+  }
+
+  const cloud = await fetchCloudBackup(uid);
+  if (cloud && cloud.backup && cloud.backup.data) {
+    const backup = cloud.backup;
+    if (backup.passwordHash) {
+      if (password === null || password === undefined) return { error: 'パスワードが必要です' };
+      if (backup.passwordHash !== simpleHash(password || '')) {
+        return { error: 'パスワードが正しくありません' };
+      }
+    }
+    try {
+      importTransferBackup(backup);
+      return { success: true, source: 'cloud' };
+    } catch (e) {
+      return { error: e.message || 'クラウド復元に失敗しました' };
+    }
+  }
+
+  const bundle = await pullServerSyncBundle(uid);
+  if (bundle && bundle.data) {
+    try {
+      importTransferBackup(bundle);
+      return { success: true, source: 'server' };
+    } catch (e) {
+      return { error: e.message || 'サーバーからの復元に失敗しました' };
+    }
+  }
+
+  return { error: 'バックアップが見つかりません。古い端末で一度アプリを開いてください' };
+}
+
+function finishAccountRestore(result) {
+  if (result.error) {
+    showToast(result.error);
+    return false;
+  }
+  hideModal('modal-transfer-scan');
+  stopTransferScanner();
+  showScreen('main');
+  refreshMainUI();
+  startGlobalSync();
+  if (typeof startPresenceHeartbeat === 'function') startPresenceHeartbeat();
+  if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
+  showToast('引き継ぎが完了しました！');
+  return true;
+}
+
+async function redeemTransferCodeExt(code) {
+  const raw = String(code || '').trim();
+  if (!raw) return { error: 'コードを入力してください' };
+  ensureSyncUrlForRestore();
+
+  let transferCode = raw;
+  if (!raw.includes(TRANSFER_PREFIX)) {
+    const short = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (short.length >= 6 && short.length <= 12) {
+      const shortRes = await cloudRequestExt(`/api/transfer-short/${encodeURIComponent(short)}`, {}, 120000);
+      if (shortRes && shortRes.code) transferCode = shortRes.code;
+      else if (shortRes && shortRes.backup) {
+        try {
+          importTransferBackup(shortRes.backup);
+          return { success: true };
+        } catch (e) {
+          return { error: e.message || '復元に失敗しました' };
+        }
+      }
+    }
+    if (!transferCode.includes(TRANSFER_PREFIX) && /^[a-z0-9]{10,}$/i.test(raw)) {
+      transferCode = TRANSFER_PREFIX + raw;
+    }
+  }
+
+  if (typeof redeemTransferCode === 'function') {
+    return redeemTransferCode(transferCode);
+  }
+  return { error: '引き継ぎ機能が利用できません' };
+}
+
 async function verifyAdminCredentialsAsync(email, password) {
   const base = getEffectiveSyncUrl();
   if (!base) {
@@ -4621,7 +4763,8 @@ async function verifyAdminCredentialsAsync(email, password) {
       return null;
     }
     const data = await res.json();
-    return data.role || null;
+    if (data.token) saveAdminToken(data.token);
+    return data.role ? { role: data.role, token: data.token } : null;
   } catch (e) {
     showToast('認証サーバーに接続できません');
     return null;
@@ -5085,14 +5228,26 @@ function handleTransferRedeemResult(result) {
 }
 
 function openTransferScanModal() {
+  ensureSyncUrlForRestore();
   if (typeof stopQrScanner === 'function') stopQrScanner();
   stopTransferScanner();
   transferScanHandled = false;
   qrScanHandled = false;
-  const input = document.getElementById('input-transfer-code');
-  if (input) input.value = '';
   showModal('modal-transfer-scan');
   setTimeout(() => startQrScannerForTransfer(), 350);
+}
+
+function restoreByUserIdFromModal() {
+  ensureSyncUrlForRestore();
+  const userId = document.getElementById('input-transfer-user-id')?.value?.trim() || '';
+  if (!userId) {
+    showToast('ユーザーIDを入力してください');
+    return;
+  }
+  const password = prompt('引き継ぎパスワード（未設定なら空欄でOK）');
+  if (password === null) return;
+  showToast('サーバーから復元中…');
+  restoreAccountByUserId(userId, password).then(finishAccountRestore);
 }
 
 async function startQrScannerForTransfer() {
@@ -5162,7 +5317,7 @@ function onTransferScanSuccess(decodedText) {
   qrScanHandled = true;
   stopTransferScanner();
   showToast('引き継ぎ中…');
-  redeemTransferCode(code).then(handleTransferRedeemResult);
+  redeemTransferCodeExt(code).then(handleTransferRedeemResult);
 }
 
 // ─── WebRTC calls ────────────────────────────────────────
@@ -5720,15 +5875,16 @@ function setupGlobalClickDelegation() {
     'btn-redeem-transfer-code': () => {
       const code = document.getElementById('input-transfer-code')?.value?.trim() || '';
       if (!code) { showToast('引き継ぎコードを入力してください'); return; }
-      if (typeof redeemTransferCode !== 'function') return;
       stopTransferScanner();
       showToast('引き継ぎ中…');
-      redeemTransferCode(code).then(handleTransferRedeemResult);
+      redeemTransferCodeExt(code).then(handleTransferRedeemResult);
     },
+    'btn-restore-by-user-id': () => restoreByUserIdFromModal(),
     'btn-line-sticker-shop': () => window.open(LINE_STICKER_SHOP_URL, '_blank'),
     'btn-admin-logout': () => {
       adminLoggedIn = false;
       adminRole = null;
+      saveAdminToken('');
       saveAdminSession();
       updateAdminTabVisibility();
       document.querySelector('.tab[data-tab="chats"]')?.click();
@@ -5737,6 +5893,7 @@ function setupGlobalClickDelegation() {
     'btn-admin-logout-mod': () => {
       adminLoggedIn = false;
       adminRole = null;
+      saveAdminToken('');
       saveAdminSession();
       updateAdminTabVisibility();
       document.querySelector('.tab[data-tab="chats"]')?.click();
@@ -6246,7 +6403,8 @@ openChat = function (convId) {
 performAdminLogin = function () {
   const email = document.getElementById('input-admin-email').value;
   const password = document.getElementById('input-admin-password').value;
-  verifyAdminCredentialsAsync(email, password).then((role) => {
+  verifyAdminCredentialsAsync(email, password).then((auth) => {
+    const role = auth && auth.role ? auth.role : null;
     if (!role) {
       if (getEffectiveSyncUrl()) showToast('メールアドレスまたはパスワードが正しくありません');
       return;
@@ -6592,6 +6750,8 @@ renderAdminUsers = function () {
         <div class="list-preview">ID: ${user.id}</div>
         <div class="admin-user-actions">
           ${friendBtnHtml}
+          <button class="admin-btn admin-btn-issue-transfer" data-user-id="${user.id}">引き継ぎ発行</button>
+          <button class="admin-btn admin-btn-restore-user" data-user-id="${user.id}">端末に復元</button>
           <button class="admin-btn admin-btn-title" data-user-id="${user.id}">${user.title?.text ? '称号変更' : '称号'}</button>
           <button class="admin-btn admin-btn-delete" data-user-id="${user.id}">削除</button>
         </div>
@@ -6614,6 +6774,14 @@ renderAdminUsers = function () {
       item.querySelector('.admin-btn-title').addEventListener('click', (e) => {
         e.stopPropagation();
         renderSuperAdminTitlePanel(user.id);
+      });
+      item.querySelector('.admin-btn-issue-transfer')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof adminIssueTransferForUser === 'function') adminIssueTransferForUser(user.id);
+      });
+      item.querySelector('.admin-btn-restore-user')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof adminRestoreUserToDevice === 'function') adminRestoreUserToDevice(user.id);
       });
       item.querySelector('.admin-btn-delete').addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -6788,23 +6956,13 @@ async function restoreFromCloudBackup(userId, password) {
 }
 
 function showCloudRestoreModal() {
-  const userId = prompt('復元するアカウントのユーザーIDを入力してください\n（マイページに表示されています）\n\n別ブラウザで使っていた場合も、同じIDで復元できます');
+  ensureSyncUrlForRestore();
+  const userId = prompt('復元するアカウントのユーザーIDを入力してください\n（マイページに表示されています）');
   if (!userId || !userId.trim()) return;
   const password = prompt('引き継ぎパスワード（設定していない場合は空欄でOK）');
   if (password === null) return;
-  showToast('クラウドから復元中…');
-  restoreFromCloudBackup(userId.trim(), password).then(result => {
-    if (result.error) {
-      showToast(result.error);
-      return;
-    }
-    showScreen('main');
-    refreshMainUI();
-    startGlobalSync();
-    startPresenceHeartbeat();
-    scheduleCloudBackup();
-    showToast('クラウドから復元しました！');
-  });
+  showToast('サーバーから復元中…');
+  restoreAccountByUserId(userId.trim(), password).then(finishAccountRestore);
 }
 
 async function createTransferSessionV6() {
@@ -6859,6 +7017,7 @@ async function createTransferSessionV6() {
 createTransferSession = createTransferSessionV6;
 
 async function redeemTransferCodeV6(code) {
+  ensureSyncUrlForRestore();
   const raw = String(code || '').trim();
   const idx = raw.indexOf(TRANSFER_PREFIX);
   if (idx < 0) return { error: '無効な引き継ぎコードです' };
@@ -7098,8 +7257,7 @@ stopGlobalSync = function () {
 function initV6Features() {
   bindClick('btn-cloud-restore', () => showCloudRestoreModal());
   bindClick('btn-cloud-restore-onboarding', () => {
-    const url = prompt('同期サーバーURL（空欄でデフォルト）', getEffectiveSyncUrl() || '');
-    if (url !== null && url.trim()) setSyncUrl(url.trim());
+    ensureSyncUrlForRestore();
     showCloudRestoreModal();
   });
 
@@ -8578,9 +8736,85 @@ function showAdminForceFriendPairDialog() {
   adminForceFriendship(id1.trim(), id2.trim());
 }
 
+async function adminIssueTransferForUser(userId) {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return;
+  }
+  ensureSyncUrlForRestore();
+  const user = getUser(userId);
+  const name = user ? user.name : userId;
+  if (!confirm(`「${name}」の引き継ぎコードを発行しますか？\n（QR不要・72時間有効）`)) return;
+
+  const res = await adminCloudRequest('/api/admin/issue-transfer', {
+    method: 'POST',
+    body: JSON.stringify({ userId: String(userId), hours: 72 })
+  });
+  if (!res || !res.ok) {
+    showToast('引き継ぎコードの発行に失敗しました（サーバーデータがない可能性）');
+    return;
+  }
+
+  const msg = [
+    `引き継ぎコードを発行しました（${name}）`,
+    '',
+    `短縮コード: ${res.shortCode}`,
+    '',
+    `長いコード:`,
+    res.code,
+    '',
+    '新しい端末の「引き継ぎ」画面で入力してください'
+  ].join('\n');
+  alert(msg);
+  try {
+    await navigator.clipboard.writeText(res.shortCode || res.code);
+    showToast('短縮コードをコピーしました');
+  } catch (e) {
+    showToast('コードをメモしてください');
+  }
+}
+
+async function adminRestoreUserToDevice(userId) {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return;
+  }
+  const user = getUser(userId);
+  const name = user ? user.name : userId;
+  if (!confirm(`「${name}」のデータをこの端末に復元しますか？`)) return;
+  const password = prompt('引き継ぎパスワード（未設定なら空欄）');
+  if (password === null) return;
+  showToast('サーバーから復元中…');
+  const result = await restoreAccountByUserId(userId, password);
+  finishAccountRestore(result);
+}
+
+async function adminForceGlobalSync() {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return;
+  }
+  ensureSyncUrlForRestore();
+  const res = await adminCloudRequest('/api/admin/force-sync', { method: 'POST', body: '{}' });
+  if (!res || !res.ok) {
+    showToast('強制同期に失敗しました（再ログインしてください）');
+    return;
+  }
+  localStorage.removeItem(ACTIVITY_VERSION_KEY);
+  if (typeof syncAllConversations === 'function') await syncAllConversations();
+  if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+  showToast('全端末への同期を通知しました');
+}
+
 onAppInit(() => {
   applyAppBranding();
+  ensureSyncUrlForRestore();
   bindClick('btn-admin-force-friend', () => showAdminForceFriendPairDialog());
+  bindClick('btn-admin-force-sync', () => adminForceGlobalSync());
+  const user = getCurrentUser();
+  if (user && getEffectiveSyncUrl() && typeof uploadCloudBackup === 'function') {
+    uploadCloudBackup().catch(() => {});
+  }
 });
 
 if (document.readyState === 'loading') {
