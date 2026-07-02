@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8766;
+const SERVER_VERSION = '2026-07-03';
 const DATA_FILE = path.join(__dirname, 'data.json');
 
 function loadDotEnv() {
@@ -222,7 +223,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'health') {
-      sendJson(res, 200, { ok: true, service: 'BlueChat Sync' });
+      sendJson(res, 200, { ok: true, service: 'BlueChat Sync', version: SERVER_VERSION });
       return;
     }
 
