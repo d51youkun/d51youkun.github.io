@@ -10,6 +10,41 @@ const path = require('path');
 const PORT = process.env.PORT || 8766;
 const DATA_FILE = path.join(__dirname, 'data.json');
 
+function loadDotEnv() {
+  const envPath = path.join(__dirname, '.env');
+  try {
+    if (!fs.existsSync(envPath)) return;
+    fs.readFileSync(envPath, 'utf8').split('\n').forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const eq = trimmed.indexOf('=');
+      if (eq < 1) return;
+      const key = trimmed.slice(0, eq).trim();
+      if (process.env[key] !== undefined) return;
+      let val = trimmed.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      process.env[key] = val;
+    });
+  } catch (e) { /* ignore */ }
+}
+
+loadDotEnv();
+
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const MODERATOR_EMAIL = (process.env.MODERATOR_EMAIL || '').trim().toLowerCase();
+const MODERATOR_PASSWORD = process.env.MODERATOR_PASSWORD || '';
+
+function verifyAdminLogin(email, password) {
+  const e = String(email || '').trim().toLowerCase();
+  const p = String(password || '').trim();
+  if (ADMIN_EMAIL && ADMIN_PASSWORD && e === ADMIN_EMAIL && p === ADMIN_PASSWORD) return 'super';
+  if (MODERATOR_EMAIL && MODERATOR_PASSWORD && e === MODERATOR_EMAIL && p === MODERATOR_PASSWORD) return 'moderator';
+  return null;
+}
+
 function loadData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
@@ -79,6 +114,17 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'health') {
       sendJson(res, 200, { ok: true, service: 'BlueChat Sync' });
+      return;
+    }
+
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'login') {
+      const body = await readBody(req);
+      const role = verifyAdminLogin(body.email, body.password);
+      if (!role) {
+        sendJson(res, 401, { error: 'invalid' });
+        return;
+      }
+      sendJson(res, 200, { ok: true, role });
       return;
     }
 
@@ -162,6 +208,7 @@ const server = http.createServer(async (req, res) => {
         || prev.bannedUntil !== user.bannedUntil
         || prev.suspendedUntil !== user.suspendedUntil
         || prev.premium !== user.premium
+        || prev.superPremium !== user.superPremium
         || JSON.stringify(prev.title) !== JSON.stringify(user.title);
       if (moderationChanged) saveDataWithActivity(data);
       else saveData(data);
@@ -179,7 +226,8 @@ const server = http.createServer(async (req, res) => {
         suspendedUntil: u.suspendedUntil || null,
         banned: u.banned || false,
         bannedUntil: u.bannedUntil || null,
-        premium: u.premium || false
+        premium: u.premium || false,
+        superPremium: u.superPremium || false
       }));
       users.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       sendJson(res, 200, users);
@@ -333,6 +381,25 @@ const server = http.createServer(async (req, res) => {
 
     // Cloud backup (7-day retention, restore anytime)
     if (!data.cloudBackups) data.cloudBackups = {};
+    // Title presets (max 10, shared across all clients)
+    if (!data.titlePresets) data.titlePresets = [];
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'title-presets') {
+      sendJson(res, 200, { presets: data.titlePresets || [] });
+      return;
+    }
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'title-presets') {
+      const body = await readBody(req);
+      const presets = Array.isArray(body.presets) ? body.presets.slice(0, 10) : [];
+      data.titlePresets = presets.map(p => ({
+        id: p.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        text: String(p.text || '').trim().slice(0, 20),
+        color: String(p.color || '#1a6fd4').trim()
+      })).filter(p => p.text);
+      saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true, presets: data.titlePresets });
+      return;
+    }
+
     // User sticker packs (sync across browsers on same account)
     if (!data.userStickers) data.userStickers = {};
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'user-stickers' && parts[2]) {

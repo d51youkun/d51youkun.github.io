@@ -107,19 +107,36 @@ function toggleTheme() {
 
 // ─── Premium badge ─────────────────────────────────────────
 function premiumBadgeHtml(user) {
-  if (!user || !user.premium) return '';
+  if (!user || !user.premium || user.superPremium) return '';
   return '<span class="premium-check" title="BlueChatプレミアム">✓</span>';
 }
 
-displayNameHtml = function (user) {
-  if (!user) return '不明';
-  let html = escapeHtml(user.name);
-  if (user.premium) html += premiumBadgeHtml(user);
-  if (user.title && user.title.text) {
+function superPremiumBadgeHtml(user) {
+  if (!user || !user.superPremium) return '';
+  return '<span class="super-premium-check" title="BlueChatスーパープレミアム">⭐️</span>';
+}
+
+function userBadgesHtml(user) {
+  if (!user) return '';
+  let html = '';
+  if (user.superPremium) html += superPremiumBadgeHtml(user);
+  else if (user.premium) html += premiumBadgeHtml(user);
+  if (typeof titleBadgeHtml === 'function') html += titleBadgeHtml(user);
+  else if (user.title && user.title.text) {
     const color = user.title.color || '#1a6fd4';
     html += `<span class="user-title-badge" style="background:${escapeHtml(color)}">${escapeHtml(user.title.text)}</span>`;
   }
   return html;
+}
+
+function userHasTalkBadge(user) {
+  if (!user) return false;
+  return !!user.superPremium || !!user.premium || !!(user.title && user.title.text);
+}
+
+displayNameHtml = function (user) {
+  if (!user) return '不明';
+  return `${escapeHtml(user.name)}${userBadgesHtml(user)}`;
 };
 
 // ─── Global Ban ────────────────────────────────────────────
@@ -153,7 +170,7 @@ async function syncCurrentUserModeration() {
   const data = getData();
   const local = data.users[user.id];
   if (!local) return;
-  ['banned', 'bannedUntil', 'suspendedUntil', 'premium', 'title'].forEach(k => {
+  ['banned', 'bannedUntil', 'suspendedUntil', 'premium', 'superPremium', 'title'].forEach(k => {
     if (remote[k] !== undefined) local[k] = remote[k];
   });
   saveData(data);
@@ -205,9 +222,20 @@ function adminSetPremium(userId, premium) {
   const user = getUser(userId);
   if (!user) return;
   user.premium = !!premium;
+  if (!premium && user.superPremium) user.superPremium = false;
   saveData(getData());
   cloudPushUser(user);
   showToast(premium ? 'プレミアムを付与しました' : 'プレミアムを解除しました');
+}
+
+function adminSetSuperPremium(userId, enabled) {
+  const user = getUser(userId);
+  if (!user) return;
+  user.superPremium = !!enabled;
+  if (enabled) user.premium = true;
+  saveData(getData());
+  cloudPushUser(user);
+  showToast(enabled ? 'スーパープレミアムを付与しました' : 'スーパープレミアムを解除しました');
 }
 
 async function adminSuspendUserHours(userId, hours) {
@@ -241,7 +269,11 @@ function startSyncVersionPolling() {
       await handleRemoteActivity();
       return;
     }
-    if (last === 0) localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
+    if (last === 0) {
+      localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
+      await handleRemoteActivity();
+      return;
+    }
   };
   poll();
   syncVersionTimer = setInterval(poll, ACTIVITY_POLL_MS);
@@ -679,6 +711,15 @@ function appendAdminV7Buttons() {
       adminSetPremium(userId, !u?.premium);
       renderAdminUsers();
     });
+    const spBtn = document.createElement('button');
+    spBtn.className = 'admin-btn admin-btn-super-premium';
+    spBtn.textContent = 'S.Premium';
+    spBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const u = getUser(userId);
+      adminSetSuperPremium(userId, !u?.superPremium);
+      renderAdminUsers();
+    });
     const suspBtn = document.createElement('button');
     suspBtn.className = 'admin-btn admin-btn-suspend';
     suspBtn.textContent = '時間停止';
@@ -693,6 +734,7 @@ function appendAdminV7Buttons() {
     actions.appendChild(unbanBtn);
     actions.appendChild(suspBtn);
     actions.appendChild(premBtn);
+    actions.appendChild(spBtn);
   });
 }
 

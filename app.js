@@ -3,8 +3,6 @@
  */
 
 const STORAGE_KEY = 'bluechat_data';
-const ADMIN_EMAIL = 'd51498go@icloud.com';
-const ADMIN_PASSWORD = 'D51498Go';
 const CODE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 const INVITE_PREFIX = 'bc:';
 const INVITE_PREFIX_LEGACY = 'bluechat:';
@@ -48,7 +46,8 @@ function loadData() {
     conversations: {},
     messages: {},
     readReceipts: {},
-    customStickerPacks: []
+    customStickerPacks: [],
+    titlePresets: []
   };
 }
 
@@ -319,6 +318,10 @@ function ensureLocalUser(userInfo) {
   }
   if (userInfo.premium !== undefined) {
     data.users[uid].premium = userInfo.premium;
+    saveData(data);
+  }
+  if (userInfo.superPremium !== undefined) {
+    data.users[uid].superPremium = userInfo.superPremium;
     saveData(data);
   }
   return data.users[uid];
@@ -772,6 +775,8 @@ async function syncMessageDeletions(convId) {
   if (!getSyncUrl() || !convId) return;
   const ids = await cloudRequest(`/api/messages/${convId}/ids`);
   if (!Array.isArray(ids)) return;
+  // サーバーにまだメッセージが無い場合はローカル履歴を消さない
+  if (ids.length === 0) return;
 
   const data = getData();
   if (!data.messages[convId] || !data.messages[convId].length) return;
@@ -893,6 +898,7 @@ async function cloudPushUser(user) {
     banned: !!user.banned,
     bannedUntil: user.bannedUntil || null,
     premium: !!user.premium,
+    superPremium: !!user.superPremium,
     passwordHash: user.passwordHash || null
   };
   for (let i = 0; i < 4; i++) {
@@ -955,6 +961,7 @@ async function syncFriendships() {
         if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
         if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
         if (remoteUser.premium !== undefined) u.premium = remoteUser.premium;
+        if (remoteUser.superPremium !== undefined) u.superPremium = remoteUser.superPremium;
         if (remoteUser.name) u.name = remoteUser.name;
         saveData(getData());
       }
@@ -981,6 +988,11 @@ async function syncUserConversationList() {
       if (remoteConv && remoteConv.members && remoteConv.members.includes(user.id)) {
         data.conversations[convId] = remoteConv;
         if (!data.messages[convId]) data.messages[convId] = [];
+        saveData(data);
+        const remoteMsgs = await cloudFetchMessages(convId, 0);
+        for (const msg of remoteMsgs) {
+          mergeRemoteMessage(convId, msg);
+        }
         changed = true;
       }
     }
@@ -1839,12 +1851,6 @@ function bindClick(id, handler) {
   if (el) el.addEventListener('click', handler);
 }
 
-function verifyAdminCredentials(email, password) {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
-  const normalizedPassword = String(password || '').trim();
-  return normalizedEmail === ADMIN_EMAIL.toLowerCase() && normalizedPassword === ADMIN_PASSWORD;
-}
-
 function saveAdminSession() {
   if (adminLoggedIn) localStorage.setItem(ADMIN_SESSION_KEY, '1');
   else localStorage.removeItem(ADMIN_SESSION_KEY);
@@ -1853,22 +1859,25 @@ function saveAdminSession() {
 function performAdminLogin() {
   const email = document.getElementById('input-admin-email').value;
   const password = document.getElementById('input-admin-password').value;
-  if (!verifyAdminCredentials(email, password)) {
-    showToast('メールアドレスまたはパスワードが正しくありません');
-    return;
-  }
-  adminLoggedIn = true;
-  saveAdminSession();
-  document.getElementById('input-admin-email').value = '';
-  document.getElementById('input-admin-password').value = '';
-  try {
-    renderAdminUsers();
-    renderAdminConversations();
-  } catch (e) {
-    console.error(e);
-  }
-  showScreen('admin');
-  showToast('管理者としてログインしました');
+  verifyAdminCredentialsAsync(email, password).then((role) => {
+    if (!role) {
+      if (getEffectiveSyncUrl()) showToast('メールアドレスまたはパスワードが正しくありません');
+      return;
+    }
+    adminLoggedIn = true;
+    adminRole = role;
+    saveAdminSession();
+    document.getElementById('input-admin-email').value = '';
+    document.getElementById('input-admin-password').value = '';
+    try {
+      renderAdminUsers();
+      renderAdminConversations();
+    } catch (e) {
+      console.error(e);
+    }
+    showScreen('admin');
+    showToast('管理者としてログインしました');
+  });
 }
 
 function setupAdminHandlers() {

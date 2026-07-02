@@ -176,6 +176,34 @@ function getEffectiveSyncUrl() {
   return '';
 }
 
+async function verifyAdminCredentialsAsync(email, password) {
+  const base = getEffectiveSyncUrl();
+  if (!base) {
+    showToast('管理者ログインには同期サーバーの設定が必要です');
+    return null;
+  }
+  try {
+    const res = await fetch(base + '/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: String(email || '').trim(),
+        password: String(password || '')
+      })
+    });
+    if (res.status === 401) return null;
+    if (!res.ok) {
+      showToast('認証サーバーに接続できません');
+      return null;
+    }
+    const data = await res.json();
+    return data.role || null;
+  } catch (e) {
+    showToast('認証サーバーに接続できません');
+    return null;
+  }
+}
+
 async function cloudRequestExt(path, options = {}, timeoutMs = 45000) {
   const base = getEffectiveSyncUrl();
   if (!base) return null;
@@ -312,8 +340,14 @@ function createMessageElementExt(msg, convId, user) {
   const isGroup = conv && conv.type === 'group';
   const isSent = String(msg.senderId) === String(user.id);
   const sender = data.users[msg.senderId];
-  const senderLabel = isSent ? 'あなた' : (sender ? sender.name : '不明');
-  const showSender = isGroup || isSent;
+  const showSender = isGroup || isSent || (sender && (
+    typeof userHasTalkBadge === 'function' ? userHasTalkBadge(sender) : (
+      !!(sender.title && sender.title.text) || !!sender.premium || !!sender.superPremium
+    )
+  ));
+  const senderHtml = typeof messageSenderHtml === 'function'
+    ? messageSenderHtml(msg, convId, user)
+    : escapeHtml(isSent ? 'あなた' : (sender ? sender.name : '不明'));
   const isMedia = ['image', 'video', 'sticker'].includes(msg.type) || msg.image;
 
   const readLabel = isSent && isMessageReadByOther(msg, convId, user.id)
@@ -324,7 +358,7 @@ function createMessageElementExt(msg, convId, user) {
   el.dataset.msgId = msg.id;
   el.innerHTML = `
     <div class="message-bubble${isMedia ? ' message-bubble-image' : ''}">
-      ${showSender ? `<div class="message-sender">${escapeHtml(senderLabel)}</div>` : ''}
+      ${showSender ? `<div class="message-sender">${senderHtml}</div>` : ''}
       ${getMessageContentHtmlExt(msg)}
       ${isSent ? '<button type="button" class="btn-delete-message" aria-label="削除">×</button>' : ''}
     </div>
@@ -480,7 +514,8 @@ function buildTransferBackup() {
       conversations: data.conversations,
       messages: data.messages,
       readReceipts: data.readReceipts || {},
-      customStickerPacks: data.customStickerPacks || []
+      customStickerPacks: data.customStickerPacks || [],
+      titlePresets: data.titlePresets || []
     }
   };
 }
@@ -503,7 +538,8 @@ function importTransferBackup(backup) {
     conversations: payload.conversations || {},
     messages: payload.messages || {},
     readReceipts: payload.readReceipts || {},
-    customStickerPacks: payload.customStickerPacks || []
+    customStickerPacks: payload.customStickerPacks || [],
+    titlePresets: payload.titlePresets || []
   };
   try {
     saveData(merged);

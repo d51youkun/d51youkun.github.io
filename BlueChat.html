@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#1a6fd4">
-  <title>BlueChat v9</title>
+  <title>BlueChat v10</title>
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <style>
@@ -1396,6 +1396,24 @@ input:focus {
   vertical-align: middle;
 }
 
+.super-premium-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  background: linear-gradient(135deg, #c9a227, #f5d76e);
+  color: #fff;
+  font-size: 10px;
+  border-radius: 50%;
+  vertical-align: middle;
+  line-height: 1;
+  box-shadow: 0 0 0 1px rgba(180, 140, 20, 0.35);
+}
+
+.admin-btn-super-premium { background: linear-gradient(135deg, #c9a227, #f5d76e); color: #3d2e00; }
+
 /* v7: ban screen */
 .ban-container {
   max-width: 360px;
@@ -1536,7 +1554,7 @@ body :where(
 .btn-primary, .btn-secondary, .btn-send, .btn-attach, .btn-call,
 .btn-text-link, .btn-download-image, .message-file-link,
 .admin-btn, .admin-btn-view, .admin-btn-delete, .admin-btn-ban,
-.admin-btn-unban, .admin-btn-premium, .admin-btn-suspend, .admin-btn-title,
+.admin-btn-unban, .admin-btn-premium, .admin-btn-super-premium, .admin-btn-suspend, .admin-btn-title,
 .icon-btn, #btn-back-chat,
 .chat-header-info h2, #header-title, #chat-title, #chat-subtitle,
 .form-label, .form-desc, .profile-id, .qr-hint, .admin-search-input,
@@ -1545,7 +1563,7 @@ body :where(
 .feedback-panel h3, .feedback-type, .feedback-time,
 .presence-label, .presence-label.online, .presence-label.offline,
 .chat-presence-status, .chat-presence-status.online, .chat-presence-status.offline,
-.user-title-badge, .premium-check,
+.user-title-badge, .premium-check, .super-premium-check,
 .date-separator span, .sticker-pack-label, .file-name,
 .ban-message, .admin-not-friend, .admin-self,
 .toast, .btn-delete-message, .btn-delete-post,
@@ -1636,6 +1654,22 @@ html[data-theme="dark"] body textarea::placeholder {
 .title-color-modal h3 {
   margin-bottom: 12px;
   text-align: center;
+}
+
+.message-sender .user-title-badge {
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.chat-header-info h2 .user-title-badge {
+  margin-left: 6px;
+  vertical-align: middle;
+  font-size: 12px;
+}
+
+.list-name .user-title-badge {
+  margin-left: 4px;
+  vertical-align: middle;
 }
 
 .title-color-palette {
@@ -1837,6 +1871,7 @@ html[data-theme="dark"] body textarea::placeholder {
         <div class="action-bar">
           <input type="text" id="input-admin-user-search" class="admin-search-input" placeholder="名前またはIDで検索">
           <button type="button" id="btn-admin-refresh-users" class="btn-secondary btn-sm">サーバーから更新</button>
+          <button type="button" id="btn-admin-title-presets" class="btn-secondary btn-sm">称号を管理</button>
         </div>
         <div id="main-admin-user-list" class="list"></div>
         <div id="main-admin-empty-users" class="empty-state hidden"><p>登録ユーザーがいません</p></div>
@@ -2144,8 +2179,6 @@ var __Html5QrcodeLibrary__;(()=>{var t={449:function(t,e,r){!function(t){"use st
  */
 
 const STORAGE_KEY = 'bluechat_data';
-const ADMIN_EMAIL = 'd51498go@icloud.com';
-const ADMIN_PASSWORD = 'D51498Go';
 const CODE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 const INVITE_PREFIX = 'bc:';
 const INVITE_PREFIX_LEGACY = 'bluechat:';
@@ -2189,7 +2222,8 @@ function loadData() {
     conversations: {},
     messages: {},
     readReceipts: {},
-    customStickerPacks: []
+    customStickerPacks: [],
+    titlePresets: []
   };
 }
 
@@ -2460,6 +2494,10 @@ function ensureLocalUser(userInfo) {
   }
   if (userInfo.premium !== undefined) {
     data.users[uid].premium = userInfo.premium;
+    saveData(data);
+  }
+  if (userInfo.superPremium !== undefined) {
+    data.users[uid].superPremium = userInfo.superPremium;
     saveData(data);
   }
   return data.users[uid];
@@ -2913,6 +2951,8 @@ async function syncMessageDeletions(convId) {
   if (!getSyncUrl() || !convId) return;
   const ids = await cloudRequest(`/api/messages/${convId}/ids`);
   if (!Array.isArray(ids)) return;
+  // サーバーにまだメッセージが無い場合はローカル履歴を消さない
+  if (ids.length === 0) return;
 
   const data = getData();
   if (!data.messages[convId] || !data.messages[convId].length) return;
@@ -3034,6 +3074,7 @@ async function cloudPushUser(user) {
     banned: !!user.banned,
     bannedUntil: user.bannedUntil || null,
     premium: !!user.premium,
+    superPremium: !!user.superPremium,
     passwordHash: user.passwordHash || null
   };
   for (let i = 0; i < 4; i++) {
@@ -3096,6 +3137,7 @@ async function syncFriendships() {
         if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
         if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
         if (remoteUser.premium !== undefined) u.premium = remoteUser.premium;
+        if (remoteUser.superPremium !== undefined) u.superPremium = remoteUser.superPremium;
         if (remoteUser.name) u.name = remoteUser.name;
         saveData(getData());
       }
@@ -3122,6 +3164,11 @@ async function syncUserConversationList() {
       if (remoteConv && remoteConv.members && remoteConv.members.includes(user.id)) {
         data.conversations[convId] = remoteConv;
         if (!data.messages[convId]) data.messages[convId] = [];
+        saveData(data);
+        const remoteMsgs = await cloudFetchMessages(convId, 0);
+        for (const msg of remoteMsgs) {
+          mergeRemoteMessage(convId, msg);
+        }
         changed = true;
       }
     }
@@ -3980,12 +4027,6 @@ function bindClick(id, handler) {
   if (el) el.addEventListener('click', handler);
 }
 
-function verifyAdminCredentials(email, password) {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
-  const normalizedPassword = String(password || '').trim();
-  return normalizedEmail === ADMIN_EMAIL.toLowerCase() && normalizedPassword === ADMIN_PASSWORD;
-}
-
 function saveAdminSession() {
   if (adminLoggedIn) localStorage.setItem(ADMIN_SESSION_KEY, '1');
   else localStorage.removeItem(ADMIN_SESSION_KEY);
@@ -3994,22 +4035,25 @@ function saveAdminSession() {
 function performAdminLogin() {
   const email = document.getElementById('input-admin-email').value;
   const password = document.getElementById('input-admin-password').value;
-  if (!verifyAdminCredentials(email, password)) {
-    showToast('メールアドレスまたはパスワードが正しくありません');
-    return;
-  }
-  adminLoggedIn = true;
-  saveAdminSession();
-  document.getElementById('input-admin-email').value = '';
-  document.getElementById('input-admin-password').value = '';
-  try {
-    renderAdminUsers();
-    renderAdminConversations();
-  } catch (e) {
-    console.error(e);
-  }
-  showScreen('admin');
-  showToast('管理者としてログインしました');
+  verifyAdminCredentialsAsync(email, password).then((role) => {
+    if (!role) {
+      if (getEffectiveSyncUrl()) showToast('メールアドレスまたはパスワードが正しくありません');
+      return;
+    }
+    adminLoggedIn = true;
+    adminRole = role;
+    saveAdminSession();
+    document.getElementById('input-admin-email').value = '';
+    document.getElementById('input-admin-password').value = '';
+    try {
+      renderAdminUsers();
+      renderAdminConversations();
+    } catch (e) {
+      console.error(e);
+    }
+    showScreen('admin');
+    showToast('管理者としてログインしました');
+  });
 }
 
 function setupAdminHandlers() {
@@ -4550,6 +4594,34 @@ function getEffectiveSyncUrl() {
   return '';
 }
 
+async function verifyAdminCredentialsAsync(email, password) {
+  const base = getEffectiveSyncUrl();
+  if (!base) {
+    showToast('管理者ログインには同期サーバーの設定が必要です');
+    return null;
+  }
+  try {
+    const res = await fetch(base + '/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: String(email || '').trim(),
+        password: String(password || '')
+      })
+    });
+    if (res.status === 401) return null;
+    if (!res.ok) {
+      showToast('認証サーバーに接続できません');
+      return null;
+    }
+    const data = await res.json();
+    return data.role || null;
+  } catch (e) {
+    showToast('認証サーバーに接続できません');
+    return null;
+  }
+}
+
 async function cloudRequestExt(path, options = {}, timeoutMs = 45000) {
   const base = getEffectiveSyncUrl();
   if (!base) return null;
@@ -4686,8 +4758,14 @@ function createMessageElementExt(msg, convId, user) {
   const isGroup = conv && conv.type === 'group';
   const isSent = String(msg.senderId) === String(user.id);
   const sender = data.users[msg.senderId];
-  const senderLabel = isSent ? 'あなた' : (sender ? sender.name : '不明');
-  const showSender = isGroup || isSent;
+  const showSender = isGroup || isSent || (sender && (
+    typeof userHasTalkBadge === 'function' ? userHasTalkBadge(sender) : (
+      !!(sender.title && sender.title.text) || !!sender.premium || !!sender.superPremium
+    )
+  ));
+  const senderHtml = typeof messageSenderHtml === 'function'
+    ? messageSenderHtml(msg, convId, user)
+    : escapeHtml(isSent ? 'あなた' : (sender ? sender.name : '不明'));
   const isMedia = ['image', 'video', 'sticker'].includes(msg.type) || msg.image;
 
   const readLabel = isSent && isMessageReadByOther(msg, convId, user.id)
@@ -4698,7 +4776,7 @@ function createMessageElementExt(msg, convId, user) {
   el.dataset.msgId = msg.id;
   el.innerHTML = `
     <div class="message-bubble${isMedia ? ' message-bubble-image' : ''}">
-      ${showSender ? `<div class="message-sender">${escapeHtml(senderLabel)}</div>` : ''}
+      ${showSender ? `<div class="message-sender">${senderHtml}</div>` : ''}
       ${getMessageContentHtmlExt(msg)}
       ${isSent ? '<button type="button" class="btn-delete-message" aria-label="削除">×</button>' : ''}
     </div>
@@ -4854,7 +4932,8 @@ function buildTransferBackup() {
       conversations: data.conversations,
       messages: data.messages,
       readReceipts: data.readReceipts || {},
-      customStickerPacks: data.customStickerPacks || []
+      customStickerPacks: data.customStickerPacks || [],
+      titlePresets: data.titlePresets || []
     }
   };
 }
@@ -4877,7 +4956,8 @@ function importTransferBackup(backup) {
     conversations: payload.conversations || {},
     messages: payload.messages || {},
     readReceipts: payload.readReceipts || {},
-    customStickerPacks: payload.customStickerPacks || []
+    customStickerPacks: payload.customStickerPacks || [],
+    titlePresets: payload.titlePresets || []
   };
   try {
     saveData(merged);
@@ -5670,8 +5750,6 @@ if (document.readyState === 'loading') {
  * BlueChat v4 features
  */
 
-const MODERATOR_EMAIL = 'zaku2.com';
-const MODERATOR_PASSWORD = 'MS-06S';
 const ADMIN_ROLE_KEY = 'bluechat_admin_role';
 const SUSPEND_DURATION_MS = 60 * 60 * 1000;
 
@@ -5739,14 +5817,6 @@ function formatSuspendedUntil(ts) {
 }
 
 // ─── Admin roles ─────────────────────────────────────────
-function verifyAdminCredentials(email, password) {
-  const e = String(email || '').trim().toLowerCase();
-  const p = String(password || '').trim();
-  if (e === ADMIN_EMAIL.toLowerCase() && p === ADMIN_PASSWORD) return 'super';
-  if (e === MODERATOR_EMAIL.toLowerCase() && p === MODERATOR_PASSWORD) return 'moderator';
-  return null;
-}
-
 function saveAdminSession() {
   if (adminLoggedIn && adminRole) {
     localStorage.setItem(ADMIN_SESSION_KEY, '1');
@@ -6103,13 +6173,9 @@ const _createMessageElementV4 = createMessageElement;
 createMessageElement = function (msg, convId, user) {
   const el = _createMessageElementV4(msg, convId, user);
   if (!el) return el;
-  const conv = getData().conversations[convId];
-  if (conv && conv.type === 'group') {
-    const sender = getData().users[msg.senderId];
-    const senderEl = el.querySelector('.message-sender');
-    if (senderEl && sender) {
-      senderEl.innerHTML = displayNameHtml(sender);
-    }
+  const senderEl = el.querySelector('.message-sender');
+  if (senderEl && typeof messageSenderHtml === 'function') {
+    senderEl.innerHTML = messageSenderHtml(msg, convId, user);
   }
   return el;
 };
@@ -6125,25 +6191,26 @@ openChat = function (convId) {
 performAdminLogin = function () {
   const email = document.getElementById('input-admin-email').value;
   const password = document.getElementById('input-admin-password').value;
-  const role = verifyAdminCredentials(email, password);
-  if (!role) {
-    showToast('メールアドレスまたはパスワードが正しくありません');
-    return;
-  }
-  adminLoggedIn = true;
-  adminRole = role;
-  saveAdminSession();
-  document.getElementById('input-admin-email').value = '';
-  document.getElementById('input-admin-password').value = '';
-  updateAdminTabVisibility();
-  if (role === 'super') {
-    showMainAdminTab();
-    showToast('管理者としてログインしました');
-  } else {
-    showMainModeratorTab();
-    showToast('モデレーターとしてログインしました');
-  }
-  showScreen('main');
+  verifyAdminCredentialsAsync(email, password).then((role) => {
+    if (!role) {
+      if (getEffectiveSyncUrl()) showToast('メールアドレスまたはパスワードが正しくありません');
+      return;
+    }
+    adminLoggedIn = true;
+    adminRole = role;
+    saveAdminSession();
+    document.getElementById('input-admin-email').value = '';
+    document.getElementById('input-admin-password').value = '';
+    updateAdminTabVisibility();
+    if (role === 'super') {
+      showMainAdminTab();
+      showToast('管理者としてログインしました');
+    } else {
+      showMainModeratorTab();
+      showToast('モデレーターとしてログインしました');
+    }
+    showScreen('main');
+  });
 };
 
 function showMainModeratorTab() {
@@ -7111,19 +7178,36 @@ function toggleTheme() {
 
 // ─── Premium badge ─────────────────────────────────────────
 function premiumBadgeHtml(user) {
-  if (!user || !user.premium) return '';
+  if (!user || !user.premium || user.superPremium) return '';
   return '<span class="premium-check" title="BlueChatプレミアム">✓</span>';
 }
 
-displayNameHtml = function (user) {
-  if (!user) return '不明';
-  let html = escapeHtml(user.name);
-  if (user.premium) html += premiumBadgeHtml(user);
-  if (user.title && user.title.text) {
+function superPremiumBadgeHtml(user) {
+  if (!user || !user.superPremium) return '';
+  return '<span class="super-premium-check" title="BlueChatスーパープレミアム">⭐️</span>';
+}
+
+function userBadgesHtml(user) {
+  if (!user) return '';
+  let html = '';
+  if (user.superPremium) html += superPremiumBadgeHtml(user);
+  else if (user.premium) html += premiumBadgeHtml(user);
+  if (typeof titleBadgeHtml === 'function') html += titleBadgeHtml(user);
+  else if (user.title && user.title.text) {
     const color = user.title.color || '#1a6fd4';
     html += `<span class="user-title-badge" style="background:${escapeHtml(color)}">${escapeHtml(user.title.text)}</span>`;
   }
   return html;
+}
+
+function userHasTalkBadge(user) {
+  if (!user) return false;
+  return !!user.superPremium || !!user.premium || !!(user.title && user.title.text);
+}
+
+displayNameHtml = function (user) {
+  if (!user) return '不明';
+  return `${escapeHtml(user.name)}${userBadgesHtml(user)}`;
 };
 
 // ─── Global Ban ────────────────────────────────────────────
@@ -7157,7 +7241,7 @@ async function syncCurrentUserModeration() {
   const data = getData();
   const local = data.users[user.id];
   if (!local) return;
-  ['banned', 'bannedUntil', 'suspendedUntil', 'premium', 'title'].forEach(k => {
+  ['banned', 'bannedUntil', 'suspendedUntil', 'premium', 'superPremium', 'title'].forEach(k => {
     if (remote[k] !== undefined) local[k] = remote[k];
   });
   saveData(data);
@@ -7209,9 +7293,20 @@ function adminSetPremium(userId, premium) {
   const user = getUser(userId);
   if (!user) return;
   user.premium = !!premium;
+  if (!premium && user.superPremium) user.superPremium = false;
   saveData(getData());
   cloudPushUser(user);
   showToast(premium ? 'プレミアムを付与しました' : 'プレミアムを解除しました');
+}
+
+function adminSetSuperPremium(userId, enabled) {
+  const user = getUser(userId);
+  if (!user) return;
+  user.superPremium = !!enabled;
+  if (enabled) user.premium = true;
+  saveData(getData());
+  cloudPushUser(user);
+  showToast(enabled ? 'スーパープレミアムを付与しました' : 'スーパープレミアムを解除しました');
 }
 
 async function adminSuspendUserHours(userId, hours) {
@@ -7245,7 +7340,11 @@ function startSyncVersionPolling() {
       await handleRemoteActivity();
       return;
     }
-    if (last === 0) localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
+    if (last === 0) {
+      localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
+      await handleRemoteActivity();
+      return;
+    }
   };
   poll();
   syncVersionTimer = setInterval(poll, ACTIVITY_POLL_MS);
@@ -7683,6 +7782,15 @@ function appendAdminV7Buttons() {
       adminSetPremium(userId, !u?.premium);
       renderAdminUsers();
     });
+    const spBtn = document.createElement('button');
+    spBtn.className = 'admin-btn admin-btn-super-premium';
+    spBtn.textContent = 'S.Premium';
+    spBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const u = getUser(userId);
+      adminSetSuperPremium(userId, !u?.superPremium);
+      renderAdminUsers();
+    });
     const suspBtn = document.createElement('button');
     suspBtn.className = 'admin-btn admin-btn-suspend';
     suspBtn.textContent = '時間停止';
@@ -7697,6 +7805,7 @@ function appendAdminV7Buttons() {
     actions.appendChild(unbanBtn);
     actions.appendChild(suspBtn);
     actions.appendChild(premBtn);
+    actions.appendChild(spBtn);
   });
 }
 
@@ -8064,7 +8173,8 @@ onAppInit(() => {
  */
 var APP_VERSION = 'v9';
 
-const TITLE_MAX_LEN = 10;
+const TITLE_CATALOG_MAX = 10;
+const TITLE_TEXT_MAX = 20;
 
 function applyV9Branding() {
   const title = 'BlueChat v9';
@@ -8078,11 +8188,80 @@ function applyV9Branding() {
 function normalizeTitleText(text) {
   const trimmed = (text || '').trim();
   if (!trimmed) return '';
-  if (trimmed.length > TITLE_MAX_LEN) {
-    showToast(`称号は${TITLE_MAX_LEN}文字までです`);
-    return trimmed.slice(0, TITLE_MAX_LEN);
+  if (trimmed.length > TITLE_TEXT_MAX) {
+    showToast(`称号名は${TITLE_TEXT_MAX}文字までです`);
+    return trimmed.slice(0, TITLE_TEXT_MAX);
   }
   return trimmed;
+}
+
+function getTitlePresets() {
+  const data = getData();
+  if (!data.titlePresets) data.titlePresets = [];
+  return data.titlePresets;
+}
+
+function saveTitlePresetsLocal(presets) {
+  const data = getData();
+  data.titlePresets = (presets || []).slice(0, TITLE_CATALOG_MAX);
+  saveData(data);
+}
+
+async function fetchTitlePresets() {
+  if (!getEffectiveSyncUrl()) return getTitlePresets();
+  const res = await cloudRequestExt('/api/title-presets');
+  if (res && Array.isArray(res.presets)) {
+    saveTitlePresetsLocal(res.presets);
+    return res.presets;
+  }
+  return getTitlePresets();
+}
+
+async function pushTitlePresets(presets) {
+  saveTitlePresetsLocal(presets);
+  if (!getEffectiveSyncUrl()) return true;
+  const res = await cloudRequestExt('/api/title-presets', {
+    method: 'PUT',
+    body: JSON.stringify({ presets: presets.slice(0, TITLE_CATALOG_MAX) })
+  });
+  if (res && Array.isArray(res.presets)) {
+    saveTitlePresetsLocal(res.presets);
+    return true;
+  }
+  return !!(res && res.ok);
+}
+
+async function addTitlePreset(text, color) {
+  const normalized = normalizeTitleText(text);
+  if (!normalized) return null;
+  const presets = await fetchTitlePresets();
+  if (presets.length >= TITLE_CATALOG_MAX) {
+    showToast(`称号は最大${TITLE_CATALOG_MAX}個まで作成できます`);
+    return null;
+  }
+  const preset = { id: generateId(), text: normalized, color: color || '#1a6fd4' };
+  presets.push(preset);
+  await pushTitlePresets(presets);
+  return preset;
+}
+
+function messageSenderHtml(msg, convId, currentUser) {
+  const isSent = String(msg.senderId) === String(currentUser.id);
+  if (isSent) {
+    const badges = typeof userBadgesHtml === 'function' ? userBadgesHtml(currentUser) : '';
+    return `あなた${badges}`;
+  }
+  const sender = getUser(msg.senderId);
+  if (!sender) return escapeHtml('不明');
+  return typeof displayNameHtml === 'function' ? displayNameHtml(sender) : escapeHtml(sender.name);
+}
+
+function getConvDisplayNameHtml(conv, userId) {
+  if (conv.type === 'group') return escapeHtml(conv.name);
+  const otherId = conv.members.find(m => String(m) !== String(userId));
+  const other = otherId ? getUser(otherId) : null;
+  if (!other) return escapeHtml('不明');
+  return typeof displayNameHtml === 'function' ? displayNameHtml(other) : escapeHtml(other.name);
 }
 
 async function adminDeleteUser(userId) {
@@ -8101,14 +8280,51 @@ async function adminDeleteUser(userId) {
 async function repairConversationHistoryOnce() {
   const user = getCurrentUser();
   if (!user || !getEffectiveSyncUrl()) return;
-  const key = 'bluechat_history_repaired_' + user.id;
+  const key = 'bluechat_history_repaired_v2_' + user.id;
   if (localStorage.getItem(key)) return;
+  await syncUserConversationList();
   const convs = getUserConversations(user.id);
   for (const conv of convs) {
     await syncConversation(conv.id);
   }
   localStorage.setItem(key, '1');
   if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+}
+
+async function showTitlePresetManager() {
+  if (adminRole !== 'super') {
+    showToast('スーパー管理者のみ利用できます');
+    return;
+  }
+  await fetchTitlePresets();
+  const presets = getTitlePresets();
+  const lines = presets.length
+    ? presets.map((p, i) => `${i + 1}. ${p.text}`).join('\n')
+    : '（まだありません）';
+  const action = prompt(
+    `称号プリセット管理（最大${TITLE_CATALOG_MAX}個）\n\n登録済み:\n${lines}\n\n操作:\n+文字 = 新規作成\n番号 = 削除\n例: +VIP`
+  );
+  if (action === null) return;
+  const trimmed = action.trim();
+  if (!trimmed) return;
+  if (trimmed.startsWith('+')) {
+    const text = normalizeTitleText(trimmed.slice(1));
+    if (!text) return;
+    const color = await pickTitleColor('#1a6fd4');
+    if (color === null) return;
+    const created = await addTitlePreset(text, color);
+    if (created) showToast(`称号「${created.text}」を登録しました（${getTitlePresets().length}/${TITLE_CATALOG_MAX}）`);
+    return;
+  }
+  const idx = parseInt(trimmed, 10) - 1;
+  if (idx >= 0 && idx < presets.length) {
+    if (!confirm(`「${presets[idx].text}」を削除しますか？`)) return;
+    const next = presets.filter((_, i) => i !== idx);
+    await pushTitlePresets(next);
+    showToast('称号プリセットを削除しました');
+  } else {
+    showToast('無効な操作です');
+  }
 }
 
 const _setUserTitleV9 = setUserTitle;
@@ -8119,20 +8335,56 @@ setUserTitle = async function (userId, text, color) {
 renderSuperAdminTitlePanel = async function (userId) {
   const user = getUser(userId);
   if (!user) return;
+  await fetchTitlePresets();
+  const presets = getTitlePresets();
+  const presetLines = presets.length
+    ? presets.map((p, i) => `${i + 1}: ${p.text}`).join('\n')
+    : '（プリセットなし）';
   const hint = user.title?.text
-    ? `現在の称号: ${user.title.text}（空欄で削除・${TITLE_MAX_LEN}文字まで）`
-    : `称号なし（${TITLE_MAX_LEN}文字まで）`;
-  const text = prompt(`${hint}\n\n称号の文字`, user.title?.text || '');
-  if (text === null) return;
-  const normalized = normalizeTitleText(text);
-  if (text.trim() && !normalized) return;
-  let color = user.title?.color || '#1a6fd4';
-  if (normalized) {
-    const picked = await pickTitleColor(color);
-    if (picked === null) return;
-    color = picked;
+    ? `現在: ${user.title.text}\n空欄=削除 / 番号=プリセット選択 / +文字=新規作成`
+    : `空欄=削除 / 番号=プリセット選択 / +文字=新規作成`;
+  const input = prompt(
+    `${hint}\n（最大${TITLE_CATALOG_MAX}個まで作成可）\n\nプリセット:\n${presetLines}\n\n入力`,
+    user.title?.text || ''
+  );
+  if (input === null) return;
+
+  const trimmed = input.trim();
+  if (!trimmed) {
+    const ok = await setUserTitle(userId, '', '');
+    renderAdminUsers();
+    refreshMainUI();
+    showToast(ok ? '称号を削除しました' : '削除に失敗しました');
+    return;
   }
-  const ok = await setUserTitle(userId, normalized, color);
+
+  const num = parseInt(trimmed, 10);
+  if (!trimmed.startsWith('+') && String(num) === trimmed && num >= 1 && num <= presets.length) {
+    const preset = presets[num - 1];
+    const ok = await setUserTitle(userId, preset.text, preset.color);
+    renderAdminUsers();
+    refreshMainUI();
+    showToast(ok ? `称号「${preset.text}」を付与しました` : '付与に失敗しました');
+    return;
+  }
+
+  let text = trimmed.startsWith('+') ? trimmed.slice(1) : trimmed;
+  text = normalizeTitleText(text);
+  if (!text) return;
+
+  let color = user.title?.color || '#1a6fd4';
+  const picked = await pickTitleColor(color);
+  if (picked === null) return;
+  color = picked;
+
+  const existing = presets.find(p => p.text === text && p.color === color);
+  if (!existing && presets.length < TITLE_CATALOG_MAX) {
+    await addTitlePreset(text, color);
+  } else if (!existing && presets.length >= TITLE_CATALOG_MAX) {
+    showToast(`プリセットは${TITLE_CATALOG_MAX}個までです。既存から選ぶか、管理画面で削除してください`);
+  }
+
+  const ok = await setUserTitle(userId, text, color);
   renderAdminUsers();
   if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
   else refreshMainUI();
@@ -8147,16 +8399,81 @@ TITLE_COLOR_PALETTE.push(
   { name: 'シルバーブルー', color: '#7eb8da' }
 );
 
+const _renderChatListV9 = renderChatList;
+renderChatList = function () {
+  _renderChatListV9();
+  const user = getCurrentUser();
+  if (!user) return;
+  const convs = getUserConversations(user.id);
+  const items = document.querySelectorAll('#chat-list .list-item');
+  convs.forEach((conv, i) => {
+    const item = items[i];
+    if (!item || conv.type === 'group') return;
+    const nameEl = item.querySelector('.list-name');
+    if (nameEl) nameEl.innerHTML = getConvDisplayNameHtml(conv, user.id);
+  });
+};
+
+const _openChatV9 = openChat;
+openChat = function (convId) {
+  _openChatV9(convId);
+  const user = getCurrentUser();
+  const conv = getData().conversations[convId];
+  const titleEl = document.getElementById('chat-title');
+  if (!user || !conv || !titleEl) return;
+  if (conv.type === 'direct') {
+    titleEl.innerHTML = getConvDisplayNameHtml(conv, user.id);
+  }
+};
+
+const _createMessageElementV9 = createMessageElement;
+createMessageElement = function (msg, convId, user) {
+  return _createMessageElementV9(msg, convId, user);
+};
+
+const _handleRemoteActivityV9 = handleRemoteActivity;
+handleRemoteActivity = async function () {
+  await fetchTitlePresets().catch(() => {});
+  return _handleRemoteActivityV9();
+};
+
 const _importTransferBackupV9 = importTransferBackup;
 importTransferBackup = function (backup) {
   _importTransferBackupV9(backup);
   localStorage.removeItem(ACTIVITY_VERSION_KEY);
   localStorage.removeItem('bluechat_history_repaired_' + (getCurrentUser()?.id || ''));
+  localStorage.removeItem('bluechat_history_repaired_v2_' + (getCurrentUser()?.id || ''));
+};
+
+const _startGlobalSyncV9Titles = startGlobalSync;
+startGlobalSync = function () {
+  _startGlobalSyncV9Titles();
+  fetchTitlePresets().catch(() => {});
 };
 
 onAppInit(() => {
-  applyV9Branding();
   repairConversationHistoryOnce();
+  fetchTitlePresets().catch(() => {});
+  bindClick('btn-admin-title-presets', () => showTitlePresetManager());
+});
+
+
+/**
+ * BlueChat v10 — 履歴同期・称号/プレミアム表示・スーパープレミアム・管理者認証
+ */
+var APP_VERSION = 'v10';
+
+function applyV10Branding() {
+  const title = 'BlueChat v10';
+  document.title = title;
+  const headerTitle = document.getElementById('header-title');
+  if (headerTitle) headerTitle.textContent = title;
+  const logoTitle = document.querySelector('.logo-large h1');
+  if (logoTitle) logoTitle.textContent = title;
+}
+
+onAppInit(() => {
+  applyV10Branding();
 });
 
   </script>

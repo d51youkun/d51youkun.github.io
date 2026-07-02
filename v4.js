@@ -2,8 +2,6 @@
  * BlueChat v4 features
  */
 
-const MODERATOR_EMAIL = 'zaku2.com';
-const MODERATOR_PASSWORD = 'MS-06S';
 const ADMIN_ROLE_KEY = 'bluechat_admin_role';
 const SUSPEND_DURATION_MS = 60 * 60 * 1000;
 
@@ -71,14 +69,6 @@ function formatSuspendedUntil(ts) {
 }
 
 // ─── Admin roles ─────────────────────────────────────────
-function verifyAdminCredentials(email, password) {
-  const e = String(email || '').trim().toLowerCase();
-  const p = String(password || '').trim();
-  if (e === ADMIN_EMAIL.toLowerCase() && p === ADMIN_PASSWORD) return 'super';
-  if (e === MODERATOR_EMAIL.toLowerCase() && p === MODERATOR_PASSWORD) return 'moderator';
-  return null;
-}
-
 function saveAdminSession() {
   if (adminLoggedIn && adminRole) {
     localStorage.setItem(ADMIN_SESSION_KEY, '1');
@@ -435,13 +425,9 @@ const _createMessageElementV4 = createMessageElement;
 createMessageElement = function (msg, convId, user) {
   const el = _createMessageElementV4(msg, convId, user);
   if (!el) return el;
-  const conv = getData().conversations[convId];
-  if (conv && conv.type === 'group') {
-    const sender = getData().users[msg.senderId];
-    const senderEl = el.querySelector('.message-sender');
-    if (senderEl && sender) {
-      senderEl.innerHTML = displayNameHtml(sender);
-    }
+  const senderEl = el.querySelector('.message-sender');
+  if (senderEl && typeof messageSenderHtml === 'function') {
+    senderEl.innerHTML = messageSenderHtml(msg, convId, user);
   }
   return el;
 };
@@ -457,25 +443,26 @@ openChat = function (convId) {
 performAdminLogin = function () {
   const email = document.getElementById('input-admin-email').value;
   const password = document.getElementById('input-admin-password').value;
-  const role = verifyAdminCredentials(email, password);
-  if (!role) {
-    showToast('メールアドレスまたはパスワードが正しくありません');
-    return;
-  }
-  adminLoggedIn = true;
-  adminRole = role;
-  saveAdminSession();
-  document.getElementById('input-admin-email').value = '';
-  document.getElementById('input-admin-password').value = '';
-  updateAdminTabVisibility();
-  if (role === 'super') {
-    showMainAdminTab();
-    showToast('管理者としてログインしました');
-  } else {
-    showMainModeratorTab();
-    showToast('モデレーターとしてログインしました');
-  }
-  showScreen('main');
+  verifyAdminCredentialsAsync(email, password).then((role) => {
+    if (!role) {
+      if (getEffectiveSyncUrl()) showToast('メールアドレスまたはパスワードが正しくありません');
+      return;
+    }
+    adminLoggedIn = true;
+    adminRole = role;
+    saveAdminSession();
+    document.getElementById('input-admin-email').value = '';
+    document.getElementById('input-admin-password').value = '';
+    updateAdminTabVisibility();
+    if (role === 'super') {
+      showMainAdminTab();
+      showToast('管理者としてログインしました');
+    } else {
+      showMainModeratorTab();
+      showToast('モデレーターとしてログインしました');
+    }
+    showScreen('main');
+  });
 };
 
 function showMainModeratorTab() {
