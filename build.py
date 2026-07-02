@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Build BlueChat HTML outputs from source files."""
 
-import html
 import json
 import shutil
 from pathlib import Path
@@ -39,17 +38,6 @@ def load_sync_config() -> dict:
         return {}
 
 
-def get_body_html() -> str:
-    cfg = load_sync_config()
-    body = read("body.html")
-    admin_email = html.escape(str(cfg.get("adminEmail", "")), quote=True)
-    admin_password = html.escape(str(cfg.get("adminPassword", "")), quote=True)
-    return (
-        body.replace("__ADMIN_EMAIL__", admin_email)
-        .replace("__ADMIN_PASSWORD__", admin_password)
-    )
-
-
 def get_app_js() -> str:
     app_js = read("app.js")
     cfg = load_sync_config()
@@ -57,10 +45,14 @@ def get_app_js() -> str:
     alternates = cfg.get("alternates", [])
     if not isinstance(alternates, list):
         alternates = []
+    admin_email = str(cfg.get("adminEmail", "d51498go@icloud.com")).strip()
+    admin_password = str(cfg.get("adminPassword", "D51498Go"))
     if not sync_url:
         sync_url = "https://bluechat-sync.onrender.com"
     app_js = app_js.replace("__DEFAULT_SYNC_URL__", sync_url, 1)
-    return app_js.replace("__SYNC_ALTERNATE_URLS__", json.dumps(alternates), 1)
+    app_js = app_js.replace("__SYNC_ALTERNATE_URLS__", json.dumps(alternates), 1)
+    app_js = app_js.replace("__ADMIN_EMAIL__", admin_email, 1)
+    return app_js.replace("__ADMIN_PASSWORD__", admin_password, 1)
 
 
 def get_merged_js() -> str:
@@ -76,7 +68,7 @@ def get_merged_js() -> str:
 def build_pages_html() -> str:
     """GitHub Pages 用: CSS・JS をすべて index.html に内蔵（外部ファイル不要）"""
     css = read("styles.css")
-    body = get_body_html().strip()
+    body = read("body.html").strip()
     qrcode_js = read("lib/qrcode.min.js")
     html5_qrcode_js = read("lib/html5-qrcode.min.js")
     merged_js = get_merged_js()

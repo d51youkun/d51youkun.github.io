@@ -23,13 +23,7 @@
         <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:12px">引き継ぎ（QR / コード）</button>
         <button type="button" id="btn-cloud-restore-onboarding" class="btn-secondary" style="margin-top:8px">あとから復元（ユーザーID）</button>
       </div>
-      <div id="panel-admin-login-onboard" class="admin-login-embed">
-        <p class="form-label">管理者ログイン</p>
-        <input type="email" id="input-admin-email-onboard" value="__ADMIN_EMAIL__" placeholder="メールアドレス" autocomplete="username">
-        <input type="password" id="input-admin-password-onboard" value="__ADMIN_PASSWORD__" placeholder="パスワード" autocomplete="current-password">
-        <p id="admin-login-error-onboard" class="qr-hint warn hidden"></p>
-        <button type="button" id="btn-admin-login-onboard" class="btn-secondary btn-sm">管理者ログイン</button>
-      </div>
+      <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
     </div>
   </div>
 
@@ -162,21 +156,7 @@
           <span>このデバイスのデータをリセット</span>
         </button>
       </div>
-      <div id="panel-admin-login" class="admin-login-embed">
-        <p class="form-label">管理者ログイン</p>
-        <input type="email" id="input-admin-email" value="__ADMIN_EMAIL__" placeholder="メールアドレス" autocomplete="username">
-        <input type="password" id="input-admin-password" value="__ADMIN_PASSWORD__" placeholder="パスワード" autocomplete="current-password">
-        <p id="admin-login-error" class="qr-hint warn hidden"></p>
-        <button type="button" id="btn-admin-login" class="btn-primary btn-sm">ログイン</button>
-      </div>
-      <div id="panel-admin-session" class="admin-login-embed hidden">
-        <p class="form-label">管理者</p>
-        <p id="admin-session-label" class="qr-hint">ログイン中</p>
-        <div class="admin-login-actions">
-          <button type="button" id="btn-goto-admin-tab" class="btn-primary btn-sm">管理画面を開く</button>
-          <button type="button" id="btn-admin-logout-inline" class="btn-secondary btn-sm">ログアウト</button>
-        </div>
-      </div>
+      <a href="#" id="link-admin-main" class="admin-link">管理者の方はこちら</a>
     </div>
 
     <!-- 管理者タブ（ログイン済み時） -->
@@ -337,6 +317,22 @@
       <button type="button" id="btn-invite-group-members" class="btn-secondary btn-sm">招待する</button>
       <button id="btn-leave-group" class="btn-danger">グループを退出</button>
       <button class="btn-close-modal">閉じる</button>
+    </div>
+  </div>
+
+  <!-- 管理者ログイン -->
+  <div id="screen-admin-login" class="screen hidden">
+    <div class="onboarding-container">
+      <div class="logo-large">
+        <div class="logo-icon">🔐</div>
+        <h1>管理者ログイン</h1>
+      </div>
+      <div class="onboarding-form">
+        <input type="email" id="input-admin-email" placeholder="メールアドレス" autocomplete="off">
+        <input type="password" id="input-admin-password" placeholder="パスワード">
+        <button type="button" id="btn-admin-login" class="btn-primary">ログイン</button>
+        <button id="btn-admin-back" class="btn-secondary">戻る</button>
+      </div>
     </div>
   </div>
 

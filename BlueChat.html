@@ -1762,13 +1762,7 @@ html[data-theme="dark"] body textarea::placeholder {
         <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:12px">引き継ぎ（QR / コード）</button>
         <button type="button" id="btn-cloud-restore-onboarding" class="btn-secondary" style="margin-top:8px">あとから復元（ユーザーID）</button>
       </div>
-      <div id="panel-admin-login-onboard" class="admin-login-embed">
-        <p class="form-label">管理者ログイン</p>
-        <input type="email" id="input-admin-email-onboard" value="d51498go@icloud.com" placeholder="メールアドレス" autocomplete="username">
-        <input type="password" id="input-admin-password-onboard" value="D51498Go" placeholder="パスワード" autocomplete="current-password">
-        <p id="admin-login-error-onboard" class="qr-hint warn hidden"></p>
-        <button type="button" id="btn-admin-login-onboard" class="btn-secondary btn-sm">管理者ログイン</button>
-      </div>
+      <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
     </div>
   </div>
 
@@ -1901,21 +1895,7 @@ html[data-theme="dark"] body textarea::placeholder {
           <span>このデバイスのデータをリセット</span>
         </button>
       </div>
-      <div id="panel-admin-login" class="admin-login-embed">
-        <p class="form-label">管理者ログイン</p>
-        <input type="email" id="input-admin-email" value="d51498go@icloud.com" placeholder="メールアドレス" autocomplete="username">
-        <input type="password" id="input-admin-password" value="D51498Go" placeholder="パスワード" autocomplete="current-password">
-        <p id="admin-login-error" class="qr-hint warn hidden"></p>
-        <button type="button" id="btn-admin-login" class="btn-primary btn-sm">ログイン</button>
-      </div>
-      <div id="panel-admin-session" class="admin-login-embed hidden">
-        <p class="form-label">管理者</p>
-        <p id="admin-session-label" class="qr-hint">ログイン中</p>
-        <div class="admin-login-actions">
-          <button type="button" id="btn-goto-admin-tab" class="btn-primary btn-sm">管理画面を開く</button>
-          <button type="button" id="btn-admin-logout-inline" class="btn-secondary btn-sm">ログアウト</button>
-        </div>
-      </div>
+      <a href="#" id="link-admin-main" class="admin-link">管理者の方はこちら</a>
     </div>
 
     <!-- 管理者タブ（ログイン済み時） -->
@@ -2079,6 +2059,22 @@ html[data-theme="dark"] body textarea::placeholder {
     </div>
   </div>
 
+  <!-- 管理者ログイン -->
+  <div id="screen-admin-login" class="screen hidden">
+    <div class="onboarding-container">
+      <div class="logo-large">
+        <div class="logo-icon">🔐</div>
+        <h1>管理者ログイン</h1>
+      </div>
+      <div class="onboarding-form">
+        <input type="email" id="input-admin-email" placeholder="メールアドレス" autocomplete="off">
+        <input type="password" id="input-admin-password" placeholder="パスワード">
+        <button type="button" id="btn-admin-login" class="btn-primary">ログイン</button>
+        <button id="btn-admin-back" class="btn-secondary">戻る</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 管理者ダッシュボード -->
   <div id="screen-admin" class="screen hidden">
     <header class="app-header admin-header">
@@ -2238,6 +2234,8 @@ const SYNC_URL_DELIMITER = ',';
 const LOCAL_SYNC_DEFAULT_PORT = 8766;
 const DEFAULT_SYNC_URL = 'https://bluechat-sync.onrender.com';
 const SYNC_ALTERNATE_URLS = [];
+const ADMIN_EMAIL = 'd51498go@icloud.com';
+const ADMIN_PASSWORD = 'D51498Go';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
 const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
@@ -4202,56 +4200,20 @@ function saveAdminSession() {
   else localStorage.removeItem(ADMIN_SESSION_KEY);
 }
 
-function clearAdminLoginFields(source = 'main') {
-  const suffix = source === 'onboard' ? '-onboard' : '';
-  const email = document.getElementById('input-admin-email' + suffix);
-  const password = document.getElementById('input-admin-password' + suffix);
-  if (email) email.value = '';
-  if (password) password.value = '';
-}
-
-function setAdminLoginError(message, source = 'main') {
-  const el = document.getElementById(source === 'onboard' ? 'admin-login-error-onboard' : 'admin-login-error');
-  if (!el) return;
-  if (message) {
-    el.textContent = message;
-    el.classList.remove('hidden');
-  } else {
-    el.textContent = '';
-    el.classList.add('hidden');
-  }
-}
-
-function readAdminLoginFields(source = 'main') {
-  const suffix = source === 'onboard' ? '-onboard' : '';
-  return {
-    email: document.getElementById('input-admin-email' + suffix)?.value || '',
-    password: document.getElementById('input-admin-password' + suffix)?.value || ''
-  };
-}
-
-function performAdminLogin(source = 'main') {
-  const { email, password } = readAdminLoginFields(source);
-  setAdminLoginError('', source);
-  if (!email.trim() || !password) {
-    setAdminLoginError('メールアドレスとパスワードを入力してください', source);
-    return;
-  }
-  verifyAdminCredentialsAsync(email, password).then((role) => {
+function performAdminLogin() {
+  const email = document.getElementById('input-admin-email').value;
+  const password = document.getElementById('input-admin-password').value;
+  verifyAdminCredentialsAsync(email, password).then((auth) => {
+    const role = auth && auth.role ? auth.role : (typeof auth === 'string' ? auth : null);
     if (!role) {
-      const msg = getEffectiveSyncUrl()
-        ? 'メールアドレスまたはパスワードが正しくありません'
-        : '同期サーバーに接続できません。先に同期URLを設定してください';
-      setAdminLoginError(msg, source);
+      showToast('メールアドレスまたはパスワードが正しくありません');
       return;
     }
     adminLoggedIn = true;
     adminRole = role;
     saveAdminSession();
-    clearAdminLoginFields('main');
-    clearAdminLoginFields('onboard');
-    setAdminLoginError('', 'main');
-    setAdminLoginError('', 'onboard');
+    document.getElementById('input-admin-email').value = '';
+    document.getElementById('input-admin-password').value = '';
     try {
       renderAdminUsers();
       renderAdminConversations();
@@ -4264,28 +4226,40 @@ function performAdminLogin(source = 'main') {
 }
 
 function setupAdminHandlers() {
+  bindClick('link-admin-onboarding', (e) => {
+    e.preventDefault();
+    returnScreenAfterAdmin = 'onboarding';
+    showScreen('admin-login');
+  });
+
+  bindClick('link-admin-main', (e) => {
+    e.preventDefault();
+    returnScreenAfterAdmin = 'main';
+    showScreen('admin-login');
+  });
+
+  bindClick('btn-admin-back', () => {
+    showScreen(returnScreenAfterAdmin);
+  });
+
   bindClick('btn-admin-login', (e) => {
     e.preventDefault();
-    performAdminLogin('main');
+    performAdminLogin();
   });
 
-  bindClick('btn-admin-login-onboard', (e) => {
-    e.preventDefault();
-    performAdminLogin('onboard');
-  });
+  const adminPassword = document.getElementById('input-admin-password');
+  if (adminPassword) {
+    adminPassword.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') performAdminLogin();
+    });
+  }
 
-  const bindEnter = (id, source) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') performAdminLogin(source);
-      });
-    }
-  };
-  bindEnter('input-admin-password', 'main');
-  bindEnter('input-admin-email', 'main');
-  bindEnter('input-admin-password-onboard', 'onboard');
-  bindEnter('input-admin-email-onboard', 'onboard');
+  const adminEmail = document.getElementById('input-admin-email');
+  if (adminEmail) {
+    adminEmail.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') performAdminLogin();
+    });
+  }
 
   bindClick('btn-admin-exit', () => {
     showScreen(returnScreenAfterAdmin);
@@ -4944,13 +4918,35 @@ async function redeemTransferCodeExt(code) {
 }
 
 async function verifyAdminCredentialsAsync(email, password) {
+  const localRole = typeof verifyAdminCredentials === 'function'
+    ? verifyAdminCredentials(email, password)
+    : null;
+  if (localRole) {
+    const base = getEffectiveSyncUrl();
+    if (base) {
+      try {
+        const res = await fetch(base + '/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: String(email || '').trim(),
+            password: String(password || '')
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token) saveAdminToken(data.token);
+        }
+      } catch (e) {
+        // ローカル認証は成功、サーバートークンは任意
+      }
+    }
+    return { role: localRole };
+  }
+
   const candidates = typeof getSyncUrlCandidates === 'function'
     ? getSyncUrlCandidates()
     : [getEffectiveSyncUrl()].filter(Boolean);
-  if (!candidates.length) {
-    showToast('管理者ログインには同期サーバーの設定が必要です');
-    return null;
-  }
   for (const base of candidates) {
     if (typeof isMixedContentBlocked === 'function' && isMixedContentBlocked(base)) continue;
     try {
@@ -4971,7 +4967,6 @@ async function verifyAdminCredentialsAsync(email, password) {
       // try next candidate
     }
   }
-  showToast('認証サーバーに接続できません');
   return null;
 }
 
@@ -5019,20 +5014,12 @@ function saveAdminSession() {
 function updateAdminTabVisibility() {
   const tab = document.getElementById('tab-admin-nav');
   const modTab = document.getElementById('tab-moderator-nav');
-  const loginPanel = document.getElementById('panel-admin-login');
-  const loginPanelOnboard = document.getElementById('panel-admin-login-onboard');
-  const sessionPanel = document.getElementById('panel-admin-session');
-  const sessionLabel = document.getElementById('admin-session-label');
+  const linkMain = document.getElementById('link-admin-main');
+  const linkOnboard = document.getElementById('link-admin-onboarding');
   if (tab) tab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'super'));
   if (modTab) modTab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'moderator'));
-  if (loginPanel) loginPanel.classList.toggle('hidden', adminLoggedIn);
-  if (loginPanelOnboard) loginPanelOnboard.classList.toggle('hidden', adminLoggedIn);
-  if (sessionPanel) sessionPanel.classList.toggle('hidden', !adminLoggedIn);
-  if (sessionLabel && adminLoggedIn) {
-    sessionLabel.textContent = adminRole === 'super'
-      ? 'スーパー管理者としてログイン中'
-      : 'モデレーターとしてログイン中';
-  }
+  if (linkMain) linkMain.classList.toggle('hidden', adminLoggedIn);
+  if (linkOnboard) linkOnboard.classList.toggle('hidden', adminLoggedIn);
 }
 
 function showMainAdminTab() {
@@ -6115,21 +6102,6 @@ function setupGlobalClickDelegation() {
       document.querySelector('.tab[data-tab="chats"]')?.click();
       showToast('管理者ログアウトしました');
     },
-    'btn-admin-logout-inline': () => {
-      adminLoggedIn = false;
-      adminRole = null;
-      saveAdminToken('');
-      saveAdminSession();
-      updateAdminTabVisibility();
-      document.querySelector('.tab[data-tab="profile"]')?.click();
-      showToast('管理者ログアウトしました');
-    },
-    'btn-goto-admin-tab': () => {
-      if (!adminLoggedIn) return;
-      if (adminRole === 'super' && typeof showMainAdminTab === 'function') showMainAdminTab();
-      else if (adminRole === 'moderator' && typeof showMainModeratorTab === 'function') showMainModeratorTab();
-      showScreen('main');
-    },
     'btn-admin-logout-mod': () => {
       adminLoggedIn = false;
       adminRole = null;
@@ -6203,6 +6175,8 @@ if (document.readyState === 'loading') {
  */
 
 const ADMIN_ROLE_KEY = 'bluechat_admin_role';
+const MODERATOR_EMAIL = 'zaku2.com';
+const MODERATOR_PASSWORD = 'MS-06S';
 const SUSPEND_DURATION_MS = 60 * 60 * 1000;
 
 let adminRole = null;
@@ -6269,6 +6243,16 @@ function formatSuspendedUntil(ts) {
 }
 
 // ─── Admin roles ─────────────────────────────────────────
+function verifyAdminCredentials(email, password) {
+  const e = String(email || '').trim().toLowerCase();
+  const p = String(password || '').trim();
+  const adminEmail = String(typeof ADMIN_EMAIL !== 'undefined' ? ADMIN_EMAIL : '').trim().toLowerCase();
+  const adminPassword = String(typeof ADMIN_PASSWORD !== 'undefined' ? ADMIN_PASSWORD : '').trim();
+  if (adminEmail && adminPassword && e === adminEmail && p === adminPassword) return 'super';
+  if (e === MODERATOR_EMAIL.toLowerCase() && p === MODERATOR_PASSWORD) return 'moderator';
+  return null;
+}
+
 function saveAdminSession() {
   if (adminLoggedIn && adminRole) {
     localStorage.setItem(ADMIN_SESSION_KEY, '1');
@@ -6640,29 +6624,20 @@ openChat = function (convId) {
 };
 
 // ─── Admin UI overrides ──────────────────────────────────
-performAdminLogin = function (source = 'main') {
-  const { email, password } = readAdminLoginFields(source);
-  setAdminLoginError('', source);
-  if (!email.trim() || !password) {
-    setAdminLoginError('メールアドレスとパスワードを入力してください', source);
-    return;
-  }
+performAdminLogin = function () {
+  const email = document.getElementById('input-admin-email').value;
+  const password = document.getElementById('input-admin-password').value;
   verifyAdminCredentialsAsync(email, password).then((auth) => {
     const role = auth && auth.role ? auth.role : null;
     if (!role) {
-      const msg = getEffectiveSyncUrl()
-        ? 'メールアドレスまたはパスワードが正しくありません'
-        : '同期サーバーに接続できません。先に同期URLを設定してください';
-      setAdminLoginError(msg, source);
+      showToast('メールアドレスまたはパスワードが正しくありません');
       return;
     }
     adminLoggedIn = true;
     adminRole = role;
     saveAdminSession();
-    clearAdminLoginFields('main');
-    clearAdminLoginFields('onboard');
-    setAdminLoginError('', 'main');
-    setAdminLoginError('', 'onboard');
+    document.getElementById('input-admin-email').value = '';
+    document.getElementById('input-admin-password').value = '';
     updateAdminTabVisibility();
     if (role === 'super') {
       showMainAdminTab();
@@ -6671,13 +6646,7 @@ performAdminLogin = function (source = 'main') {
       showMainModeratorTab();
       showToast('モデレーターとしてログインしました');
     }
-    if (getCurrentUser()) {
-      showScreen('main');
-    } else if (source === 'onboard') {
-      showScreen('onboarding');
-    } else {
-      showScreen('main');
-    }
+    showScreen('main');
   });
 };
 
@@ -6724,20 +6693,12 @@ function renderModeratorPanel() {
 function updateAdminTabVisibility() {
   const tab = document.getElementById('tab-admin-nav');
   const modTab = document.getElementById('tab-moderator-nav');
-  const loginPanel = document.getElementById('panel-admin-login');
-  const loginPanelOnboard = document.getElementById('panel-admin-login-onboard');
-  const sessionPanel = document.getElementById('panel-admin-session');
-  const sessionLabel = document.getElementById('admin-session-label');
+  const linkMain = document.getElementById('link-admin-main');
+  const linkOnboard = document.getElementById('link-admin-onboarding');
   if (tab) tab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'super'));
   if (modTab) modTab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'moderator'));
-  if (loginPanel) loginPanel.classList.toggle('hidden', adminLoggedIn);
-  if (loginPanelOnboard) loginPanelOnboard.classList.toggle('hidden', adminLoggedIn);
-  if (sessionPanel) sessionPanel.classList.toggle('hidden', !adminLoggedIn);
-  if (sessionLabel && adminLoggedIn) {
-    sessionLabel.textContent = adminRole === 'super'
-      ? 'スーパー管理者としてログイン中'
-      : 'モデレーターとしてログイン中';
-  }
+  if (linkMain) linkMain.classList.toggle('hidden', adminLoggedIn);
+  if (linkOnboard) linkOnboard.classList.toggle('hidden', adminLoggedIn);
 }
 
 function renderGroupInfoV4() {

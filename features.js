@@ -321,13 +321,35 @@ async function redeemTransferCodeExt(code) {
 }
 
 async function verifyAdminCredentialsAsync(email, password) {
+  const localRole = typeof verifyAdminCredentials === 'function'
+    ? verifyAdminCredentials(email, password)
+    : null;
+  if (localRole) {
+    const base = getEffectiveSyncUrl();
+    if (base) {
+      try {
+        const res = await fetch(base + '/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: String(email || '').trim(),
+            password: String(password || '')
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token) saveAdminToken(data.token);
+        }
+      } catch (e) {
+        // ローカル認証は成功、サーバートークンは任意
+      }
+    }
+    return { role: localRole };
+  }
+
   const candidates = typeof getSyncUrlCandidates === 'function'
     ? getSyncUrlCandidates()
     : [getEffectiveSyncUrl()].filter(Boolean);
-  if (!candidates.length) {
-    showToast('管理者ログインには同期サーバーの設定が必要です');
-    return null;
-  }
   for (const base of candidates) {
     if (typeof isMixedContentBlocked === 'function' && isMixedContentBlocked(base)) continue;
     try {
@@ -348,7 +370,6 @@ async function verifyAdminCredentialsAsync(email, password) {
       // try next candidate
     }
   }
-  showToast('認証サーバーに接続できません');
   return null;
 }
 
@@ -396,20 +417,12 @@ function saveAdminSession() {
 function updateAdminTabVisibility() {
   const tab = document.getElementById('tab-admin-nav');
   const modTab = document.getElementById('tab-moderator-nav');
-  const loginPanel = document.getElementById('panel-admin-login');
-  const loginPanelOnboard = document.getElementById('panel-admin-login-onboard');
-  const sessionPanel = document.getElementById('panel-admin-session');
-  const sessionLabel = document.getElementById('admin-session-label');
+  const linkMain = document.getElementById('link-admin-main');
+  const linkOnboard = document.getElementById('link-admin-onboarding');
   if (tab) tab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'super'));
   if (modTab) modTab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'moderator'));
-  if (loginPanel) loginPanel.classList.toggle('hidden', adminLoggedIn);
-  if (loginPanelOnboard) loginPanelOnboard.classList.toggle('hidden', adminLoggedIn);
-  if (sessionPanel) sessionPanel.classList.toggle('hidden', !adminLoggedIn);
-  if (sessionLabel && adminLoggedIn) {
-    sessionLabel.textContent = adminRole === 'super'
-      ? 'スーパー管理者としてログイン中'
-      : 'モデレーターとしてログイン中';
-  }
+  if (linkMain) linkMain.classList.toggle('hidden', adminLoggedIn);
+  if (linkOnboard) linkOnboard.classList.toggle('hidden', adminLoggedIn);
 }
 
 function showMainAdminTab() {
@@ -1491,21 +1504,6 @@ function setupGlobalClickDelegation() {
       updateAdminTabVisibility();
       document.querySelector('.tab[data-tab="chats"]')?.click();
       showToast('管理者ログアウトしました');
-    },
-    'btn-admin-logout-inline': () => {
-      adminLoggedIn = false;
-      adminRole = null;
-      saveAdminToken('');
-      saveAdminSession();
-      updateAdminTabVisibility();
-      document.querySelector('.tab[data-tab="profile"]')?.click();
-      showToast('管理者ログアウトしました');
-    },
-    'btn-goto-admin-tab': () => {
-      if (!adminLoggedIn) return;
-      if (adminRole === 'super' && typeof showMainAdminTab === 'function') showMainAdminTab();
-      else if (adminRole === 'moderator' && typeof showMainModeratorTab === 'function') showMainModeratorTab();
-      showScreen('main');
     },
     'btn-admin-logout-mod': () => {
       adminLoggedIn = false;

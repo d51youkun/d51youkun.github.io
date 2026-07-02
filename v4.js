@@ -3,6 +3,8 @@
  */
 
 const ADMIN_ROLE_KEY = 'bluechat_admin_role';
+const MODERATOR_EMAIL = 'zaku2.com';
+const MODERATOR_PASSWORD = 'MS-06S';
 const SUSPEND_DURATION_MS = 60 * 60 * 1000;
 
 let adminRole = null;
@@ -69,6 +71,16 @@ function formatSuspendedUntil(ts) {
 }
 
 // ─── Admin roles ─────────────────────────────────────────
+function verifyAdminCredentials(email, password) {
+  const e = String(email || '').trim().toLowerCase();
+  const p = String(password || '').trim();
+  const adminEmail = String(typeof ADMIN_EMAIL !== 'undefined' ? ADMIN_EMAIL : '').trim().toLowerCase();
+  const adminPassword = String(typeof ADMIN_PASSWORD !== 'undefined' ? ADMIN_PASSWORD : '').trim();
+  if (adminEmail && adminPassword && e === adminEmail && p === adminPassword) return 'super';
+  if (e === MODERATOR_EMAIL.toLowerCase() && p === MODERATOR_PASSWORD) return 'moderator';
+  return null;
+}
+
 function saveAdminSession() {
   if (adminLoggedIn && adminRole) {
     localStorage.setItem(ADMIN_SESSION_KEY, '1');
@@ -440,29 +452,20 @@ openChat = function (convId) {
 };
 
 // ─── Admin UI overrides ──────────────────────────────────
-performAdminLogin = function (source = 'main') {
-  const { email, password } = readAdminLoginFields(source);
-  setAdminLoginError('', source);
-  if (!email.trim() || !password) {
-    setAdminLoginError('メールアドレスとパスワードを入力してください', source);
-    return;
-  }
+performAdminLogin = function () {
+  const email = document.getElementById('input-admin-email').value;
+  const password = document.getElementById('input-admin-password').value;
   verifyAdminCredentialsAsync(email, password).then((auth) => {
     const role = auth && auth.role ? auth.role : null;
     if (!role) {
-      const msg = getEffectiveSyncUrl()
-        ? 'メールアドレスまたはパスワードが正しくありません'
-        : '同期サーバーに接続できません。先に同期URLを設定してください';
-      setAdminLoginError(msg, source);
+      showToast('メールアドレスまたはパスワードが正しくありません');
       return;
     }
     adminLoggedIn = true;
     adminRole = role;
     saveAdminSession();
-    clearAdminLoginFields('main');
-    clearAdminLoginFields('onboard');
-    setAdminLoginError('', 'main');
-    setAdminLoginError('', 'onboard');
+    document.getElementById('input-admin-email').value = '';
+    document.getElementById('input-admin-password').value = '';
     updateAdminTabVisibility();
     if (role === 'super') {
       showMainAdminTab();
@@ -471,13 +474,7 @@ performAdminLogin = function (source = 'main') {
       showMainModeratorTab();
       showToast('モデレーターとしてログインしました');
     }
-    if (getCurrentUser()) {
-      showScreen('main');
-    } else if (source === 'onboard') {
-      showScreen('onboarding');
-    } else {
-      showScreen('main');
-    }
+    showScreen('main');
   });
 };
 
@@ -524,20 +521,12 @@ function renderModeratorPanel() {
 function updateAdminTabVisibility() {
   const tab = document.getElementById('tab-admin-nav');
   const modTab = document.getElementById('tab-moderator-nav');
-  const loginPanel = document.getElementById('panel-admin-login');
-  const loginPanelOnboard = document.getElementById('panel-admin-login-onboard');
-  const sessionPanel = document.getElementById('panel-admin-session');
-  const sessionLabel = document.getElementById('admin-session-label');
+  const linkMain = document.getElementById('link-admin-main');
+  const linkOnboard = document.getElementById('link-admin-onboarding');
   if (tab) tab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'super'));
   if (modTab) modTab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'moderator'));
-  if (loginPanel) loginPanel.classList.toggle('hidden', adminLoggedIn);
-  if (loginPanelOnboard) loginPanelOnboard.classList.toggle('hidden', adminLoggedIn);
-  if (sessionPanel) sessionPanel.classList.toggle('hidden', !adminLoggedIn);
-  if (sessionLabel && adminLoggedIn) {
-    sessionLabel.textContent = adminRole === 'super'
-      ? 'スーパー管理者としてログイン中'
-      : 'モデレーターとしてログイン中';
-  }
+  if (linkMain) linkMain.classList.toggle('hidden', adminLoggedIn);
+  if (linkOnboard) linkOnboard.classList.toggle('hidden', adminLoggedIn);
 }
 
 function renderGroupInfoV4() {
