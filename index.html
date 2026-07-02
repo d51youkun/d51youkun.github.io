@@ -8,7 +8,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>BlueChat v10</title>
+  <title>BlueChatX</title>
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <style>
@@ -1720,7 +1720,7 @@ html[data-theme="dark"] body textarea::placeholder {
     <div class="onboarding-container">
       <div class="logo-large">
         <div class="logo-icon">💬</div>
-        <h1>BlueChat</h1>
+        <h1>BlueChatX</h1>
         <p class="tagline">シンプルなチャットアプリ</p>
       </div>
       <div class="onboarding-form">
@@ -1737,7 +1737,7 @@ html[data-theme="dark"] body textarea::placeholder {
   <!-- メインアプリ -->
   <div id="screen-main" class="screen hidden">
     <header class="app-header">
-      <h1 id="header-title">BlueChat</h1>
+      <h1 id="header-title">BlueChatX</h1>
       <button id="btn-menu" class="icon-btn" aria-label="メニュー">☰</button>
     </header>
 
@@ -4579,7 +4579,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=10');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX');
   } catch (e) { /* ignore */ }
 }
 
@@ -8173,7 +8173,6 @@ startGlobalSync = function () {
 };
 
 onAppInit(() => {
-  applyV8Branding();
   bindChatsTabOnMainOpen();
   requestAnimationFrame(showChatsTab);
   const user = getCurrentUser();
@@ -8475,13 +8474,13 @@ onAppInit(() => {
 
 
 /**
- * BlueChat v10 — 履歴同期・称号/プレミアム表示・スーパープレミアム・管理者認証
+ * BlueChatX — branding & super-admin extensions
  */
-var APP_VERSION = 'v10';
-const BUILD_STAMP = '2026-07-02-v10';
+var APP_VERSION = 'BlueChatX';
+const BUILD_STAMP = 'BlueChatX-2026-07-02';
 
 function applyAppBranding() {
-  const title = 'BlueChat v10';
+  const title = 'BlueChatX';
   document.title = title;
   const headerTitle = document.getElementById('header-title');
   if (headerTitle) headerTitle.textContent = title;

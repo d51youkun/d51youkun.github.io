@@ -1,5 +1,5 @@
-/* BlueChat v10 — notification click + cache bust */
-const SW_VERSION = 'v10-2026-07-02';
+/* BlueChatX — notification click + cache bust */
+const SW_VERSION = 'BlueChatX-2026-07-02';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();

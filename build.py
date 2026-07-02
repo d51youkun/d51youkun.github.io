@@ -17,7 +17,7 @@ PAGES_HEAD = """<!DOCTYPE html>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>BlueChat v10</title>
+  <title>BlueChatX</title>
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <style>
@@ -121,7 +121,7 @@ def main() -> None:
     (ROOT / "styles.css").write_text(read("styles.css"), encoding="utf-8")
     (ROOT / ".nojekyll").touch()
 
-    export_version_folder(pages, "v10")
+    export_version_folder(pages, "X")
 
     print(f"Wrote index.html ({len(pages)} bytes) — GitHub Pages 用（CSS+JS 内蔵）")
     print(f"Wrote BlueChat.html ({len(bundle)} bytes) — 1ファイル版")

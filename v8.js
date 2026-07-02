@@ -268,7 +268,6 @@ startGlobalSync = function () {
 };
 
 onAppInit(() => {
-  applyV8Branding();
   bindChatsTabOnMainOpen();
   requestAnimationFrame(showChatsTab);
   const user = getCurrentUser();

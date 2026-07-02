@@ -1,11 +1,11 @@
 /**
- * BlueChat v10 — 履歴同期・称号/プレミアム表示・スーパープレミアム・管理者認証
+ * BlueChatX — branding & super-admin extensions
  */
-var APP_VERSION = 'v10';
-const BUILD_STAMP = '2026-07-02-v10';
+var APP_VERSION = 'BlueChatX';
+const BUILD_STAMP = 'BlueChatX-2026-07-02';
 
 function applyAppBranding() {
-  const title = 'BlueChat v10';
+  const title = 'BlueChatX';
   document.title = title;
   const headerTitle = document.getElementById('header-title');
   if (headerTitle) headerTitle.textContent = title;
