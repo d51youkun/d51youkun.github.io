@@ -482,6 +482,36 @@ input:focus {
   margin-bottom: 10px;
 }
 
+.admin-login-embed {
+  margin: 16px 0 0;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--blue-pale);
+  border: 1px solid var(--gray-200);
+}
+
+.admin-login-embed .form-label {
+  margin-bottom: 6px;
+}
+
+.admin-login-embed input[type="email"],
+.admin-login-embed input[type="password"] {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  font-size: 16px;
+  background: var(--white);
+}
+
+.admin-login-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .sync-settings .btn-sm {
   width: 100%;
   margin-bottom: 8px;

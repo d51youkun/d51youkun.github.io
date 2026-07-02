@@ -440,20 +440,29 @@ openChat = function (convId) {
 };
 
 // ─── Admin UI overrides ──────────────────────────────────
-performAdminLogin = function () {
-  const email = document.getElementById('input-admin-email').value;
-  const password = document.getElementById('input-admin-password').value;
+performAdminLogin = function (source = 'main') {
+  const { email, password } = readAdminLoginFields(source);
+  setAdminLoginError('', source);
+  if (!email.trim() || !password) {
+    setAdminLoginError('メールアドレスとパスワードを入力してください', source);
+    return;
+  }
   verifyAdminCredentialsAsync(email, password).then((auth) => {
     const role = auth && auth.role ? auth.role : null;
     if (!role) {
-      if (getEffectiveSyncUrl()) showToast('メールアドレスまたはパスワードが正しくありません');
+      const msg = getEffectiveSyncUrl()
+        ? 'メールアドレスまたはパスワードが正しくありません'
+        : '同期サーバーに接続できません。先に同期URLを設定してください';
+      setAdminLoginError(msg, source);
       return;
     }
     adminLoggedIn = true;
     adminRole = role;
     saveAdminSession();
-    document.getElementById('input-admin-email').value = '';
-    document.getElementById('input-admin-password').value = '';
+    clearAdminLoginFields('main');
+    clearAdminLoginFields('onboard');
+    setAdminLoginError('', 'main');
+    setAdminLoginError('', 'onboard');
     updateAdminTabVisibility();
     if (role === 'super') {
       showMainAdminTab();
@@ -462,7 +471,13 @@ performAdminLogin = function () {
       showMainModeratorTab();
       showToast('モデレーターとしてログインしました');
     }
-    showScreen('main');
+    if (getCurrentUser()) {
+      showScreen('main');
+    } else if (source === 'onboard') {
+      showScreen('onboarding');
+    } else {
+      showScreen('main');
+    }
   });
 };
 
@@ -509,12 +524,20 @@ function renderModeratorPanel() {
 function updateAdminTabVisibility() {
   const tab = document.getElementById('tab-admin-nav');
   const modTab = document.getElementById('tab-moderator-nav');
-  const linkMain = document.getElementById('link-admin-main');
-  const linkOnboard = document.getElementById('link-admin-onboarding');
+  const loginPanel = document.getElementById('panel-admin-login');
+  const loginPanelOnboard = document.getElementById('panel-admin-login-onboard');
+  const sessionPanel = document.getElementById('panel-admin-session');
+  const sessionLabel = document.getElementById('admin-session-label');
   if (tab) tab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'super'));
   if (modTab) modTab.classList.toggle('hidden', !(adminLoggedIn && adminRole === 'moderator'));
-  if (linkMain) linkMain.classList.toggle('hidden', adminLoggedIn);
-  if (linkOnboard) linkOnboard.classList.toggle('hidden', adminLoggedIn);
+  if (loginPanel) loginPanel.classList.toggle('hidden', adminLoggedIn);
+  if (loginPanelOnboard) loginPanelOnboard.classList.toggle('hidden', adminLoggedIn);
+  if (sessionPanel) sessionPanel.classList.toggle('hidden', !adminLoggedIn);
+  if (sessionLabel && adminLoggedIn) {
+    sessionLabel.textContent = adminRole === 'super'
+      ? 'スーパー管理者としてログイン中'
+      : 'モデレーターとしてログイン中';
+  }
 }
 
 function renderGroupInfoV4() {

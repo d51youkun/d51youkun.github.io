@@ -1976,19 +1976,56 @@ function saveAdminSession() {
   else localStorage.removeItem(ADMIN_SESSION_KEY);
 }
 
-function performAdminLogin() {
-  const email = document.getElementById('input-admin-email').value;
-  const password = document.getElementById('input-admin-password').value;
+function clearAdminLoginFields(source = 'main') {
+  const suffix = source === 'onboard' ? '-onboard' : '';
+  const email = document.getElementById('input-admin-email' + suffix);
+  const password = document.getElementById('input-admin-password' + suffix);
+  if (email) email.value = '';
+  if (password) password.value = '';
+}
+
+function setAdminLoginError(message, source = 'main') {
+  const el = document.getElementById(source === 'onboard' ? 'admin-login-error-onboard' : 'admin-login-error');
+  if (!el) return;
+  if (message) {
+    el.textContent = message;
+    el.classList.remove('hidden');
+  } else {
+    el.textContent = '';
+    el.classList.add('hidden');
+  }
+}
+
+function readAdminLoginFields(source = 'main') {
+  const suffix = source === 'onboard' ? '-onboard' : '';
+  return {
+    email: document.getElementById('input-admin-email' + suffix)?.value || '',
+    password: document.getElementById('input-admin-password' + suffix)?.value || ''
+  };
+}
+
+function performAdminLogin(source = 'main') {
+  const { email, password } = readAdminLoginFields(source);
+  setAdminLoginError('', source);
+  if (!email.trim() || !password) {
+    setAdminLoginError('メールアドレスとパスワードを入力してください', source);
+    return;
+  }
   verifyAdminCredentialsAsync(email, password).then((role) => {
     if (!role) {
-      if (getEffectiveSyncUrl()) showToast('メールアドレスまたはパスワードが正しくありません');
+      const msg = getEffectiveSyncUrl()
+        ? 'メールアドレスまたはパスワードが正しくありません'
+        : '同期サーバーに接続できません。先に同期URLを設定してください';
+      setAdminLoginError(msg, source);
       return;
     }
     adminLoggedIn = true;
     adminRole = role;
     saveAdminSession();
-    document.getElementById('input-admin-email').value = '';
-    document.getElementById('input-admin-password').value = '';
+    clearAdminLoginFields('main');
+    clearAdminLoginFields('onboard');
+    setAdminLoginError('', 'main');
+    setAdminLoginError('', 'onboard');
     try {
       renderAdminUsers();
       renderAdminConversations();
@@ -2001,40 +2038,28 @@ function performAdminLogin() {
 }
 
 function setupAdminHandlers() {
-  bindClick('link-admin-onboarding', (e) => {
-    e.preventDefault();
-    returnScreenAfterAdmin = 'onboarding';
-    showScreen('admin-login');
-  });
-
-  bindClick('link-admin-main', (e) => {
-    e.preventDefault();
-    returnScreenAfterAdmin = 'main';
-    showScreen('admin-login');
-  });
-
-  bindClick('btn-admin-back', () => {
-    showScreen(returnScreenAfterAdmin);
-  });
-
   bindClick('btn-admin-login', (e) => {
     e.preventDefault();
-    performAdminLogin();
+    performAdminLogin('main');
   });
 
-  const adminPassword = document.getElementById('input-admin-password');
-  if (adminPassword) {
-    adminPassword.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') performAdminLogin();
-    });
-  }
+  bindClick('btn-admin-login-onboard', (e) => {
+    e.preventDefault();
+    performAdminLogin('onboard');
+  });
 
-  const adminEmail = document.getElementById('input-admin-email');
-  if (adminEmail) {
-    adminEmail.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') performAdminLogin();
-    });
-  }
+  const bindEnter = (id, source) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') performAdminLogin(source);
+      });
+    }
+  };
+  bindEnter('input-admin-password', 'main');
+  bindEnter('input-admin-email', 'main');
+  bindEnter('input-admin-password-onboard', 'onboard');
+  bindEnter('input-admin-email-onboard', 'onboard');
 
   bindClick('btn-admin-exit', () => {
     showScreen(returnScreenAfterAdmin);
