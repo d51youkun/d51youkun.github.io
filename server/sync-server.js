@@ -368,6 +368,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'conversations' && parts[2] === 'list') {
+      const list = Object.values(data.conversations || {})
+        .sort((a, b) => (b.lastMessageAt || b.createdAt || 0) - (a.lastMessageAt || a.createdAt || 0));
+      sendJson(res, 200, list);
+      return;
+    }
+
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'conversations' && parts[2]) {
       const conv = data.conversations[parts[2]] || null;
       sendJson(res, 200, conv);

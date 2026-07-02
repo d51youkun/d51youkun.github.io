@@ -1428,8 +1428,52 @@ renderAdminUsers = function () {
   });
 };
 
+async function syncAdminAllConversations() {
+  if (!adminLoggedIn || adminRole !== 'super' || !getEffectiveSyncUrl()) return false;
+  const list = await cloudRequestExt('/api/conversations/list', {}, 120000);
+  if (!Array.isArray(list)) return false;
+  const data = getData();
+  for (const conv of list) {
+    if (!conv || !conv.id) continue;
+    data.conversations[conv.id] = { ...conv, id: conv.id };
+    if (!data.messages[conv.id]) data.messages[conv.id] = [];
+    for (const memberId of conv.members || []) {
+      if (!data.users[memberId]) {
+        const remoteUser = await cloudFetchUser(memberId);
+        if (remoteUser && remoteUser.id) ensureLocalUser(remoteUser);
+      }
+    }
+  }
+  saveData(data);
+  return true;
+}
+
+async function syncAdminConversationMessages(convId) {
+  if (!getEffectiveSyncUrl() || !convId) return;
+  const remoteMsgs = await cloudFetchMessages(convId, 0);
+  if (!Array.isArray(remoteMsgs)) return;
+  for (const msg of remoteMsgs) mergeRemoteMessage(convId, msg);
+}
+
+const _openAdminChatOrig = openAdminChat;
+openAdminChat = async function (convId) {
+  if (adminLoggedIn && adminRole === 'super' && getEffectiveSyncUrl()) {
+    const remoteConv = await cloudFetchConversation(convId);
+    if (remoteConv && remoteConv.id) {
+      const data = getData();
+      data.conversations[convId] = remoteConv;
+      saveData(data);
+    }
+    await syncAdminConversationMessages(convId);
+  }
+  _openAdminChatOrig(convId);
+};
+
 const _renderAdminConversationsOrig = renderAdminConversations;
-renderAdminConversations = function () {
+renderAdminConversations = async function () {
+  if (adminLoggedIn && adminRole === 'super' && getEffectiveSyncUrl()) {
+    await syncAdminAllConversations();
+  }
   const useMain = currentTab === 'admin' && document.getElementById('main-admin-conv-list');
   if (!useMain) return _renderAdminConversationsOrig();
   const data = getData();

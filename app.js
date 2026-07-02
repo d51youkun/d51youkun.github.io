@@ -1804,6 +1804,16 @@ function renderAdminUsers() {
 }
 
 function showAdminUserConversations(userId) {
+  const run = async () => {
+    if (adminLoggedIn && adminRole === 'super' && typeof syncAdminAllConversations === 'function') {
+      await syncAdminAllConversations();
+    }
+    showAdminUserConversationsList(userId);
+  };
+  run();
+}
+
+function showAdminUserConversationsList(userId) {
   const data = getData();
   const user = data.users[userId];
   if (!user) return;
@@ -1857,6 +1867,16 @@ function showAdminUserConversations(userId) {
 }
 
 function renderAdminConversations() {
+  const run = async () => {
+    if (adminLoggedIn && adminRole === 'super' && typeof syncAdminAllConversations === 'function') {
+      await syncAdminAllConversations();
+    }
+    renderAdminConversationsList();
+  };
+  run();
+}
+
+function renderAdminConversationsList() {
   const data = getData();
   const convs = Object.values(data.conversations)
     .sort((a, b) => (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt));

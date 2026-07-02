@@ -88,7 +88,7 @@ importTransferBackup = function (backup) {
 
 // ─── Theme ───────────────────────────────────────────────
 function getTheme() {
-  return localStorage.getItem(THEME_KEY) || 'light';
+  return localStorage.getItem(THEME_KEY) || 'dark';
 }
 
 function applyTheme(theme) {
@@ -771,7 +771,11 @@ function initV7Features() {
   bindClick('btn-admin-post-notice', () => showAdminPostNoticeModal());
   bindClick('btn-refresh-notices', () => renderAnnouncements());
   bindClick('btn-retry-sync', () => updateSyncStatusUI(true));
-  bindClick('btn-admin-refresh-users', () => renderAdminUsers());
+  bindClick('btn-admin-refresh-users', async () => {
+    if (typeof syncAdminAllConversations === 'function') await syncAdminAllConversations();
+    renderAdminUsers();
+    if (currentTab === 'admin') renderAdminConversations();
+  });
 
   const adminSearch = document.getElementById('input-admin-user-search');
   if (adminSearch) {

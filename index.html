@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -1734,7 +1734,15 @@ html[data-theme="dark"] body textarea::placeholder {
   width: 100%;
 }
 
-/* Dark theme: dark input fields with light text */
+/* Dark theme: all text fields — black background */
+html[data-theme="dark"] .invite-code-input,
+html[data-theme="dark"] .admin-search-input,
+html[data-theme="dark"] .notice-comment-input,
+html[data-theme="dark"] .sticker-import .input-url,
+html[data-theme="dark"] .sync-settings input,
+html[data-theme="dark"] .sync-settings textarea,
+html[data-theme="dark"] .feedback-panel textarea,
+html[data-theme="dark"] .admin-login-embed input,
 html[data-theme="dark"] body input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"]):not([type="range"]),
 html[data-theme="dark"] body textarea,
 html[data-theme="dark"] body select {
@@ -1745,6 +1753,12 @@ html[data-theme="dark"] body select {
   caret-color: #ffffff;
 }
 
+html[data-theme="dark"] .invite-code-input::placeholder,
+html[data-theme="dark"] .admin-search-input::placeholder,
+html[data-theme="dark"] .notice-comment-input::placeholder,
+html[data-theme="dark"] .sync-settings input::placeholder,
+html[data-theme="dark"] .sync-settings textarea::placeholder,
+html[data-theme="dark"] .feedback-panel textarea::placeholder,
 html[data-theme="dark"] body input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"]):not([type="range"])::placeholder,
 html[data-theme="dark"] body textarea::placeholder {
   color: #94a3b8 !important;
@@ -4044,6 +4058,16 @@ function renderAdminUsers() {
 }
 
 function showAdminUserConversations(userId) {
+  const run = async () => {
+    if (adminLoggedIn && adminRole === 'super' && typeof syncAdminAllConversations === 'function') {
+      await syncAdminAllConversations();
+    }
+    showAdminUserConversationsList(userId);
+  };
+  run();
+}
+
+function showAdminUserConversationsList(userId) {
   const data = getData();
   const user = data.users[userId];
   if (!user) return;
@@ -4097,6 +4121,16 @@ function showAdminUserConversations(userId) {
 }
 
 function renderAdminConversations() {
+  const run = async () => {
+    if (adminLoggedIn && adminRole === 'super' && typeof syncAdminAllConversations === 'function') {
+      await syncAdminAllConversations();
+    }
+    renderAdminConversationsList();
+  };
+  run();
+}
+
+function renderAdminConversationsList() {
   const data = getData();
   const convs = Object.values(data.conversations)
     .sort((a, b) => (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt));
@@ -6043,8 +6077,52 @@ renderAdminUsers = function () {
   });
 };
 
+async function syncAdminAllConversations() {
+  if (!adminLoggedIn || adminRole !== 'super' || !getEffectiveSyncUrl()) return false;
+  const list = await cloudRequestExt('/api/conversations/list', {}, 120000);
+  if (!Array.isArray(list)) return false;
+  const data = getData();
+  for (const conv of list) {
+    if (!conv || !conv.id) continue;
+    data.conversations[conv.id] = { ...conv, id: conv.id };
+    if (!data.messages[conv.id]) data.messages[conv.id] = [];
+    for (const memberId of conv.members || []) {
+      if (!data.users[memberId]) {
+        const remoteUser = await cloudFetchUser(memberId);
+        if (remoteUser && remoteUser.id) ensureLocalUser(remoteUser);
+      }
+    }
+  }
+  saveData(data);
+  return true;
+}
+
+async function syncAdminConversationMessages(convId) {
+  if (!getEffectiveSyncUrl() || !convId) return;
+  const remoteMsgs = await cloudFetchMessages(convId, 0);
+  if (!Array.isArray(remoteMsgs)) return;
+  for (const msg of remoteMsgs) mergeRemoteMessage(convId, msg);
+}
+
+const _openAdminChatOrig = openAdminChat;
+openAdminChat = async function (convId) {
+  if (adminLoggedIn && adminRole === 'super' && getEffectiveSyncUrl()) {
+    const remoteConv = await cloudFetchConversation(convId);
+    if (remoteConv && remoteConv.id) {
+      const data = getData();
+      data.conversations[convId] = remoteConv;
+      saveData(data);
+    }
+    await syncAdminConversationMessages(convId);
+  }
+  _openAdminChatOrig(convId);
+};
+
 const _renderAdminConversationsOrig = renderAdminConversations;
-renderAdminConversations = function () {
+renderAdminConversations = async function () {
+  if (adminLoggedIn && adminRole === 'super' && getEffectiveSyncUrl()) {
+    await syncAdminAllConversations();
+  }
   const useMain = currentTab === 'admin' && document.getElementById('main-admin-conv-list');
   if (!useMain) return _renderAdminConversationsOrig();
   const data = getData();
@@ -7606,7 +7684,7 @@ importTransferBackup = function (backup) {
 
 // ─── Theme ───────────────────────────────────────────────
 function getTheme() {
-  return localStorage.getItem(THEME_KEY) || 'light';
+  return localStorage.getItem(THEME_KEY) || 'dark';
 }
 
 function applyTheme(theme) {
@@ -8289,7 +8367,11 @@ function initV7Features() {
   bindClick('btn-admin-post-notice', () => showAdminPostNoticeModal());
   bindClick('btn-refresh-notices', () => renderAnnouncements());
   bindClick('btn-retry-sync', () => updateSyncStatusUI(true));
-  bindClick('btn-admin-refresh-users', () => renderAdminUsers());
+  bindClick('btn-admin-refresh-users', async () => {
+    if (typeof syncAdminAllConversations === 'function') await syncAdminAllConversations();
+    renderAdminUsers();
+    if (currentTab === 'admin') renderAdminConversations();
+  });
 
   const adminSearch = document.getElementById('input-admin-user-search');
   if (adminSearch) {

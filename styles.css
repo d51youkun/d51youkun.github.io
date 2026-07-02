@@ -1720,7 +1720,15 @@ html[data-theme="dark"] body textarea::placeholder {
   width: 100%;
 }
 
-/* Dark theme: dark input fields with light text */
+/* Dark theme: all text fields — black background */
+html[data-theme="dark"] .invite-code-input,
+html[data-theme="dark"] .admin-search-input,
+html[data-theme="dark"] .notice-comment-input,
+html[data-theme="dark"] .sticker-import .input-url,
+html[data-theme="dark"] .sync-settings input,
+html[data-theme="dark"] .sync-settings textarea,
+html[data-theme="dark"] .feedback-panel textarea,
+html[data-theme="dark"] .admin-login-embed input,
 html[data-theme="dark"] body input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"]):not([type="range"]),
 html[data-theme="dark"] body textarea,
 html[data-theme="dark"] body select {
@@ -1731,6 +1739,12 @@ html[data-theme="dark"] body select {
   caret-color: #ffffff;
 }
 
+html[data-theme="dark"] .invite-code-input::placeholder,
+html[data-theme="dark"] .admin-search-input::placeholder,
+html[data-theme="dark"] .notice-comment-input::placeholder,
+html[data-theme="dark"] .sync-settings input::placeholder,
+html[data-theme="dark"] .sync-settings textarea::placeholder,
+html[data-theme="dark"] .feedback-panel textarea::placeholder,
 html[data-theme="dark"] body input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"]):not([type="range"])::placeholder,
 html[data-theme="dark"] body textarea::placeholder {
   color: #94a3b8 !important;
