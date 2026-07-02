@@ -1734,20 +1734,21 @@ html[data-theme="dark"] body textarea::placeholder {
   width: 100%;
 }
 
-/* Dark theme: black text on light input fields (global white-text rule breaks typing) */
+/* Dark theme: dark input fields with light text */
 html[data-theme="dark"] body input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"]):not([type="range"]),
 html[data-theme="dark"] body textarea,
 html[data-theme="dark"] body select {
-  color: #000000 !important;
-  -webkit-text-fill-color: #000000;
-  background: #ffffff !important;
-  caret-color: #000000;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+  background: #000000 !important;
+  border-color: var(--gray-300);
+  caret-color: #ffffff;
 }
 
 html[data-theme="dark"] body input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"]):not([type="range"])::placeholder,
 html[data-theme="dark"] body textarea::placeholder {
-  color: #666666 !important;
-  -webkit-text-fill-color: #666666;
+  color: #94a3b8 !important;
+  -webkit-text-fill-color: #94a3b8;
   opacity: 1;
 }
 
