@@ -135,9 +135,13 @@ async function adminForceGlobalSync() {
     return;
   }
   ensureSyncUrlForRestore();
-  const res = await adminCloudRequest('/api/admin/force-sync', { method: 'POST', body: '{}' });
+  if (!getEffectiveSyncUrl()) {
+    showToast('同期サーバーに接続できません');
+    return;
+  }
+  const res = await adminForceSyncRequest();
   if (!res || !res.ok) {
-    showToast('強制同期に失敗しました（再ログインしてください）');
+    showToast('強制同期に失敗しました（サーバー接続または管理者認証を確認してください）');
     return;
   }
   localStorage.removeItem(ACTIVITY_VERSION_KEY);

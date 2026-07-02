@@ -510,13 +510,20 @@ async function createCustomPhotoStickerPackV7(name, files) {
   const stickers = [];
   for (const file of files) {
     if (!file.type.startsWith('image/')) continue;
-    if (file.size > 3 * 1024 * 1024) continue;
+    const maxSize = file.type === 'image/gif' ? 5 * 1024 * 1024 : 3 * 1024 * 1024;
+    if (file.size > maxSize) continue;
     const src = await readFileAsDataURL(file);
-    const isGif = file.type === 'image/gif';
-    stickers.push({ type: 'image', src, emoji: isGif ? '🎬' : '🖼️', isGif });
+    const isAnimated = file.type === 'image/gif' || file.type === 'image/webp';
+    stickers.push({
+      type: 'image',
+      src,
+      emoji: isAnimated ? '🎬' : '🖼️',
+      isGif: isAnimated,
+      isAnimated
+    });
   }
   if (!stickers.length) {
-    showToast('画像またはGIFを選択してください');
+    showToast('画像・GIF・動くWebPを選択してください');
     return null;
   }
   const pack = { id: 'custom_' + generateId(), name: name || 'マイスタンプ', stickers };
@@ -552,7 +559,8 @@ renderStickerPicker = function () {
       btn.type = 'button';
       btn.className = 'sticker-btn';
       if (st.type === 'image' && st.src) {
-        if (st.isGif || (st.src && st.src.includes('image/gif'))) {
+        const animated = st.isGif || st.isAnimated || isAnimatedStickerSource(st.src);
+        if (animated) {
           btn.innerHTML = `<img src="${st.src}" alt="gif" class="sticker-img sticker-gif">`;
         } else {
           btn.innerHTML = `<img src="${st.src}" alt="sticker" class="sticker-img">`;
@@ -565,7 +573,13 @@ renderStickerPicker = function () {
         if (!user || !currentConvId) return;
         let msg;
         if (st.type === 'image' && st.src) {
-          msg = pushMessage(currentConvId, user.id, { type: 'sticker', stickerImage: st.src, text: '' });
+          const animated = st.isGif || st.isAnimated || isAnimatedStickerSource(st.src);
+          msg = pushMessage(currentConvId, user.id, {
+            type: 'sticker',
+            stickerImage: st.src,
+            stickerAnimated: animated,
+            text: ''
+          });
         } else {
           msg = sendStickerMessage(currentConvId, user.id, st.emoji || st);
         }

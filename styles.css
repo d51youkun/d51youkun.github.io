@@ -1189,6 +1189,7 @@ input:focus {
 .sticker-pack-label { grid-column: 1 / -1; font-size: 12px; color: var(--gray-500); margin-top: 8px; }
 .sticker-img { width: 48px; height: 48px; object-fit: contain; }
 .message-sticker-img { max-width: 120px; max-height: 120px; }
+.message-sticker-img.sticker-gif { object-fit: contain; }
 .user-title-badge {
   display: inline-block;
   font-size: 10px;

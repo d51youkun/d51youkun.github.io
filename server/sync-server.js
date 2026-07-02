@@ -246,7 +246,10 @@ const server = http.createServer(async (req, res) => {
     const adminRoleFromToken = verifyAdminSession(data, adminToken, false);
 
     if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'force-sync') {
-      if (!adminRoleFromToken) {
+      let role = adminRoleFromToken;
+      const body = await readBody(req);
+      if (!role) role = verifyAdminLogin(body.email, body.password);
+      if (!role) {
         sendJson(res, 401, { error: 'unauthorized' });
         return;
       }
@@ -690,12 +693,20 @@ const server = http.createServer(async (req, res) => {
         }
         const titleObj = meta.title || {};
         const name = titleObj.ja || titleObj.en || titleObj['zh-Hant'] || ('LINE ' + productId);
+        const isAnimated = !!(
+          meta.hasAnimation
+          || meta.stickerResourceType === 'ANIMATION'
+          || meta.stickerResourceType === 'SOUND'
+        );
         const stickers = meta.stickers.slice(0, 40).map(s => ({
           id: String(s.id),
-          url: `https://stickershop.line-scdn.net/stickershop/v1/sticker/${s.id}/android/sticker.png`,
-          emoji: '🎨'
+          url: isAnimated
+            ? `https://stickershop.line-scdn.net/stickershop/v1/sticker/${s.id}/IOS/sticker_animation.png`
+            : `https://stickershop.line-scdn.net/stickershop/v1/sticker/${s.id}/android/sticker.png`,
+          emoji: isAnimated ? '🎬' : '🎨',
+          isAnimated
         }));
-        sendJson(res, 200, { name, stickers, productId });
+        sendJson(res, 200, { name, stickers, productId, isAnimated });
       } catch (e) {
         sendJson(res, 500, { error: e.message || '取得エラー', stickers: [] });
       }

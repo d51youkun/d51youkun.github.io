@@ -846,6 +846,37 @@ async function cloudDeleteMessage(convId, msgId) {
 }
 
 const PENDING_MSG_KEY = 'bluechat_pending_msgs';
+const SYNCED_MSG_KEY = 'bluechat_synced_msg_ids';
+
+function getSyncedMessageIds(convId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SYNCED_MSG_KEY) || '{}');
+    return new Set(all[convId] || []);
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function markMessageSynced(convId, msgId) {
+  if (!convId || !msgId) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(SYNCED_MSG_KEY) || '{}');
+    if (!all[convId]) all[convId] = [];
+    if (!all[convId].includes(msgId)) all[convId].push(msgId);
+    localStorage.setItem(SYNCED_MSG_KEY, JSON.stringify(all));
+  } catch (e) { /* ignore */ }
+}
+
+function unmarkMessageSynced(convId, msgId) {
+  if (!convId || !msgId) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(SYNCED_MSG_KEY) || '{}');
+    if (!all[convId]) return;
+    all[convId] = all[convId].filter(id => id !== msgId);
+    if (!all[convId].length) delete all[convId];
+    localStorage.setItem(SYNCED_MSG_KEY, JSON.stringify(all));
+  } catch (e) { /* ignore */ }
+}
 
 function getPendingMessageIds(convId) {
   try {
@@ -880,6 +911,7 @@ function untrackPendingMessage(convId, msgId) {
 function markMessagePushed(convId, msg) {
   if (!convId || !msg) return;
   untrackPendingMessage(convId, msg.id);
+  markMessageSynced(convId, msg.id);
   const key = 'bluechat_last_push_' + convId;
   const last = parseInt(localStorage.getItem(key) || '0', 10);
   localStorage.setItem(key, String(Math.max(last, msg.timestamp || Date.now())));
@@ -897,16 +929,22 @@ async function syncMessageDeletions(convId) {
 
   const idSet = new Set(ids);
   const pendingIds = getPendingMessageIds(convId);
-  const key = 'bluechat_last_push_' + convId;
-  const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
+  const syncedIds = getSyncedMessageIds(convId);
   const before = data.messages[convId].length;
   data.messages[convId] = data.messages[convId].filter(m => {
     if (pendingIds.has(m.id)) return true;
     if (idSet.has(m.id)) {
+      markMessageSynced(convId, m.id);
       untrackPendingMessage(convId, m.id);
       return true;
     }
-    return (m.timestamp || 0) > lastPush;
+    // サーバーに存在していたメッセージだけ削除同期（他端末での削除）
+    if (syncedIds.has(m.id)) {
+      unmarkMessageSynced(convId, m.id);
+      return false;
+    }
+    // 未同期のローカル履歴は消さない
+    return true;
   });
   if (data.messages[convId].length !== before) {
     syncConversationMeta(convId);
@@ -943,11 +981,13 @@ function mergeRemoteMessage(convId, remoteMsg) {
   const idx = data.messages[convId].findIndex(m => m.id === remoteMsg.id);
   if (idx >= 0) {
     data.messages[convId][idx] = { ...data.messages[convId][idx], ...remoteMsg };
+    markMessageSynced(convId, remoteMsg.id);
     saveData(data);
     return false;
   }
   data.messages[convId].push(remoteMsg);
   data.messages[convId].sort((a, b) => a.timestamp - b.timestamp);
+  markMessageSynced(convId, remoteMsg.id);
   const conv = data.conversations[convId];
   if (conv) {
     const last = data.messages[convId][data.messages[convId].length - 1];
@@ -961,16 +1001,16 @@ function mergeRemoteMessage(convId, remoteMsg) {
 
 async function syncPushLocalMessages(convId) {
   if (!getSyncUrl() || !convId) return;
-  const key = 'bluechat_last_push_' + convId;
-  const lastPush = parseInt(localStorage.getItem(key) || '0', 10);
+  const ids = await cloudRequest(`/api/messages/${convId}/ids`);
+  const idSet = Array.isArray(ids) ? new Set(ids) : null;
   const pendingIds = getPendingMessageIds(convId);
-  const pending = getMessages(convId).filter(m =>
-    pendingIds.has(m.id) || (m.timestamp || 0) > lastPush
+  const toPush = getMessages(convId).filter(m =>
+    pendingIds.has(m.id) || (idSet && !idSet.has(m.id))
   );
-  if (!pending.length) return;
+  if (!toPush.length) return;
   const conv = getData().conversations[convId];
   if (conv) await cloudPushConversation(conv);
-  for (const msg of pending) {
+  for (const msg of toPush) {
     await cloudPushMessage(convId, msg);
   }
 }
@@ -1372,6 +1412,7 @@ async function deleteMessage(convId, msgId) {
   data.messages[convId] = msgs.filter(m => m.id !== msgId);
   syncConversationMeta(convId);
   saveData(data);
+  unmarkMessageSynced(convId, msgId);
   if (getSyncUrl()) await cloudDeleteMessage(convId, msgId);
   return true;
 }

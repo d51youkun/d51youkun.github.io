@@ -195,7 +195,13 @@ async function importLineStickerPackV6(url) {
   const pack = {
     id: 'line_' + productId,
     name: result.name || ('LINE ' + productId),
-    stickers: result.stickers.map(s => ({ type: 'image', src: s.url, emoji: s.emoji || '🎨' }))
+    stickers: result.stickers.map(s => ({
+      type: 'image',
+      src: s.url,
+      emoji: s.isAnimated ? '🎬' : (s.emoji || '🎨'),
+      isGif: !!s.isAnimated,
+      isAnimated: !!s.isAnimated
+    }))
   };
   saveCustomStickerPack(pack);
   if (typeof pushUserStickerPacksToServer === 'function') pushUserStickerPacksToServer().catch(() => {});

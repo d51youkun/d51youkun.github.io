@@ -193,6 +193,25 @@ function saveAdminToken(token) {
   else localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
+async function adminForceSyncRequest() {
+  if (!getAdminToken() && typeof ADMIN_EMAIL !== 'undefined' && ADMIN_EMAIL
+      && typeof verifyAdminCredentialsAsync === 'function') {
+    await verifyAdminCredentialsAsync(ADMIN_EMAIL, ADMIN_PASSWORD || '');
+  }
+
+  let res = await adminCloudRequest('/api/admin/force-sync', { method: 'POST', body: '{}' });
+  if (res && res.ok) return res;
+
+  const email = typeof ADMIN_EMAIL !== 'undefined' ? String(ADMIN_EMAIL || '').trim() : '';
+  const password = typeof ADMIN_PASSWORD !== 'undefined' ? String(ADMIN_PASSWORD || '') : '';
+  if (!email || !password) return res;
+
+  return adminCloudRequest('/api/admin/force-sync', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+}
+
 async function adminCloudRequest(path, options = {}, timeoutMs = 120000) {
   const candidates = typeof getSyncUrlCandidates === 'function'
     ? getSyncUrlCandidates()
@@ -491,10 +510,23 @@ function isMessageReadByOther(msg, convId, myId) {
 }
 
 // ─── Extended message rendering ──────────────────────────
+function isAnimatedStickerSource(src) {
+  if (!src || typeof src !== 'string') return false;
+  return src.includes('image/gif')
+    || src.includes('data:image/gif')
+    || src.includes('sticker_animation');
+}
+
+function stickerImageHtml(src, animated) {
+  const anim = animated || isAnimatedStickerSource(src);
+  const cls = anim ? 'message-sticker-img sticker-gif' : 'message-sticker-img';
+  return `<img src="${src}" class="${cls}" alt="スタンプ">`;
+}
+
 function getMessageContentHtmlExt(msg) {
   if (msg.type === 'sticker') {
     if (msg.stickerImage) {
-      return `<img src="${msg.stickerImage}" class="message-sticker-img" alt="スタンプ">`;
+      return stickerImageHtml(msg.stickerImage, msg.stickerAnimated);
     }
     return `<div class="message-sticker">${msg.stickerEmoji || '🎨'}</div>`;
   }
@@ -602,6 +634,12 @@ renderMessages = function (convId) {
   const messages = getMessages(convId);
   const container = document.getElementById('messages-container');
   if (!container) return;
+
+  const nearBottom =
+    typeof isMessagesNearBottom === 'function' ? isMessagesNearBottom() : false;
+  const prevScrollHeight = container.scrollHeight;
+  const prevScrollTop = container.scrollTop;
+
   container.innerHTML = '';
   let lastDate = '';
   messages.forEach(msg => {
@@ -619,7 +657,14 @@ renderMessages = function (convId) {
       container.appendChild(el);
     }
   });
-  scrollMessagesToBottom(true);
+
+  if (nearBottom) {
+    scrollMessagesToBottom(true);
+  } else if (prevScrollHeight > 0) {
+    requestAnimationFrame(() => {
+      container.scrollTop = prevScrollTop + (container.scrollHeight - prevScrollHeight);
+    });
+  }
 };
 
 // Patch chat sync to include reads
