@@ -4438,6 +4438,7 @@ let peerConnection = null;
 let localStream = null;
 let callState = { active: false, type: null, remoteUserId: null, convId: null };
 let transferScanner = null;
+let transferScanHandled = false;
 let pendingIncomingCall = null;
 let ringToneTimer = null;
 let audioCtx = null;
@@ -5055,24 +5056,113 @@ async function redeemTransferCode(code) {
   }
 }
 
-function onTransferScanSuccess(decodedText) {
-  if (qrScanHandled) return;
-  const code = String(decodedText || '').trim();
-  if (!code.includes(TRANSFER_PREFIX)) return;
-  qrScanHandled = true;
-  if (typeof stopTransferScanner === 'function') stopTransferScanner();
-  else stopQrScanner();
-  hideModal('modal-transfer-scan');
-  redeemTransferCode(code).then(result => {
-    if (result.error) {
-      showToast(result.error);
-      return;
+function parseTransferCodeFromScan(raw) {
+  const text = String(raw || '').trim();
+  const idx = text.indexOf(TRANSFER_PREFIX);
+  if (idx < 0) return null;
+  return text.slice(idx).split(/\s/)[0].trim();
+}
+
+function handleTransferRedeemResult(result) {
+  if (result.error) {
+    showToast(result.error);
+    transferScanHandled = false;
+    qrScanHandled = false;
+    const modal = document.getElementById('modal-transfer-scan');
+    if (modal && !modal.classList.contains('hidden')) {
+      setTimeout(() => startQrScannerForTransfer(), 400);
     }
-    showScreen('main');
-    refreshMainUI();
-    startGlobalSync();
-    showToast('引き継ぎが完了しました！');
-  });
+    return;
+  }
+  hideModal('modal-transfer-scan');
+  stopTransferScanner();
+  showScreen('main');
+  refreshMainUI();
+  startGlobalSync();
+  if (typeof startPresenceHeartbeat === 'function') startPresenceHeartbeat();
+  if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
+  showToast('引き継ぎが完了しました！');
+}
+
+function openTransferScanModal() {
+  if (typeof stopQrScanner === 'function') stopQrScanner();
+  stopTransferScanner();
+  transferScanHandled = false;
+  qrScanHandled = false;
+  const input = document.getElementById('input-transfer-code');
+  if (input) input.value = '';
+  showModal('modal-transfer-scan');
+  setTimeout(() => startQrScannerForTransfer(), 350);
+}
+
+async function startQrScannerForTransfer() {
+  if (typeof Html5Qrcode === 'undefined') {
+    showToast('QRスキャナーを読み込めませんでした');
+    return;
+  }
+  if (!window.isSecureContext) {
+    showToast('カメラはHTTPSまたはlocalhostでのみ使えます');
+    return;
+  }
+  const modal = document.getElementById('modal-transfer-scan');
+  if (!modal || modal.classList.contains('hidden')) return;
+
+  if (typeof stopQrScanner === 'function') {
+    try { await stopQrScanner(); } catch (e) { /* ignore */ }
+  }
+  await stopTransferScanner();
+  transferScanHandled = false;
+
+  if (!document.getElementById('qr-reader-transfer')) return;
+
+  const config = { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 };
+  const onSuccess = (text) => onTransferScanSuccess(text);
+  const onError = () => {};
+
+  try {
+    transferScanner = new Html5Qrcode('qr-reader-transfer', { verbose: false });
+    try {
+      await transferScanner.start({ facingMode: 'environment' }, config, onSuccess, onError);
+      return;
+    } catch (e1) {
+      try {
+        await transferScanner.start({ facingMode: 'user' }, config, onSuccess, onError);
+        return;
+      } catch (e2) {
+        const cameras = await Html5Qrcode.getCameras();
+        if (cameras && cameras.length) {
+          const back = cameras.find(c => /back|rear|環境/i.test(c.label || ''));
+          const camId = (back || cameras[cameras.length - 1]).id;
+          await transferScanner.start(camId, config, onSuccess, onError);
+          return;
+        }
+        throw e2;
+      }
+    }
+  } catch (e) {
+    transferScanner = null;
+    showToast('カメラを起動できません。下のコード入力も使えます');
+  }
+}
+
+async function stopTransferScanner() {
+  if (!transferScanner) return;
+  try {
+    if (transferScanner.isScanning) await transferScanner.stop();
+    transferScanner.clear();
+  } catch (e) { /* ignore */ }
+  transferScanner = null;
+}
+
+function onTransferScanSuccess(decodedText) {
+  if (transferScanHandled) return;
+  const code = parseTransferCodeFromScan(decodedText);
+  if (!code) return;
+  transferScanHandled = true;
+  qrScanHandled = true;
+  stopTransferScanner();
+  showToast('引き継ぎ中…');
+  redeemTransferCode(code).then(handleTransferRedeemResult);
 }
 
 // ─── WebRTC calls ────────────────────────────────────────
@@ -5524,36 +5614,6 @@ function initExtendedFeatures() {
   startGlobalCallPolling();
 }
 
-async function startQrScannerForTransfer() {
-  if (typeof Html5Qrcode === 'undefined' || !window.isSecureContext) {
-    showToast('カメラはHTTPSまたはlocalhostでのみ使えます');
-    return;
-  }
-  try {
-    if (transferScanner && transferScanner.isScanning) await transferScanner.stop();
-    if (!transferScanner) {
-      transferScanner = new Html5Qrcode('qr-reader-transfer', { verbose: false });
-    }
-    qrScanHandled = false;
-    await transferScanner.start(
-      { facingMode: 'environment' },
-      { fps: 8, qrbox: { width: 200, height: 200 } },
-      onTransferScanSuccess,
-      () => {}
-    );
-  } catch (e) {
-    showToast('カメラを起動できません');
-  }
-}
-
-async function stopTransferScanner() {
-  if (!transferScanner) return;
-  try {
-    if (transferScanner.isScanning) await transferScanner.stop();
-    transferScanner.clear();
-  } catch (e) { /* ignore */ }
-}
-
 // Override admin render for main tab
 const _renderAdminUsersOrig = renderAdminUsers;
 renderAdminUsers = function () {
@@ -5629,6 +5689,7 @@ renderAdminConversations = function () {
 const _hideAllModalsOrig = hideAllModals;
 hideAllModals = function () {
   _hideAllModalsOrig();
+  transferScanHandled = false;
   stopTransferScanner();
 };
 
@@ -5652,7 +5713,7 @@ function setupGlobalClickDelegation() {
     },
     'btn-transfer-onboarding': () => {
       if (!getEffectiveSyncUrl()) showToast('同期サーバーが未設定です。引き継ぎ後にマイページで設定できます');
-      showModal('modal-transfer-scan');
+      openTransferScanModal();
     },
     'btn-start-transfer-camera': () => startQrScannerForTransfer(),
     'btn-stop-transfer-camera': () => stopTransferScanner(),
@@ -5660,20 +5721,9 @@ function setupGlobalClickDelegation() {
       const code = document.getElementById('input-transfer-code')?.value?.trim() || '';
       if (!code) { showToast('引き継ぎコードを入力してください'); return; }
       if (typeof redeemTransferCode !== 'function') return;
+      stopTransferScanner();
       showToast('引き継ぎ中…');
-      redeemTransferCode(code).then(result => {
-        if (result.error) {
-          showToast(result.error);
-          return;
-        }
-        hideModal('modal-transfer-scan');
-        showScreen('main');
-        refreshMainUI();
-        startGlobalSync();
-        if (typeof startPresenceHeartbeat === 'function') startPresenceHeartbeat();
-        if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
-        showToast('引き継ぎが完了しました！');
-      });
+      redeemTransferCode(code).then(handleTransferRedeemResult);
     },
     'btn-line-sticker-shop': () => window.open(LINE_STICKER_SHOP_URL, '_blank'),
     'btn-admin-logout': () => {
@@ -6851,30 +6901,7 @@ async function redeemTransferCodeV6(code) {
 
 redeemTransferCode = redeemTransferCodeV6;
 
-function onTransferScanSuccessV6(decodedText) {
-  if (qrScanHandled) return;
-  const code = String(decodedText || '').trim();
-  if (!code.includes(TRANSFER_PREFIX)) return;
-  qrScanHandled = true;
-  if (typeof stopTransferScanner === 'function') stopTransferScanner();
-  else if (typeof stopQrScanner === 'function') stopQrScanner();
-  hideModal('modal-transfer-scan');
-  redeemTransferCode(code).then(result => {
-    if (result.error) {
-      showToast(result.error);
-      qrScanHandled = false;
-      return;
-    }
-    showScreen('main');
-    refreshMainUI();
-    startGlobalSync();
-    startPresenceHeartbeat();
-    scheduleCloudBackup();
-    showToast('引き継ぎが完了しました！');
-  });
-}
-
-onTransferScanSuccess = onTransferScanSuccessV6;
+// Transfer QR scan uses shared handlers in features.js (onTransferScanSuccess)
 
 async function importLineStickerPackV6(url) {
   const productId = parseLineProductId(url);

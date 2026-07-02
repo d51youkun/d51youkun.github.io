@@ -182,30 +182,7 @@ async function redeemTransferCodeV6(code) {
 
 redeemTransferCode = redeemTransferCodeV6;
 
-function onTransferScanSuccessV6(decodedText) {
-  if (qrScanHandled) return;
-  const code = String(decodedText || '').trim();
-  if (!code.includes(TRANSFER_PREFIX)) return;
-  qrScanHandled = true;
-  if (typeof stopTransferScanner === 'function') stopTransferScanner();
-  else if (typeof stopQrScanner === 'function') stopQrScanner();
-  hideModal('modal-transfer-scan');
-  redeemTransferCode(code).then(result => {
-    if (result.error) {
-      showToast(result.error);
-      qrScanHandled = false;
-      return;
-    }
-    showScreen('main');
-    refreshMainUI();
-    startGlobalSync();
-    startPresenceHeartbeat();
-    scheduleCloudBackup();
-    showToast('引き継ぎが完了しました！');
-  });
-}
-
-onTransferScanSuccess = onTransferScanSuccessV6;
+// Transfer QR scan uses shared handlers in features.js (onTransferScanSuccess)
 
 async function importLineStickerPackV6(url) {
   const productId = parseLineProductId(url);
