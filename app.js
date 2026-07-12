@@ -336,6 +336,7 @@ function ensureLocalUser(userInfo) {
 function encodeInvite(user) {
   const payload = {
     i: user.id,
+    n: user.name || '',
     e: Math.floor((Date.now() + CODE_EXPIRY_MS) / 1000)
   };
   const json = JSON.stringify(payload);
@@ -344,28 +345,44 @@ function encodeInvite(user) {
   return INVITE_PREFIX + b64;
 }
 
+function decodeInviteJson(b64) {
+  let normalized = String(b64 || '').replace(/-/g, '+').replace(/_/g, '/');
+  while (normalized.length % 4) normalized += '=';
+  try {
+    const binary = atob(normalized);
+    if (typeof TextDecoder !== 'undefined') {
+      const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+    return decodeURIComponent(escape(binary));
+  } catch (e) {
+    return null;
+  }
+}
+
 function decodeInvite(str) {
   if (!str) return null;
   const text = String(str).trim().replace(/^\uFEFF/, '');
-  if (text.startsWith(TRANSFER_PREFIX)) return null;
+  if (!text || text.includes(TRANSFER_PREFIX)) return null;
   let raw = null;
   let prefixLen = 0;
   for (const prefix of [INVITE_PREFIX, INVITE_PREFIX_LEGACY]) {
-    const idx = text.toLowerCase().indexOf(prefix);
-    if (idx >= 0) {
-      raw = text.slice(idx).split(/[\s\r\n]/)[0];
-      prefixLen = prefix.length;
-      break;
-    }
+    const idx = text.toLowerCase().indexOf(prefix.toLowerCase());
+    if (idx < 0) continue;
+    const slice = text.slice(idx).split(/[\s\r\n]/)[0];
+    if (prefix === INVITE_PREFIX_LEGACY && slice.toLowerCase().startsWith(TRANSFER_PREFIX)) continue;
+    raw = slice;
+    prefixLen = prefix.length;
+    break;
   }
   if (!raw) return null;
   try {
-    let b64 = raw.slice(prefixLen).replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4) b64 += '=';
-    const json = decodeURIComponent(escape(atob(b64)));
+    const json = decodeInviteJson(raw.slice(prefixLen));
+    if (!json) return null;
     const payload = JSON.parse(json);
     if (!payload || !payload.i) return null;
     payload.i = String(payload.i);
+    if (payload.n) payload.n = String(payload.n);
     if (payload.e < 1e12) payload.e = payload.e * 1000;
     return payload;
   } catch (e) {
@@ -375,9 +392,41 @@ function decodeInvite(str) {
 
 function normalizeInviteFromScan(raw) {
   const text = String(raw || '').trim().replace(/^\uFEFF/, '');
-  if (!text || text.startsWith(TRANSFER_PREFIX)) return null;
-  const match = text.match(/(?:bc|bluechat):[A-Za-z0-9_-]+/i);
-  return match ? match[0] : null;
+  if (!text || text.includes(TRANSFER_PREFIX)) return null;
+  const candidates = [];
+  const re = /(?:bc|bluechat):[A-Za-z0-9_-]+/gi;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    candidates.push(match[0]);
+  }
+  if (!candidates.length && /^(?:bc|bluechat):/i.test(text)) {
+    candidates.push(text.split(/[\s\r\n]/)[0]);
+  }
+  for (const candidate of candidates) {
+    if (decodeInvite(candidate)) return candidate;
+  }
+  return null;
+}
+
+let lastInvalidQrToastAt = 0;
+
+async function queueFriendInviteCloudSync(meId, friendId, targetUser, convId) {
+  if (!getSyncUrl()) return;
+  const me = getCurrentUser();
+  try {
+    if (me) await cloudPushUser(me);
+    await cloudPushUser(targetUser);
+    let pushed = false;
+    for (let i = 0; i < 4 && !pushed; i++) {
+      pushed = await cloudPushFriendship(meId, friendId);
+      if (!pushed && i < 3) await new Promise(r => setTimeout(r, 2000));
+    }
+    if (convId) {
+      const conv = getData().conversations[convId];
+      if (conv) await cloudPushConversation(conv);
+    }
+    if (pushed) await syncFriendships();
+  } catch (e) { /* ignore */ }
 }
 
 async function redeemFriendInvite(inviteStr, currentUserId) {
@@ -395,27 +444,31 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
     return { error: '自分のコードは使えません' };
   }
   if (areFriends(meId, friendId)) {
-    return { error: 'すでに友だちです' };
+    const existing = getUser(friendId) || { id: friendId, name: payload.n || '友だち' };
+    return { success: true, user: existing, alreadyFriends: true };
   }
 
   const me = getCurrentUser();
   let friendName = payload.n || null;
-  if (getSyncUrl()) {
-    const remote = await cloudFetchUser(friendId);
-    if (remote && remote.id) {
-      ensureLocalUser(remote);
-      friendName = remote.name || friendName;
-    }
-  }
   ensureLocalUser({ id: friendId, name: friendName || '友だち' });
-  if (me) await cloudPushUser(me);
-  await cloudPushUser(getUser(friendId) || { id: friendId, name: friendName || '友だち', createdAt: Date.now() });
 
-  addFriendship(meId, friendId);
+  const convId = addFriendship(meId, friendId, { skipCloud: true });
   const targetUser = getUser(friendId);
   if (!targetUser) {
     return { error: '友だち情報の保存に失敗しました' };
   }
+
+  if (getSyncUrl()) {
+    queueFriendInviteCloudSync(meId, friendId, targetUser, convId);
+    if (me) cloudPushUser(me);
+    cloudFetchUser(friendId).then(remote => {
+      if (remote && remote.id) {
+        ensureLocalUser(remote);
+        refreshMainUI();
+      }
+    });
+  }
+
   return { success: true, user: targetUser };
 }
 
@@ -423,27 +476,15 @@ async function handleFriendInviteSuccess(result) {
   qrScanHandled = true;
   await stopQrScanner();
   hideModal('modal-add-friend');
-  const me = getCurrentUser();
-  if (me && result.user) {
-    await cloudPushUser(me);
-    await cloudPushUser(result.user);
-    let pushed = false;
-    for (let i = 0; i < 4 && !pushed; i++) {
-      pushed = await cloudPushFriendship(me.id, result.user.id);
-      if (!pushed && i < 3) await new Promise(r => setTimeout(r, 2000));
-    }
-    const convId = getOrCreateDirectConv(me.id, result.user.id);
-    const conv = getData().conversations[convId];
-    if (conv) await cloudPushConversation(conv);
-    if (getSyncUrl()) await syncFriendships();
-    if (!pushed && getSyncUrl()) {
-      showToast('友だちは追加しました（サーバー反映は後で再試行されます）');
-    }
-  }
   if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
   else refreshMainUI();
-  showToast(`${result.user.name}さんと友だちになりました！`);
+  if (result.alreadyFriends) {
+    showToast(`${result.user.name}さんとはすでに友だちです`);
+  } else {
+    showToast(`${result.user.name}さんと友だちになりました！`);
+  }
   document.querySelector('.tab[data-tab="friends"]')?.click();
+  if (getSyncUrl()) startGlobalSync();
 }
 
 async function tryRedeemInviteCode(code) {
@@ -599,7 +640,14 @@ async function stopQrScanner() {
 function onQrScanSuccess(decodedText) {
   if (qrScanHandled) return;
   const code = normalizeInviteFromScan(decodedText);
-  if (!code) return;
+  if (!code) {
+    const now = Date.now();
+    if (now - lastInvalidQrToastAt > 2500) {
+      lastInvalidQrToastAt = now;
+      showToast('友だち追加用QRコードを読み取れませんでした');
+    }
+    return;
+  }
   const user = getCurrentUser();
   if (!user) {
     showToast('先にアカウントを作成してください');
@@ -615,12 +663,16 @@ function onQrScanSuccess(decodedText) {
       if (result.error) {
         qrScanHandled = false;
         showToast(result.error);
+        if (document.getElementById('modal-add-friend') && !document.getElementById('modal-add-friend').classList.contains('hidden')) {
+          setTimeout(() => startQrScanner(), 400);
+        }
         return;
       }
       await handleFriendInviteSuccess(result);
     } catch (e) {
       qrScanHandled = false;
       showToast('友だち追加に失敗しました。もう一度お試しください');
+      setTimeout(() => startQrScanner(), 400);
     }
   })();
 }
@@ -639,6 +691,7 @@ function switchAddFriendTab(tab) {
   if (tab === 'scan') {
     stopQrScanner();
     updateSecureContextHint();
+    setTimeout(() => startQrScanner(), 350);
   } else {
     stopQrScanner();
     if (tab === 'show') setTimeout(() => renderMyQR(), 150);
