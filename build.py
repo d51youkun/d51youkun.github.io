@@ -97,9 +97,9 @@ def build_bundle_html() -> str:
 def export_version_folder(pages_html: str, version: str) -> None:
     """Desktop/BlueChatvN に配布用フォルダを出力"""
     out_dir = ROOT.parent / f"BlueChat{version}"
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+    if out_dir.resolve() == ROOT.resolve():
+        return
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     (out_dir / "index.html").write_text(pages_html, encoding="utf-8")
     (out_dir / "BlueChat.html").write_text(pages_html, encoding="utf-8")
@@ -111,11 +111,17 @@ def export_version_folder(pages_html: str, version: str) -> None:
 
     lib_src = ROOT / "lib"
     if lib_src.is_dir():
-        shutil.copytree(lib_src, out_dir / "lib")
+        dest_lib = out_dir / "lib"
+        if dest_lib.exists():
+            shutil.rmtree(dest_lib)
+        shutil.copytree(lib_src, dest_lib)
 
     server_src = ROOT / "server"
     if server_src.is_dir():
-        shutil.copytree(server_src, out_dir / "server")
+        dest_server = out_dir / "server"
+        if dest_server.exists():
+            shutil.rmtree(dest_server)
+        shutil.copytree(server_src, dest_server)
 
     for name in ("app.js", "features.js", "v4.js", "v6.js", "v7.js", "v8.js", "v9.js", "v10.js", "body.html", "styles.css", "build.py"):
         src = ROOT / name
