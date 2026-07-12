@@ -783,6 +783,86 @@ function importTransferBackup(backup) {
   localStorage.removeItem(ACTIVITY_VERSION_KEY);
 }
 
+// ─── Local file backup ─────────────────────────────────────
+const FILE_BACKUP_PREFIX = 'bluechat-backup:';
+
+function buildLocalBackupPayload() {
+  if (typeof buildTransferBackupWithPassword === 'function') {
+    return buildTransferBackupWithPassword(null);
+  }
+  return buildTransferBackup();
+}
+
+function serializeFileBackup(backup) {
+  return FILE_BACKUP_PREFIX + JSON.stringify(backup);
+}
+
+function parseFileBackupText(text) {
+  const raw = String(text || '').trim().replace(/^\uFEFF/, '');
+  if (!raw) return null;
+  if (raw.startsWith(FILE_BACKUP_PREFIX)) {
+    try {
+      return JSON.parse(raw.slice(FILE_BACKUP_PREFIX.length));
+    } catch (e) {
+      return null;
+    }
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function downloadLocalBackupFile() {
+  const user = getCurrentUser();
+  if (!user) {
+    showToast('先にアカウントを作成してください');
+    return;
+  }
+  const backup = buildLocalBackupPayload();
+  const content = serializeFileBackup(backup);
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  const safeName = String(user.name || 'data').replace(/[^\w\u3040-\u30ff\u4e00-\u9faf-]+/g, '_').slice(0, 24);
+  a.href = url;
+  a.download = `bluechat-backup-${safeName}-${stamp}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('バックアップを保存しました');
+}
+
+async function restoreLocalBackupFile(file) {
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const backup = parseFileBackupText(text);
+    if (!backup || !backup.data) {
+      showToast('バックアップファイルの形式が正しくありません');
+      return;
+    }
+    const userName = backup.data.users?.[backup.data.currentUserId]?.name || 'バックアップ';
+    if (!confirm(`${userName} のデータで復元しますか？\n現在のデータは上書きされます。`)) return;
+    importTransferBackup(backup);
+    if (backup.syncUrl) {
+      const migrated = typeof resolveSyncUrl === 'function' ? resolveSyncUrl(backup.syncUrl) : backup.syncUrl;
+      if (migrated) setSyncUrl(migrated);
+    }
+    showScreen('main');
+    refreshMainUI();
+    if (typeof startGlobalSync === 'function') startGlobalSync();
+    if (typeof startPresenceHeartbeat === 'function') startPresenceHeartbeat();
+    if (typeof scheduleCloudBackup === 'function') scheduleCloudBackup();
+    showToast('バックアップから復元しました');
+  } catch (e) {
+    showToast(e.message || '復元に失敗しました');
+  }
+}
+
 async function createTransferSession() {
   if (!getEffectiveSyncUrl()) {
     showToast('引き継ぎには同期サーバーURLの設定が必要です');
@@ -1337,6 +1417,15 @@ function initExtendedFeatures() {
     registerServiceWorker();
   }
 
+  const backupFileInput = document.getElementById('input-backup-file');
+  if (backupFileInput) {
+    backupFileInput.addEventListener('change', async () => {
+      const file = backupFileInput.files?.[0];
+      backupFileInput.value = '';
+      if (file) await restoreLocalBackupFile(file);
+    });
+  }
+
   const fileInput = document.getElementById('input-chat-file');
   if (fileInput) {
     fileInput.addEventListener('change', async () => {
@@ -1573,6 +1662,8 @@ function setupGlobalClickDelegation() {
       renderTransferQR();
       showModal('modal-transfer-qr');
     },
+    'btn-download-backup': () => downloadLocalBackupFile(),
+    'btn-restore-backup': () => document.getElementById('input-backup-file')?.click(),
     'btn-transfer-onboarding': () => {
       if (!getEffectiveSyncUrl()) showToast('同期サーバーが未設定です。引き継ぎ後にマイページで設定できます');
       openTransferScanModal();
