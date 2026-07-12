@@ -1,7 +1,7 @@
 {
-  "url": "https://bluechat-sync.onrender.com",
+  "url": "https://bluechat-sync-846f.onbelmo.uk",
   "alternates": [],
-  "renderOutboundIpRanges": ["74.220.48.0/24", "74.220.56.0/24"],
+  "renderOutboundIpRanges": [],
   "adminEmail": "d51498go@icloud.com",
   "adminPassword": "D51498Go"
 }

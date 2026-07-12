@@ -1893,7 +1893,7 @@ html[data-theme="dark"] body textarea::placeholder {
         </div>
         <div class="sync-settings">
           <p class="form-label">他の端末と同期</p>
-          <input type="text" id="input-sync-url" placeholder="https://bluechat-sync.onrender.com または 192.168.1.5:8766" autocomplete="off" inputmode="url">
+          <input type="text" id="input-sync-url" placeholder="https://bluechat-sync-846f.onbelmo.uk または 192.168.1.5:8766" autocomplete="off" inputmode="url">
           <button type="button" id="btn-save-sync" class="btn-secondary btn-sm">同期サーバーを保存</button>
           <button type="button" id="btn-retry-sync" class="btn-secondary btn-sm">再試行</button>
           <p class="qr-hint" id="sync-url-hint">ドメイン・IPどちらでもOK。複数ある場合はカンマ区切り</p>
@@ -2265,7 +2265,7 @@ const SYNC_URL_KEY = 'bluechat_sync_url';
 const SYNC_CONFIGURED_KEY = 'bluechat_sync_configured';
 const SYNC_URL_DELIMITER = ',';
 const LOCAL_SYNC_DEFAULT_PORT = 8766;
-const DEFAULT_SYNC_URL = 'https://bluechat-sync.onrender.com';
+const DEFAULT_SYNC_URL = 'https://bluechat-sync-846f.onbelmo.uk';
 const SYNC_ALTERNATE_URLS = [];
 const ADMIN_EMAIL = 'd51498go@icloud.com';
 const ADMIN_PASSWORD = 'D51498Go';
@@ -3018,9 +3018,9 @@ function isMixedContentBlocked(syncUrl) {
 function getSyncUrlFormatHint() {
   const blocked = getSyncUrlCandidates().find(isMixedContentBlocked);
   if (blocked) {
-    return '※ HTTPSページからローカルIP(http://)には接続できません。同じWi-FiではPCの http://(PCのIP):8765 で開くか、Renderのドメインを使ってください';
+    return '※ HTTPSページからローカルIP(http://)には接続できません。同じWi-FiではPCの http://(PCのIP):8765 で開くか、HTTPSの同期サーバーを使ってください';
   }
-  return 'ドメイン・IPどちらでもOK（例: https://bluechat-sync.onrender.com または 192.168.1.5:8766）。複数はカンマ区切り。Render送信元IP: 74.220.48.0/24, 74.220.56.0/24';
+  return 'ドメイン・IPどちらでもOK（例: https://bluechat-sync-846f.onbelmo.uk または 192.168.1.5:8766）。複数はカンマ区切り。';
 }
 
 function initSyncFromQuery() {
@@ -3506,7 +3506,7 @@ function updateSyncStatusUI(forceCheck) {
     if (!globalSyncTimer) startGlobalSync();
     return;
   }
-  status.textContent = '接続確認中…（Renderは起動に最大1分かかることがあります）';
+  status.textContent = '接続確認中…';
   status.classList.add('warn');
   testSyncConnection(5).then((ok) => {
     syncStatusChecked = !!ok;
@@ -7002,7 +7002,7 @@ async function submitFeedback(type, text) {
     : cloudRequest('/api/feedback', { method: 'POST', body: JSON.stringify(payload) }));
 
   if (!result || !result.ok) {
-    showToast('送信に失敗しました。同期サーバーとRenderの更新を確認してください');
+    showToast('送信に失敗しました。同期サーバーの接続を確認してください');
     return;
   }
 

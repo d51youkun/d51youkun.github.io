@@ -48,7 +48,7 @@ def get_app_js() -> str:
     admin_email = str(cfg.get("adminEmail", "d51498go@icloud.com")).strip()
     admin_password = str(cfg.get("adminPassword", "D51498Go"))
     if not sync_url:
-        sync_url = "https://bluechat-sync.onrender.com"
+        sync_url = "https://bluechat-sync-846f.onbelmo.uk"
     app_js = app_js.replace("__DEFAULT_SYNC_URL__", sync_url, 1)
     app_js = app_js.replace("__SYNC_ALTERNATE_URLS__", json.dumps(alternates), 1)
     app_js = app_js.replace("__ADMIN_EMAIL__", admin_email, 1)

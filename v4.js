@@ -647,7 +647,7 @@ async function submitFeedback(type, text) {
     : cloudRequest('/api/feedback', { method: 'POST', body: JSON.stringify(payload) }));
 
   if (!result || !result.ok) {
-    showToast('送信に失敗しました。同期サーバーとRenderの更新を確認してください');
+    showToast('送信に失敗しました。同期サーバーの接続を確認してください');
     return;
   }
 

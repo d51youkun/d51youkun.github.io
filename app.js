@@ -763,9 +763,9 @@ function isMixedContentBlocked(syncUrl) {
 function getSyncUrlFormatHint() {
   const blocked = getSyncUrlCandidates().find(isMixedContentBlocked);
   if (blocked) {
-    return '※ HTTPSページからローカルIP(http://)には接続できません。同じWi-FiではPCの http://(PCのIP):8765 で開くか、Renderのドメインを使ってください';
+    return '※ HTTPSページからローカルIP(http://)には接続できません。同じWi-FiではPCの http://(PCのIP):8765 で開くか、HTTPSの同期サーバーを使ってください';
   }
-  return 'ドメイン・IPどちらでもOK（例: https://bluechat-sync.onrender.com または 192.168.1.5:8766）。複数はカンマ区切り。Render送信元IP: 74.220.48.0/24, 74.220.56.0/24';
+  return 'ドメイン・IPどちらでもOK（例: https://bluechat-sync-846f.onbelmo.uk または 192.168.1.5:8766）。複数はカンマ区切り。';
 }
 
 function initSyncFromQuery() {
@@ -1251,7 +1251,7 @@ function updateSyncStatusUI(forceCheck) {
     if (!globalSyncTimer) startGlobalSync();
     return;
   }
-  status.textContent = '接続確認中…（Renderは起動に最大1分かかることがあります）';
+  status.textContent = '接続確認中…';
   status.classList.add('warn');
   testSyncConnection(5).then((ok) => {
     syncStatusChecked = !!ok;
