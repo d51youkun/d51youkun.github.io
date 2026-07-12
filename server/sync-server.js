@@ -10,7 +10,33 @@ const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8766;
 const SERVER_VERSION = '2026-07-03';
-const DATA_FILE = path.join(__dirname, 'data.json');
+
+function resolveWritableDataFile() {
+  const legacy = path.join(__dirname, 'data.json');
+  const candidates = [
+    process.env.DATA_DIR,
+    process.env.TMPDIR,
+    process.env.TEMP,
+    '/tmp'
+  ].filter(Boolean).map(dir => path.join(dir, 'bluechat-data.json'));
+  candidates.push(legacy);
+  for (const file of candidates) {
+    try {
+      const dir = path.dirname(file);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const probe = path.join(dir, '.bluechat-write-test');
+      fs.writeFileSync(probe, 'ok');
+      fs.unlinkSync(probe);
+      if (file !== legacy && fs.existsSync(legacy) && !fs.existsSync(file)) {
+        try { fs.copyFileSync(legacy, file); } catch (e) { /* ignore */ }
+      }
+      return file;
+    } catch (e) { /* try next */ }
+  }
+  return legacy;
+}
+
+const DATA_FILE = resolveWritableDataFile();
 
 function loadDotEnv() {
   const envPath = path.join(__dirname, '.env');
@@ -223,7 +249,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'health') {
-      sendJson(res, 200, { ok: true, service: 'BlueChat Sync', version: SERVER_VERSION });
+      let writable = true;
+      try {
+        const probe = path.join(path.dirname(DATA_FILE), '.bluechat-health-probe');
+        fs.writeFileSync(probe, String(Date.now()));
+        fs.unlinkSync(probe);
+      } catch (e) {
+        writable = false;
+      }
+      sendJson(res, 200, { ok: writable, service: 'BlueChat Sync', version: SERVER_VERSION, writable, dataFile: DATA_FILE });
       return;
     }
 
@@ -477,15 +511,35 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'friendships' && parts[2]) {
       const body = await readBody(req);
-      const id1 = body.user1;
-      const id2 = body.user2;
+      const id1 = String(body.user1 || '');
+      const id2 = String(body.user2 || '');
+      if (!id1 || !id2 || id1 === id2) {
+        sendJson(res, 400, { error: 'invalid' });
+        return;
+      }
       if (!data.friendships) data.friendships = {};
       if (!data.userFriendships) data.userFriendships = {};
+      if (!data.conversations) data.conversations = {};
+      if (!data.userConversations) data.userConversations = {};
       data.friendships[parts[2]] = { user1: id1, user2: id2, createdAt: body.createdAt || Date.now() };
       [id1, id2].forEach(uid => {
-        if (!uid) return;
         if (!data.userFriendships[uid]) data.userFriendships[uid] = {};
-        data.userFriendships[uid][id1 === uid ? id2 : id1] = true;
+        data.userFriendships[uid][uid === id1 ? id2 : id1] = true;
+      });
+      const convId = 'dm_' + [id1, id2].sort().join('_');
+      if (!data.conversations[convId]) {
+        data.conversations[convId] = {
+          id: convId,
+          type: 'direct',
+          members: [id1, id2].sort(),
+          createdAt: body.createdAt || Date.now(),
+          lastMessageAt: null,
+          lastMessagePreview: null
+        };
+      }
+      [id1, id2].forEach(uid => {
+        if (!data.userConversations[uid]) data.userConversations[uid] = {};
+        data.userConversations[uid][convId] = true;
       });
       saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
@@ -493,7 +547,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'user' && parts[2] && parts[3] === 'friendships') {
-      const userId = parts[2];
+      const userId = String(parts[2]);
       const friends = (data.userFriendships && data.userFriendships[userId]) || {};
       sendJson(res, 200, Object.keys(friends));
       return;
@@ -854,5 +908,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`BlueChat sync server: http://0.0.0.0:${PORT}`);
+  console.log('Data file:', DATA_FILE);
   console.log('Health check: GET /api/health');
 });

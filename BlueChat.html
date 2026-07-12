@@ -2675,7 +2675,7 @@ function normalizeInviteFromScan(raw) {
 let lastInvalidQrToastAt = 0;
 
 async function queueFriendInviteCloudSync(meId, friendId, targetUser, convId) {
-  if (!getSyncUrl()) return;
+  if (!getSyncUrl()) return false;
   const me = getCurrentUser();
   try {
     if (me) await cloudPushUser(me);
@@ -2690,7 +2690,10 @@ async function queueFriendInviteCloudSync(meId, friendId, targetUser, convId) {
       if (conv) await cloudPushConversation(conv);
     }
     if (pushed) await syncFriendships();
-  } catch (e) { /* ignore */ }
+    return pushed;
+  } catch (e) {
+    return false;
+  }
 }
 
 async function redeemFriendInvite(inviteStr, currentUserId) {
@@ -2723,7 +2726,7 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
   }
 
   if (getSyncUrl()) {
-    queueFriendInviteCloudSync(meId, friendId, targetUser, convId);
+    const cloudSynced = await queueFriendInviteCloudSync(meId, friendId, targetUser, convId);
     if (me) cloudPushUser(me);
     cloudFetchUser(friendId).then(remote => {
       if (remote && remote.id) {
@@ -2731,9 +2734,10 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
         refreshMainUI();
       }
     });
+    return { success: true, user: targetUser, cloudSynced };
   }
 
-  return { success: true, user: targetUser };
+  return { success: true, user: targetUser, cloudSynced: false };
 }
 
 async function handleFriendInviteSuccess(result) {
@@ -2744,6 +2748,8 @@ async function handleFriendInviteSuccess(result) {
   else refreshMainUI();
   if (result.alreadyFriends) {
     showToast(`${result.user.name}さんとはすでに友だちです`);
+  } else if (result.cloudSynced === false && getSyncUrl()) {
+    showToast(`${result.user.name}さんを追加しましたが、同期サーバーへの反映に失敗しました。マイページの同期設定を確認してください`);
   } else {
     showToast(`${result.user.name}さんと友だちになりました！`);
   }
@@ -2777,6 +2783,7 @@ function renderMyQR() {
   document.getElementById('qr-expiry-note').textContent = '有効期限: 24時間（更新ボタンで再発行）';
   const codeEl = document.getElementById('invite-code-text');
   if (codeEl) codeEl.textContent = invite;
+  if (getSyncUrl()) cloudPushUser(user);
   try {
     new QRCode(container, {
       text: invite,
@@ -3191,7 +3198,7 @@ async function cloudRequest(path, options = {}, timeoutMs = 45000) {
 async function testSyncConnection(retries = 5) {
   for (let i = 0; i < retries; i++) {
     const result = await cloudRequest('/api/health', {}, 60000);
-    if (result && result.ok) return true;
+    if (result && result.ok && result.writable !== false) return true;
     if (i < retries - 1) await new Promise(r => setTimeout(r, 4000));
   }
   return false;
@@ -3491,7 +3498,7 @@ async function syncFriendships() {
       added++;
     }
   }
-  if (avatarsUpdated) refreshMainUI();
+  if (avatarsUpdated || added > 0) refreshMainUI();
   return added;
 }
 
