@@ -676,6 +676,42 @@ function isPrivateIpv4(octets) {
   return false;
 }
 
+function isLegacySyncUrl(url) {
+  try {
+    return new URL(url).hostname.toLowerCase().includes('onrender.com');
+  } catch (e) {
+    return false;
+  }
+}
+
+function resolveSyncUrl(url) {
+  const normalized = normalizeSyncUrl(url);
+  if (!normalized) return '';
+  if (isLegacySyncUrl(normalized) && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+    return DEFAULT_SYNC_URL;
+  }
+  return normalized;
+}
+
+function migrateStoredSyncUrlIfNeeded() {
+  const stored = localStorage.getItem(SYNC_URL_KEY);
+  if (!stored) return;
+  const migrated = [];
+  let changed = false;
+  stored.split(SYNC_URL_DELIMITER).forEach(part => {
+    const resolved = resolveSyncUrl(part.trim());
+    if (!resolved) return;
+    if (resolved !== normalizeSyncUrl(part.trim())) changed = true;
+    if (!migrated.includes(resolved)) migrated.push(resolved);
+  });
+  if (!migrated.length) return;
+  const next = migrated.join(SYNC_URL_DELIMITER);
+  if (changed || next !== stored) {
+    localStorage.setItem(SYNC_URL_KEY, next);
+    localStorage.setItem(SYNC_CONFIGURED_KEY, '1');
+  }
+}
+
 function normalizeSyncUrl(url) {
   let s = String(url || '').trim().replace(/\/+$/, '');
   if (!s) return '';
@@ -723,7 +759,19 @@ function getSyncUrlCandidates() {
   };
 
   if (stored) {
-    stored.split(SYNC_URL_DELIMITER).forEach(part => add(part.trim()));
+    const migrated = [];
+    let changed = false;
+    stored.split(SYNC_URL_DELIMITER).forEach(part => {
+      const resolved = resolveSyncUrl(part.trim());
+      if (!resolved) return;
+      if (resolved !== normalizeSyncUrl(part.trim())) changed = true;
+      if (!migrated.includes(resolved)) migrated.push(resolved);
+    });
+    migrated.forEach(add);
+    if (changed && migrated.length) {
+      localStorage.setItem(SYNC_URL_KEY, migrated.join(SYNC_URL_DELIMITER));
+      localStorage.setItem(SYNC_CONFIGURED_KEY, '1');
+    }
   } else if (typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
     add(DEFAULT_SYNC_URL);
   }
@@ -769,6 +817,7 @@ function getSyncUrlFormatHint() {
 }
 
 function initSyncFromQuery() {
+  migrateStoredSyncUrlIfNeeded();
   const params = new URLSearchParams(window.location.search);
   const sync = params.get('sync');
   if (sync) {

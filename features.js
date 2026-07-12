@@ -776,7 +776,10 @@ function importTransferBackup(backup) {
     }
     throw e;
   }
-  if (backup.syncUrl && !localStorage.getItem(SYNC_CONFIGURED_KEY)) setSyncUrl(backup.syncUrl);
+  if (backup.syncUrl && !localStorage.getItem(SYNC_CONFIGURED_KEY)) {
+    const migrated = typeof resolveSyncUrl === 'function' ? resolveSyncUrl(backup.syncUrl) : backup.syncUrl;
+    if (migrated) setSyncUrl(migrated);
+  }
   localStorage.removeItem(ACTIVITY_VERSION_KEY);
 }
 
