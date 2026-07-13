@@ -46,13 +46,53 @@ function countDistinctAuthors(posts) {
   return ids.size;
 }
 
+function stripPostForClientList(post) {
+  if (!post) return post;
+  const copy = { ...post };
+  if (copy.authorAvatar && String(copy.authorAvatar).length > FEED_AVATAR_CACHE_STRIP_BYTES) {
+    copy.authorAvatar = null;
+  }
+  if (copy.media && copy.media.data) {
+    copy.media = {
+      type: copy.media.type || 'image',
+      mimeType: copy.media.mimeType || '',
+      fileName: copy.media.fileName || '',
+      _hasRemoteData: true
+    };
+  }
+  if (copy.attachment && copy.attachment.data) {
+    copy.attachment = {
+      fileName: copy.attachment.fileName || 'file',
+      mimeType: copy.attachment.mimeType || '',
+      size: copy.attachment.size || 0,
+      _hasRemoteData: true
+    };
+  }
+  return copy;
+}
+
+function normalizeRemoteFeedPosts(posts, liteHint) {
+  if (!Array.isArray(posts)) return [];
+  const hasRemoteFlag = posts.some(p =>
+    (p.media && p.media._hasRemoteData) || (p.attachment && p.attachment._hasRemoteData)
+  );
+  if (liteHint || hasRemoteFlag) return posts;
+  const heavy = posts.some(p =>
+    (p.media && p.media.data && p.media.data.length > FEED_CACHE_STRIP_BYTES) ||
+    (p.attachment && p.attachment.data && p.attachment.data.length > FEED_CACHE_STRIP_BYTES) ||
+    (p.authorAvatar && String(p.authorAvatar).length > FEED_AVATAR_CACHE_STRIP_BYTES)
+  );
+  return heavy ? posts.map(stripPostForClientList) : posts;
+}
+
 async function fetchPostsFromServerRemote() {
   const paths = ['/api/posts?lite=1', '/api/posts'];
   for (const path of paths) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const remote = await cloudRequest(path, { cache: 'no-store' }, FEED_FETCH_TIMEOUT_MS);
       if (Array.isArray(remote)) {
-        return { ok: true, posts: remote, lite: path.indexOf('lite=1') >= 0 };
+        const lite = path.indexOf('lite=1') >= 0;
+        return { ok: true, posts: normalizeRemoteFeedPosts(remote, lite), lite };
       }
       if (attempt === 0) await new Promise(r => setTimeout(r, 700));
     }
