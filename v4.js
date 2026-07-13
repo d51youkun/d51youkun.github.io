@@ -161,9 +161,12 @@ function unlockAudioOnce() {
 }
 
 const _onNewMessageReceivedOrig = onNewMessageReceived;
+const _inAppPopupShown = new Set();
 onNewMessageReceived = function (convId, msg) {
+  if (msg?.id && _inAppPopupShown.has(String(msg.id))) return;
   const delivered = _onNewMessageReceivedOrig(convId, msg);
   if (!delivered || document.hidden) return;
+  if (msg?.id) _inAppPopupShown.add(String(msg.id));
   const user = getCurrentUser();
   const conv = getData().conversations[convId];
   const name = getConvDisplayName(conv, user.id);

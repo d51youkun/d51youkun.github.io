@@ -17,14 +17,9 @@ let transferScanHandled = false;
 let pendingIncomingCall = null;
 let ringToneTimer = null;
 let audioCtx = null;
-const NOTIFY_STATE_PREFIX = 'bluechat_notify_v2_';
-const LEGACY_NOTIFY_KEYS = [
-  'bluechat_notify_baseline',
-  'bluechat_notify_baseline_',
-  'bluechat_notified_ids_'
-];
+const NOTIFY_STATE_PREFIX = 'bluechat_notify_v3_';
+let sessionNotifyBootedAt = 0;
 let notifySuppressedUntil = 0;
-
 let syncNotifyMutedUntil = 0;
 
 function getNotifyStateKey() {
@@ -33,38 +28,72 @@ function getNotifyStateKey() {
   return NOTIFY_STATE_PREFIX + uid;
 }
 
+function normalizeNotifyState(raw) {
+  const state = raw && typeof raw === 'object' ? { ...raw } : {};
+  state.convWatermarks = state.convWatermarks && typeof state.convWatermarks === 'object'
+    ? state.convWatermarks : {};
+  state.notifiedIds = state.notifiedIds && typeof state.notifiedIds === 'object'
+    ? state.notifiedIds : {};
+  if (Array.isArray(state.ids)) {
+    state.ids.forEach(id => { state.notifiedIds[String(id)] = 1; });
+    delete state.ids;
+  }
+  state.globalBaseline = state.globalBaseline || state.baseline || 0;
+  return state;
+}
+
 function readNotifyState() {
   try {
     const raw = localStorage.getItem(getNotifyStateKey());
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return parsed;
-    }
+    if (raw) return normalizeNotifyState(JSON.parse(raw));
   } catch (e) { /* ignore */ }
-  return { baseline: 0, ids: [], bootedAt: 0 };
+  return normalizeNotifyState({});
 }
 
 function writeNotifyState(state) {
-  const ids = Array.isArray(state.ids) ? state.ids.slice(-8000) : [];
-  localStorage.setItem(getNotifyStateKey(), JSON.stringify({
-    baseline: state.baseline || 0,
-    ids,
-    bootedAt: state.bootedAt || Date.now()
-  }));
+  const normalized = normalizeNotifyState(state);
+  const keys = Object.keys(normalized.notifiedIds);
+  if (keys.length > 12000) {
+    const trimmed = {};
+    keys.slice(-12000).forEach(k => { trimmed[k] = 1; });
+    normalized.notifiedIds = trimmed;
+  }
+  if (!sessionNotifyBootedAt) sessionNotifyBootedAt = normalized.bootedAt || Date.now();
+  normalized.bootedAt = sessionNotifyBootedAt;
+  localStorage.setItem(getNotifyStateKey(), JSON.stringify(normalized));
 }
 
-function purgeLegacyNotifyKeys() {
-  try {
-    sessionStorage.removeItem('bluechat_notify_baseline');
-    const uid = getCurrentUser()?.id;
-    const keys = Object.keys(localStorage);
-    keys.forEach(key => {
-      if (key === 'bluechat_notify_baseline') localStorage.removeItem(key);
-      if (uid && (key === 'bluechat_notify_baseline_' + uid || key === 'bluechat_notified_ids_' + uid)) {
-        localStorage.removeItem(key);
-      }
+function absorbLocalMessagesIntoNotifyState(state) {
+  const data = getData();
+  let globalBaseline = Math.max(state.globalBaseline || 0, Date.now());
+  Object.entries(data.messages || {}).forEach(([convId, msgs]) => {
+    let wm = state.convWatermarks[convId] || 0;
+    (msgs || []).forEach(m => {
+      if (!m?.id) return;
+      state.notifiedIds[String(m.id)] = 1;
+      if (m.timestamp > wm) wm = m.timestamp;
+      if (m.timestamp > globalBaseline) globalBaseline = m.timestamp;
     });
-  } catch (e) { /* ignore */ }
+    state.convWatermarks[convId] = wm;
+  });
+  state.globalBaseline = globalBaseline;
+  return state;
+}
+
+function absorbConvIntoNotifyState(convId) {
+  if (!convId) return;
+  const user = getCurrentUser();
+  const state = readNotifyState();
+  const msgs = getMessages(convId);
+  const myRead = user ? (getData().readReceipts?.[convId]?.[user.id] || 0) : 0;
+  let wm = state.convWatermarks[convId] || 0;
+  msgs.forEach(m => {
+    if (!m?.id) return;
+    state.notifiedIds[String(m.id)] = 1;
+    if (m.timestamp > wm) wm = m.timestamp;
+  });
+  state.convWatermarks[convId] = Math.max(wm, myRead, Date.now());
+  writeNotifyState(state);
 }
 
 function beginSyncNotifyMute(ms = 15000) {
@@ -83,50 +112,35 @@ function dismissStaleNotifications() {
 }
 
 function initNotifyBaseline() {
-  purgeLegacyNotifyKeys();
-  const prev = readNotifyState();
-  const data = getData();
-  const ids = new Set(Array.isArray(prev.ids) ? prev.ids : []);
-  const bootedAt = Date.now();
-  let baseline = Math.max(prev.baseline || 0, bootedAt);
-  Object.values(data.messages || {}).forEach(msgs => {
-    (msgs || []).forEach(m => {
-      if (!m?.id) return;
-      ids.add(String(m.id));
-      if (m.timestamp > baseline) baseline = m.timestamp;
-    });
-  });
-  writeNotifyState({ baseline, ids: Array.from(ids), bootedAt });
+  sessionNotifyBootedAt = Date.now();
+  let state = readNotifyState();
+  state.bootedAt = sessionNotifyBootedAt;
+  state = absorbLocalMessagesIntoNotifyState(state);
+  writeNotifyState(state);
   dismissStaleNotifications();
 }
 
 function refreshNotifyBaselineFromLocal() {
-  initNotifyBaseline();
+  let state = readNotifyState();
+  state = absorbLocalMessagesIntoNotifyState(state);
+  writeNotifyState(state);
 }
 
-function getNotifyBaseline() {
-  return readNotifyState().baseline || Date.now();
-}
-
-function bumpNotifyBaseline(ts) {
-  const state = readNotifyState();
-  if (ts > (state.baseline || 0)) {
-    state.baseline = ts;
-    writeNotifyState(state);
-  }
-}
-
-function markMessageNotified(msg) {
+function markMessageNotified(msg, convId) {
   if (!msg?.id) return;
   const state = readNotifyState();
-  const id = String(msg.id);
-  if (!state.ids.includes(id)) state.ids.push(id);
-  if (msg.timestamp > (state.baseline || 0)) state.baseline = msg.timestamp;
+  state.notifiedIds[String(msg.id)] = 1;
+  const cid = convId ? String(convId) : '';
+  if (cid) {
+    const prev = state.convWatermarks[cid] || 0;
+    if (msg.timestamp > prev) state.convWatermarks[cid] = msg.timestamp;
+  }
+  if (msg.timestamp > (state.globalBaseline || 0)) state.globalBaseline = msg.timestamp;
   writeNotifyState(state);
 }
 
 function isMessageNotified(msg) {
-  return !!(msg?.id && readNotifyState().ids.includes(String(msg.id)));
+  return !!(msg?.id && readNotifyState().notifiedIds?.[String(msg.id)]);
 }
 
 function suppressNotificationsFor(ms = 5000) {
@@ -280,21 +294,22 @@ function shouldNotifyForConv(convId) {
   return document.hidden || !onChat;
 }
 
-function canDeliverLiveNotification(msg) {
-  if (!msg?.id || !msg?.timestamp) return false;
+function canDeliverLiveNotification(msg, convId) {
+  if (!msg?.id || !msg?.timestamp || !convId) return false;
   if (Date.now() < notifySuppressedUntil) return false;
   if (Date.now() < syncNotifyMutedUntil) return false;
-  if (isMessageNotified(msg)) return false;
-  const bootedAt = readNotifyState().bootedAt || 0;
-  if (bootedAt && msg.timestamp < bootedAt - 2000) return false;
+  const state = readNotifyState();
+  if (state.notifiedIds?.[String(msg.id)]) return false;
+  if (msg.timestamp <= (state.convWatermarks?.[convId] || 0)) return false;
+  const bootedAt = sessionNotifyBootedAt || state.bootedAt || 0;
+  if (bootedAt && msg.timestamp < bootedAt - 3000) return false;
   return true;
 }
 
 function shouldNotifyForNewMessage(convId, msg) {
-  if (!canDeliverLiveNotification(msg)) return false;
+  if (!canDeliverLiveNotification(msg, convId)) return false;
   const user = getCurrentUser();
   if (!user || String(msg.senderId) === String(user.id)) return false;
-  if (!msg.timestamp || msg.timestamp <= getNotifyBaseline()) return false;
   const reads = getData().readReceipts?.[convId] || {};
   const myRead = reads[user.id] || 0;
   if (msg.timestamp <= myRead) return false;
@@ -305,7 +320,7 @@ function shouldNotifyForNewMessage(convId, msg) {
 
 function onNewMessageReceived(convId, msg) {
   if (!shouldNotifyForNewMessage(convId, msg)) return false;
-  markMessageNotified(msg);
+  markMessageNotified(msg, convId);
   if (document.hidden) {
     const user = getCurrentUser();
     const conv = getData().conversations[convId];
@@ -658,12 +673,14 @@ async function markConversationRead(convId) {
   const data = getData();
   if (!data.readReceipts) data.readReceipts = {};
   if (!data.readReceipts[convId]) data.readReceipts[convId] = {};
-  data.readReceipts[convId][user.id] = Date.now();
+  const now = Date.now();
+  data.readReceipts[convId][user.id] = now;
   saveData(data);
+  absorbConvIntoNotifyState(convId);
   if (getSyncUrl()) {
     await cloudRequest(`/api/reads/${convId}/${user.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ timestamp: Date.now() })
+      body: JSON.stringify({ timestamp: now })
     });
   }
 }
@@ -795,13 +812,15 @@ getMessageContentHtml = getMessageContentHtmlExt;
 const _mergeRemoteMessageOrig = mergeRemoteMessage;
 mergeRemoteMessage = function (convId, remoteMsg) {
   const added = _mergeRemoteMessageOrig(convId, remoteMsg);
-  if (added && canDeliverLiveNotification(remoteMsg)) {
-    onNewMessageReceived(convId, remoteMsg);
+  if (added) {
+    if (shouldNotifyForNewMessage(convId, remoteMsg)) {
+      onNewMessageReceived(convId, remoteMsg);
+    } else {
+      markMessageNotified(remoteMsg, convId);
+    }
     if (currentScreen === 'chat' && currentConvId === convId) {
       appendMessageToChat(remoteMsg, convId);
     }
-  } else if (added && currentScreen === 'chat' && currentConvId === convId) {
-    appendMessageToChat(remoteMsg, convId);
   }
   return added;
 };
@@ -857,8 +876,10 @@ renderMessages = function (convId) {
 // Patch chat sync to include reads
 const _syncConversationOrig = syncConversation;
 syncConversation = async function (convId) {
+  beginSyncNotifyMute(6000);
   const added = await _syncConversationOrig(convId);
   await syncReadReceipts(convId);
+  absorbConvIntoNotifyState(convId);
   if (currentConvId === convId) renderMessages(convId);
   return added;
 };
