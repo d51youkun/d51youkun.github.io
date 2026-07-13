@@ -917,6 +917,30 @@ input:focus {
   text-align: left;
 }
 
+.device-pair-short-code {
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  text-align: center;
+  padding: 20px 12px;
+  margin: 8px 0;
+  background: var(--gray-100);
+  border-radius: var(--radius-md);
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
+}
+
+.device-pair-short-code.hidden {
+  display: none;
+}
+
+.pair-short-input {
+  font-size: 28px !important;
+  letter-spacing: 0.25em;
+  text-align: center;
+  font-weight: 600;
+}
+
 .invite-code-input {
   width: 100%;
   min-height: 80px;

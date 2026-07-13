@@ -20,7 +20,7 @@
         <p class="form-desc">お名前を入力して新規作成するか、すでに使っている端末のQRでペアリングしてください。</p>
         <input type="text" id="input-name" placeholder="名前を入力" maxlength="20" autocomplete="off">
         <button id="btn-start" class="btn-primary">はじめる</button>
-        <button type="button" id="btn-account-login-onboarding" class="btn-secondary" style="margin-top:12px">他の端末とQRでペアリング</button>
+        <button type="button" id="btn-account-login-onboarding" class="btn-secondary" style="margin-top:12px">他の端末とペアリング（6桁コード）</button>
         <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:8px">引き継ぎ（QR / コード）</button>
       </div>
       <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
@@ -124,11 +124,11 @@
       <div class="profile-menu">
         <div class="sync-settings">
           <p class="form-label">複数端末で使う（QRペアリング）</p>
-          <p class="qr-hint">パスワードを設定し、メイン端末で「ペアリングQRを表示」→ 新しい端末でQRをスキャンすると同期が始まります。</p>
+          <p class="qr-hint">「ペアリングコードを表示」で6桁コードが出ます。別の端末でコードを入力すると同期が始まります。</p>
           <input type="password" id="input-account-password" placeholder="アカウントパスワード" autocomplete="new-password">
           <button type="button" id="btn-save-password" class="btn-secondary btn-sm">パスワードを保存</button>
           <p class="qr-hint" id="account-sync-status"></p>
-          <button type="button" id="btn-show-device-pair-qr" class="btn-primary btn-sm">ペアリングQRを表示</button>
+          <button type="button" id="btn-show-device-pair-qr" class="btn-primary btn-sm">ペアリングコードを表示</button>
           <button type="button" id="btn-scan-device-pair" class="btn-secondary btn-sm">QRをスキャンしてペアリング</button>
           <button type="button" id="btn-account-sync-now" class="btn-secondary btn-sm">今すぐ全端末に同期</button>
         </div>
@@ -471,8 +471,11 @@
   <div id="modal-device-pair-qr" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
-      <h3>端末ペアリングQR</h3>
-      <p class="qr-hint">別の端末（iPad・Macなど）で「QRをスキャンしてペアリング」を選び、このQRを読み取ってください。先に上でパスワードを保存してください。</p>
+      <h3>端末ペアリング</h3>
+      <p class="qr-hint">別の端末で「QRをスキャンしてペアリング」を開き、下の<strong>6桁コード</strong>を入力するか、QRをスキャンしてください（15分間有効）。</p>
+      <p class="form-label" style="margin-top:8px">6桁ペアリングコード</p>
+      <div id="device-pair-short-code" class="device-pair-short-code">------</div>
+      <button type="button" id="btn-copy-pair-short-code" class="btn-secondary btn-sm" style="margin:8px auto 16px;display:block">コードをコピー</button>
       <div id="device-pair-qr-canvas" class="qr-canvas-wrap"></div>
       <p id="device-pair-code-text" class="invite-code-text"></p>
       <button class="btn-close-modal">閉じる</button>
@@ -512,8 +515,13 @@
   <div id="modal-transfer-scan" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
-      <h3>QRで端末ペアリング</h3>
-      <p class="qr-hint">メイン端末のマイページで表示した「ペアリングQR」をスキャンしてください。パスワード設定済みの場合は入力が必要です。</p>
+      <h3>端末ペアリング</h3>
+      <p class="qr-hint">メイン端末のマイページで表示された<strong>6桁コード</strong>を入力するか、QRをスキャンしてください。</p>
+      <div class="sticker-import" style="margin-bottom:16px">
+        <p class="form-label">6桁ペアリングコード</p>
+        <input type="text" id="input-pair-short-code" placeholder="123456" class="sync-settings input-url pair-short-input" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code">
+        <button type="button" id="btn-redeem-pair-short-code" class="btn-primary btn-sm">コードでペアリング</button>
+      </div>
       <div class="sticker-import" style="margin-bottom:16px">
         <p class="form-label">パスワード（設定している場合）</p>
         <input type="password" id="input-transfer-password" placeholder="ペアリング用パスワード" class="sync-settings input-url" autocomplete="current-password">

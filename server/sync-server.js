@@ -168,7 +168,30 @@ function buildUserSyncBundle(data, userId) {
   };
 }
 
-function createTransferEntry(data, backup, hours) {
+function assignDevicePairShortCode(data, token, expiresAt) {
+  if (!data.shortDevicePairs) data.shortDevicePairs = {};
+  const digits = '0123456789';
+  for (let attempt = 0; attempt < 40; attempt++) {
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += digits[Math.floor(Math.random() * digits.length)];
+    }
+    const prev = data.shortDevicePairs[code];
+    if (!prev || Date.now() > (prev.expiresAt || 0)) {
+      data.shortDevicePairs[code] = { token: String(token), expiresAt: expiresAt || Date.now() + 15 * 60 * 1000 };
+      return code;
+    }
+  }
+  return String(100000 + Math.floor(Math.random() * 900000));
+}
+
+function getDevicePairShortRef(data, shortCode) {
+  if (!data.shortDevicePairs) return null;
+  const ref = data.shortDevicePairs[String(shortCode || '').trim()];
+  if (!ref || Date.now() > (ref.expiresAt || 0)) return null;
+  return ref;
+}
+
   if (!data.transfers) data.transfers = {};
   if (!data.shortTransfers) data.shortTransfers = {};
   const token = Date.now().toString(36) + crypto.randomBytes(8).toString('hex');
@@ -200,6 +223,7 @@ function emptyData() {
     transfers: {},
     shortTransfers: {},
     devicePairs: {},
+    shortDevicePairs: {},
     adminSessions: {},
     callSignals: {},
     feedback: [],
@@ -737,8 +761,44 @@ const server = http.createServer(async (req, res) => {
         consumedAt: null,
         createdAt: Date.now()
       };
+      const shortCode = assignDevicePairShortCode(data, parts[2], data.devicePairs[parts[2]].expiresAt);
+      data.devicePairs[parts[2]].shortCode = shortCode;
       await saveData(data);
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, { ok: true, shortCode, token: parts[2] });
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'device-pair-short' && parts[2] === 'register') {
+      const body = await readBody(req);
+      const token = String(body.token || '').trim();
+      if (!token || !data.devicePairs[token]) {
+        sendJson(res, 404, { error: 'pair_not_found' });
+        return;
+      }
+      const shortCode = assignDevicePairShortCode(data, token, body.expiresAt || data.devicePairs[token].expiresAt);
+      data.devicePairs[token].shortCode = shortCode;
+      await saveData(data);
+      sendJson(res, 200, { ok: true, shortCode });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'device-pair-short' && parts[2]) {
+      const ref = getDevicePairShortRef(data, parts[2]);
+      if (!ref) {
+        sendJson(res, 404, { error: 'expired' });
+        return;
+      }
+      const entry = data.devicePairs[ref.token];
+      if (!entry || Date.now() > entry.expiresAt) {
+        sendJson(res, 404, { error: 'expired' });
+        return;
+      }
+      sendJson(res, 200, {
+        token: ref.token,
+        userId: entry.userId,
+        userName: entry.userName,
+        requiresPassword: !!entry.passwordHash,
+        syncUrl: entry.syncUrl || null,
+        shortCode: parts[2]
+      });
       return;
     }
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'device-pair' && parts[2] && parts[3] === 'status') {

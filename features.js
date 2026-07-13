@@ -375,6 +375,10 @@ function finishAccountRestore(result) {
 async function redeemTransferCodeExt(code) {
   const raw = String(code || '').trim();
   if (!raw) return { error: 'コードを入力してください' };
+  const digits = raw.replace(/\D/g, '');
+  if (/^\d{6}$/.test(digits) && typeof redeemDevicePairShortCode === 'function') {
+    return redeemDevicePairShortCode(digits);
+  }
   if (typeof parseDevicePairFromScan === 'function') {
     const pairCode = parseDevicePairFromScan(raw);
     if (pairCode && typeof redeemDevicePairCode === 'function') {
@@ -1950,6 +1954,14 @@ function setupGlobalClickDelegation() {
     'btn-scan-device-pair': () => {
       if (typeof showDevicePairScanModal === 'function') showDevicePairScanModal();
       else openTransferScanModal();
+    },
+    'btn-redeem-pair-short-code': () => {
+      if (typeof redeemPairShortCodeFromModal === 'function') redeemPairShortCodeFromModal();
+      else {
+        const code = document.getElementById('input-pair-short-code')?.value?.trim() || '';
+        if (!code) { showToast('6桁コードを入力してください'); return; }
+        redeemTransferCodeExt(code).then(handleTransferRedeemResult);
+      }
     },
     'btn-download-backup': () => downloadLocalBackupFile(),
     'btn-restore-backup': () => document.getElementById('input-backup-file')?.click(),
