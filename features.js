@@ -1068,18 +1068,92 @@ const RTC_CONFIG = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
     {
       urls: [
         'turn:openrelay.metered.ca:80',
         'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp'
+        'turn:openrelay.metered.ca:443?transport=tcp',
+        'turns:openrelay.metered.ca:443?transport=tcp'
       ],
       username: 'openrelayproject',
       credential: 'openrelayproject'
     }
   ],
-  iceCandidatePoolSize: 10
+  iceCandidatePoolSize: 10,
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require'
 };
+
+function isAppleDevice() {
+  return /iPhone|iPad|iPod|Macintosh|Mac OS/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function createCallPeerConnection(callType) {
+  return new RTCPeerConnection(RTC_CONFIG);
+}
+
+function normalizeSdp(sdp) {
+  if (!sdp) return null;
+  if (typeof sdp === 'object' && sdp.type && sdp.sdp) {
+    try {
+      return new RTCSessionDescription({ type: sdp.type, sdp: sdp.sdp });
+    } catch (e) {
+      return sdp;
+    }
+  }
+  return sdp;
+}
+
+function normalizeIceCandidate(candidate) {
+  if (!candidate) return null;
+  try {
+    return new RTCIceCandidate(candidate);
+  } catch (e) {
+    return null;
+  }
+}
+
+function waitForIceGathering(pc, timeoutMs = 10000) {
+  return new Promise(resolve => {
+    if (!pc || pc.iceGatheringState === 'complete') {
+      resolve();
+      return;
+    }
+    const finish = () => {
+      pc.removeEventListener('icegatheringstatechange', onChange);
+      clearTimeout(timer);
+      resolve();
+    };
+    const onChange = () => {
+      if (pc.iceGatheringState === 'complete') finish();
+    };
+    pc.addEventListener('icegatheringstatechange', onChange);
+    const timer = setTimeout(finish, timeoutMs);
+  });
+}
+
+function attachLocalStreamToPeer(pc, stream, callType) {
+  stream.getTracks().forEach(track => pc.addTrack(track, stream));
+}
+
+function bindRemoteStream(stream, callType) {
+  const remoteV = document.getElementById('call-remote-video');
+  if (!remoteV || !stream) return;
+  remoteV.srcObject = stream;
+  if (callType === 'video') {
+    remoteV.classList.remove('hidden', 'call-audio-only');
+  } else {
+    // iOS Safari は非表示 video だと音声が再生されない
+    remoteV.classList.remove('hidden');
+    remoteV.classList.add('call-audio-only');
+  }
+  const playPromise = remoteV.play?.();
+  if (playPromise && typeof playPromise.catch === 'function') {
+    playPromise.catch(() => {});
+  }
+}
 
 let iceCandidateQueue = [];
 let callDisconnectTimer = null;
@@ -1123,21 +1197,46 @@ function updateCallOverlaySub(sub) {
   if (el) el.textContent = sub || '';
 }
 
-function normalizeSdp(sdp) {
-  if (!sdp) return null;
-  if (typeof sdp === 'object' && sdp.type && sdp.sdp) return sdp;
-  return sdp;
-}
-
-function queueIceCandidate(candidate) {
-  iceCandidateQueue.push(candidate);
-}
-
 async function flushIceCandidates(pc) {
   while (iceCandidateQueue.length) {
     const c = iceCandidateQueue.shift();
-    try { await pc.addIceCandidate(c); } catch (e) { /* ignore */ }
+    const candidate = normalizeIceCandidate(c);
+    if (!candidate) continue;
+    try { await pc.addIceCandidate(candidate); } catch (e) { /* ignore */ }
   }
+}
+
+function queueIceCandidate(candidate) {
+  if (candidate) iceCandidateQueue.push(candidate);
+}
+
+let callIceRestartTimer = null;
+
+function clearCallIceRestartTimer() {
+  if (callIceRestartTimer) {
+    clearTimeout(callIceRestartTimer);
+    callIceRestartTimer = null;
+  }
+}
+
+function scheduleIceRestart(remoteUserId, callType) {
+  clearCallIceRestartTimer();
+  callIceRestartTimer = setTimeout(async () => {
+    if (!peerConnection || !callState.active) return;
+    const ice = peerConnection.iceConnectionState;
+    if (ice === 'connected' || ice === 'completed') return;
+    try {
+      updateCallOverlaySub('接続を再試行中…');
+      const offer = await peerConnection.createOffer({ iceRestart: true });
+      await peerConnection.setLocalDescription(offer);
+      await waitForIceGathering(peerConnection);
+      await sendCallSignal(remoteUserId, 'offer', {
+        sdp: peerConnection.localDescription,
+        callType,
+        iceRestart: true
+      });
+    } catch (e) { /* ignore */ }
+  }, isAppleDevice() ? 10000 : 15000);
 }
 
 function clearCallDisconnectTimer() {
@@ -1190,6 +1289,7 @@ function setupCallConnectionHandlers(pc, callType) {
     updateCallOverlaySub(connectedLabel);
     clearCallConnectTimeout();
     clearCallDisconnectTimer();
+    clearCallIceRestartTimer();
   };
   pc.oniceconnectionstatechange = () => {
     const s = pc.iceConnectionState;
@@ -1238,14 +1338,14 @@ function setupCallConnectionHandlers(pc, callType) {
 function attachCallPeerHandlers(pc, remoteUserId, callType) {
   setupCallConnectionHandlers(pc, callType);
   pc.ontrack = (e) => {
-    const remoteV = document.getElementById('call-remote-video');
-    if (remoteV) {
-      remoteV.srcObject = e.streams[0];
-      remoteV.classList.toggle('hidden', callType !== 'video');
-    }
+    if (e.streams && e.streams[0]) bindRemoteStream(e.streams[0], callType);
   };
   pc.onicecandidate = (e) => {
-    if (e.candidate) sendCallSignal(remoteUserId, 'ice', { candidate: e.candidate.toJSON() });
+    if (e.candidate) {
+      sendCallSignal(remoteUserId, 'ice', { candidate: e.candidate.toJSON() });
+    } else {
+      sendCallSignal(remoteUserId, 'ice', { endOfCandidates: true });
+    }
   };
 }
 
@@ -1264,6 +1364,7 @@ async function endCall(options = {}) {
   try {
     clearCallConnectTimeout();
     clearCallDisconnectTimer();
+    clearCallIceRestartTimer();
     iceCandidateQueue.length = 0;
     const remoteUserId = callState.remoteUserId;
     if (notifyRemote && remoteUserId) {
@@ -1323,8 +1424,8 @@ async function acceptIncomingOffer(sig) {
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: callType === 'video'
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: callType === 'video' ? { facingMode: 'user' } : false
     });
   } catch (e) {
     await sendCallSignal(sig.from, 'hangup', {});
@@ -1339,8 +1440,8 @@ async function acceptIncomingOffer(sig) {
     convId: convId || currentConvId,
     startedAt: Date.now()
   };
-  peerConnection = new RTCPeerConnection(RTC_CONFIG);
-  localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+  peerConnection = createCallPeerConnection(callType);
+  attachLocalStreamToPeer(peerConnection, localStream, callType);
 
   const localV = document.getElementById('call-local-video');
   if (localV) {
@@ -1357,11 +1458,13 @@ async function acceptIncomingOffer(sig) {
   await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
-  await sendCallSignal(sig.from, 'answer', { sdp: answer });
+  await waitForIceGathering(peerConnection);
+  await sendCallSignal(sig.from, 'answer', { sdp: peerConnection.localDescription });
   await flushIceCandidates(peerConnection);
   bumpCallSignalSince();
   showCallOverlay(callType === 'video' ? 'ビデオ通話中' : '音声通話中', '接続中…');
   startCallConnectTimeout(callType);
+  scheduleIceRestart(sig.from, callType);
   startCallPolling();
 }
 
@@ -1400,8 +1503,8 @@ async function startCall(type) {
     return;
   }
   callState = { active: true, type, remoteUserId: remoteId, convId: currentConvId, startedAt: Date.now() };
-  peerConnection = new RTCPeerConnection(RTC_CONFIG);
-  localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+  peerConnection = createCallPeerConnection(type);
+  attachLocalStreamToPeer(peerConnection, localStream, type);
   const localV = document.getElementById('call-local-video');
   if (localV && type === 'video') {
     localV.srcObject = localStream;
@@ -1412,10 +1515,12 @@ async function startCall(type) {
 
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
-  await sendCallSignal(remoteId, 'offer', { sdp: offer, callType: type });
+  await waitForIceGathering(peerConnection);
+  await sendCallSignal(remoteId, 'offer', { sdp: peerConnection.localDescription, callType: type });
   bumpCallSignalSince();
   showCallOverlay(type === 'video' ? 'ビデオ通話中' : '音声通話中', '呼び出し中…');
   startCallConnectTimeout(type);
+  scheduleIceRestart(remoteId, type);
   startCallPolling();
   showToast('発信中…');
 }
@@ -1439,6 +1544,17 @@ async function handleCallSignal(sig) {
     return;
   }
 
+  if (sig.type === 'offer' && callState.active && String(sig.from) === String(callState.remoteUserId) && peerConnection) {
+    await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    await waitForIceGathering(peerConnection);
+    await sendCallSignal(sig.from, 'answer', { sdp: peerConnection.localDescription });
+    await flushIceCandidates(peerConnection);
+    updateCallOverlaySub('接続中…');
+    return;
+  }
+
   if (sig.type === 'offer' && !callState.active && !pendingIncomingCall) {
     pendingIncomingCall = sig;
     showIncomingCallUI(sig);
@@ -1449,13 +1565,17 @@ async function handleCallSignal(sig) {
     await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
     await flushIceCandidates(peerConnection);
     updateCallOverlaySub('接続中…');
-  } else if (sig.type === 'ice' && peerConnection && sig.payload?.candidate) {
+  } else if (sig.type === 'ice' && peerConnection) {
+    if (sig.payload?.endOfCandidates) return;
+    if (!sig.payload?.candidate) return;
     if (!peerConnection.remoteDescription) {
       queueIceCandidate(sig.payload.candidate);
       return;
     }
+    const candidate = normalizeIceCandidate(sig.payload.candidate);
+    if (!candidate) return;
     try {
-      await peerConnection.addIceCandidate(sig.payload.candidate);
+      await peerConnection.addIceCandidate(candidate);
     } catch (e) { /* ignore */ }
   }
 }
@@ -1476,7 +1596,7 @@ function startCallPolling() {
     }
   };
   poll();
-  callPollTimer = setInterval(poll, 800);
+  callPollTimer = setInterval(poll, isAppleDevice() ? 400 : 800);
 }
 
 function stopCallPolling() {

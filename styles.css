@@ -1177,6 +1177,15 @@ input:focus {
   background: #000;
   margin: 16px 0;
 }
+.call-video.call-audio-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
 .call-video-local {
   max-height: 120px;
   width: auto;
