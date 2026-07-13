@@ -186,7 +186,8 @@ function updateNotifyButtonLabel() {
 
 function showAppNotification(title, body, options = {}) {
   if (!notificationsSupported() || Notification.permission !== 'granted') return;
-  const { tag, onClick, convId } = options;
+  const { tag, onClick, convId, alwaysShow = false } = options;
+  if (!alwaysShow && !document.hidden) return;
   const n = new Notification(title, {
     body,
     tag: tag || 'bluechat',
@@ -257,7 +258,6 @@ function playPurururuRing() {
 
 function startRingtone() {
   stopRingtone();
-  if (!notificationsSupported() || Notification.permission !== 'granted') return;
   const ring = () => {
     playPurururuRing();
     if (navigator.vibrate) navigator.vibrate([500, 150, 500, 150, 500, 800]);
@@ -306,16 +306,18 @@ function shouldNotifyForNewMessage(convId, msg) {
 function onNewMessageReceived(convId, msg) {
   if (!shouldNotifyForNewMessage(convId, msg)) return false;
   markMessageNotified(msg);
-  const user = getCurrentUser();
-  const conv = getData().conversations[convId];
-  const name = getConvDisplayName(conv, user.id);
-  const preview = getMessagePreview(msg);
-  playMessageSound();
-  showAppNotification(name, preview, {
-    tag: 'msg-' + convId + '-' + msg.id,
-    convId,
-    onClick: () => openChat(convId)
-  });
+  if (document.hidden) {
+    const user = getCurrentUser();
+    const conv = getData().conversations[convId];
+    const name = getConvDisplayName(conv, user.id);
+    const preview = getMessagePreview(msg);
+    playMessageSound();
+    showAppNotification(name, preview, {
+      tag: 'msg-' + convId + '-' + msg.id,
+      convId,
+      onClick: () => openChat(convId)
+    });
+  }
   return true;
 }
 
@@ -1589,7 +1591,7 @@ function showIncomingCallUI(sig) {
     showAppNotification(
       `${name}から着信`,
       callType === 'video' ? 'ビデオ通話 — プルルル' : '音声通話 — プルルル',
-      { tag: 'incoming-call', silent: false }
+      { tag: 'incoming-call', alwaysShow: true }
     );
   }
 }

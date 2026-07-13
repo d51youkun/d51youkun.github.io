@@ -163,11 +163,12 @@ function unlockAudioOnce() {
 const _onNewMessageReceivedOrig = onNewMessageReceived;
 onNewMessageReceived = function (convId, msg) {
   const delivered = _onNewMessageReceivedOrig(convId, msg);
-  if (!delivered) return;
+  if (!delivered || document.hidden) return;
   const user = getCurrentUser();
   const conv = getData().conversations[convId];
   const name = getConvDisplayName(conv, user.id);
   const preview = getMessagePreview(msg);
+  playMessageSound();
   showInAppPopup(name, preview, () => openChat(convId));
 };
 
