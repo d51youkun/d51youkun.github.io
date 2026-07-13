@@ -9,7 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8766;
-const SERVER_VERSION = '2026-07-13-v29';
+const SERVER_VERSION = '2026-07-13';
 
 function resolveWritableDataFile() {
   const legacy = path.join(__dirname, 'data.json');
@@ -37,110 +37,6 @@ function resolveWritableDataFile() {
 }
 
 const DATA_FILE = resolveWritableDataFile();
-
-function resolveMediaDir() {
-  const candidates = [
-    process.env.MEDIA_DIR,
-    process.env.DATA_DIR && path.join(process.env.DATA_DIR, 'post-media'),
-    path.join(__dirname, 'post-media'),
-    path.join('/tmp', 'bluechat-post-media')
-  ].filter(Boolean);
-  for (const dir of candidates) {
-    try {
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const probe = path.join(dir, '.write-test');
-      fs.writeFileSync(probe, 'ok');
-      fs.unlinkSync(probe);
-      return dir;
-    } catch (e) { /* try next */ }
-  }
-  return path.join(__dirname, 'post-media');
-}
-
-const MEDIA_DIR = resolveMediaDir();
-const MEDIA_KEY_PREFIX = 'bluechat:media:';
-const POST_MEDIA_MAX_B64 = 96 * 1024 * 1024;
-const POST_MEDIA_MAX_RAW = 80 * 1024 * 1024;
-const POST_INLINE_VIDEO_MAX_B64 = 12 * 1024 * 1024;
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token, X-Bluechat-Author, X-Bluechat-Mime, X-Bluechat-Filename, X-Bluechat-Encoding, X-Bluechat-Total-Chunks, X-Bluechat-Chunk-Index'
-};
-const POST_MEDIA_CHUNK_MAX = 3 * 1024 * 1024;
-
-function normalizePostMedia(media) {
-  if (!media) return null;
-  if (media.mediaId) {
-    return {
-      type: media.type || 'video',
-      mediaId: String(media.mediaId),
-      mimeType: media.mimeType || 'video/mp4',
-      fileName: media.fileName || 'video.mp4'
-    };
-  }
-  return media;
-}
-
-function sanitizePostMediaForSave(media, kind) {
-  const normalized = normalizePostMedia(media);
-  if (kind === 'video') {
-    if (normalized?.mediaId) return normalized;
-    if (media?.data && String(media.data).length <= POST_INLINE_VIDEO_MAX_B64) {
-      return {
-        type: 'video',
-        mimeType: media.mimeType || 'video/mp4',
-        fileName: media.fileName || 'video.mp4',
-        data: media.data
-      };
-    }
-    return null;
-  }
-  if (normalized?.type === 'video' && normalized.data && String(normalized.data).length > 400000) {
-    return normalized.mediaId ? normalizePostMedia(normalized) : null;
-  }
-  return normalized;
-}
-
-async function loadPostMediaEntry(mediaId) {
-  if (USE_UPSTASH) {
-    const raw = await upstashCommand(['GET', MEDIA_KEY_PREFIX + mediaId]);
-    return raw ? JSON.parse(raw) : null;
-  }
-  const file = path.join(MEDIA_DIR, mediaId + '.json');
-  if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
-}
-
-async function savePostMediaEntry(mediaId, entry) {
-  const payload = JSON.stringify(entry);
-  if (USE_UPSTASH) {
-    await upstashCommand(['SET', MEDIA_KEY_PREFIX + mediaId, payload]);
-    return;
-  }
-  fs.writeFileSync(path.join(MEDIA_DIR, mediaId + '.json'), payload);
-}
-
-function decodeMediaDataUrl(dataStr) {
-  const raw = String(dataStr || '');
-  const m = /^data:([^;]+);base64,(.+)$/s.exec(raw);
-  if (m) return { mime: m[1], buffer: Buffer.from(m[2], 'base64') };
-  return { mime: 'application/octet-stream', buffer: Buffer.from(raw, 'base64') };
-}
-
-async function finalizeMediaChunks(entry, total) {
-  const buffers = [];
-  for (let i = 0; i < total; i++) {
-    if (!entry.chunks || entry.chunks[i] === undefined) return false;
-    buffers.push(Buffer.from(entry.chunks[i], 'base64'));
-  }
-  const merged = Buffer.concat(buffers);
-  const data = 'data:' + (entry.mimeType || 'video/mp4') + ';base64,' + merged.toString('base64');
-  if (data.length > POST_MEDIA_MAX_B64) throw new Error('too_large');
-  entry.data = data;
-  delete entry.chunks;
-  return true;
-}
 
 function loadDotEnv() {
   const envPath = path.join(__dirname, '.env');
@@ -472,35 +368,23 @@ function readBody(req) {
   });
 }
 
-function readBodyRaw(req, maxBytes) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-    req.on('data', (chunk) => {
-      size += chunk.length;
-      if (size > maxBytes) {
-        reject(new Error('too_large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
-}
-
 function sendJson(res, status, data) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
-    ...CORS_HEADERS
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token'
   });
   res.end(JSON.stringify(data));
 }
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, CORS_HEADERS);
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token'
+    });
     res.end();
     return;
   }
@@ -1272,251 +1156,36 @@ const server = http.createServer(async (req, res) => {
 
     // Public feed posts (photo / video / notice)
     if (!data.posts) data.posts = [];
-    const normalizePostEntry = (p) => {
-      if (!p) return p;
-      if (!p.likes || typeof p.likes !== 'object') p.likes = {};
-      if (!p.dislikes || typeof p.dislikes !== 'object') p.dislikes = {};
-      if (!Array.isArray(p.comments)) p.comments = [];
-      if (p.media) p.media = normalizePostMedia(p.media);
-      return p;
-    };
-    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] === 'media' && parts[3] && parts[4] === 'chunk' && parts[5] !== undefined) {
-      const mediaId = String(parts[3] || '').slice(0, 120);
-      const chunkIndex = parseInt(parts[5], 10);
-      const totalChunks = parseInt(String(req.headers['x-bluechat-total-chunks'] || '0'), 10);
-      const authorId = String(req.headers['x-bluechat-author'] || '');
-      if (!authorId || !Number.isFinite(chunkIndex) || chunkIndex < 0) {
-        sendJson(res, 400, { error: 'invalid_chunk' });
-        return;
-      }
-      if (!totalChunks || totalChunks < 1 || totalChunks > 200) {
-        sendJson(res, 400, { error: 'invalid_total_chunks' });
-        return;
-      }
-      try {
-        const buf = await readBodyRaw(req, POST_MEDIA_CHUNK_MAX);
-        let entry = await loadPostMediaEntry(mediaId);
-        if (!entry || !entry.data) {
-          if (!entry) {
-            entry = {
-              mimeType: String(req.headers['x-bluechat-mime'] || 'video/mp4'),
-              fileName: String(req.headers['x-bluechat-filename'] || 'video.mp4'),
-              kind: 'video',
-              authorId,
-              createdAt: Date.now(),
-              chunks: {}
-            };
-          }
-          if (!entry.chunks) entry.chunks = {};
-          entry.chunks[chunkIndex] = buf.toString('base64');
-          let complete = false;
-          let ready = true;
-          for (let i = 0; i < totalChunks; i++) {
-            if (entry.chunks[i] === undefined) { ready = false; break; }
-          }
-          if (ready) {
-            complete = await finalizeMediaChunks(entry, totalChunks);
-            if (!complete) {
-              sendJson(res, 400, { error: 'incomplete_chunks' });
-              return;
-            }
-          }
-          await savePostMediaEntry(mediaId, entry);
-          sendJson(res, 200, { ok: true, mediaId, chunkIndex, totalChunks, complete });
-        } else {
-          sendJson(res, 200, { ok: true, mediaId, complete: true });
-        }
-      } catch (e) {
-        sendJson(res, e?.message === 'too_large' ? 413 : 500, { error: e?.message || 'chunk_failed' });
-      }
-      return;
-    }
-    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] === 'media' && parts[3]) {
-      const mediaId = String(parts[3] || '').slice(0, 120);
-      const contentType = String(req.headers['content-type'] || '').toLowerCase();
-      const isRaw = contentType.includes('octet-stream') ||
-        String(req.headers['x-bluechat-encoding'] || '').toLowerCase() === 'raw';
-      if (isRaw) {
-        const authorId = String(req.headers['x-bluechat-author'] || '');
-        if (!authorId) {
-          sendJson(res, 400, { error: 'author_required' });
-          return;
-        }
-        try {
-          const buf = await readBodyRaw(req, POST_MEDIA_MAX_RAW);
-          const mimeType = String(req.headers['x-bluechat-mime'] || 'video/mp4');
-          const fileName = String(req.headers['x-bluechat-filename'] || 'video.mp4');
-          const data = 'data:' + mimeType + ';base64,' + buf.toString('base64');
-          if (data.length > POST_MEDIA_MAX_B64) {
-            sendJson(res, 413, { error: 'too_large' });
-            return;
-          }
-          await savePostMediaEntry(mediaId, {
-            mimeType,
-            fileName,
-            kind: 'video',
-            authorId,
-            createdAt: Date.now(),
-            data
-          });
-          sendJson(res, 200, { ok: true, mediaId });
-        } catch (e) {
-          sendJson(res, e?.message === 'too_large' ? 413 : 500, { error: e?.message || 'upload_failed' });
-        }
-        return;
-      }
-      const body = await readBody(req);
-      if (!body.authorId) {
-        sendJson(res, 400, { error: 'author_required' });
-        return;
-      }
-      const dataStr = String(body.data || '');
-      if (!dataStr) {
-        sendJson(res, 400, { error: 'data_required' });
-        return;
-      }
-      if (dataStr.length > POST_MEDIA_MAX_B64) {
-        sendJson(res, 413, { error: 'too_large' });
-        return;
-      }
-      await savePostMediaEntry(mediaId, {
-        mimeType: body.mimeType || 'video/mp4',
-        fileName: body.fileName || 'video.mp4',
-        kind: body.kind || 'video',
-        authorId: String(body.authorId),
-        createdAt: Date.now(),
-        data: dataStr
-      });
-      sendJson(res, 200, { ok: true, mediaId });
-      return;
-    }
-    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] === 'media' && parts[3]) {
-      const mediaId = String(parts[3] || '').slice(0, 120);
-      try {
-        const entry = await loadPostMediaEntry(mediaId);
-        if (!entry || !entry.data) {
-          sendJson(res, 404, { error: 'not_found' });
-          return;
-        }
-        const decoded = decodeMediaDataUrl(entry.data);
-        res.writeHead(200, {
-          'Content-Type': entry.mimeType || decoded.mime || 'video/mp4',
-          'Content-Length': decoded.buffer.length,
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token',
-          'Cache-Control': 'public, max-age=31536000, immutable'
-        });
-        res.end(decoded.buffer);
-      } catch (e) {
-        sendJson(res, 500, { error: 'media_read_failed' });
-      }
-      return;
-    }
-    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts' && parts.length === 2) {
-      const list = data.posts.map(normalizePostEntry)
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts') {
+      const list = [...data.posts].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       sendJson(res, 200, list.slice(0, 300));
       return;
     }
-    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && parts[3] === 'vote') {
-      const body = await readBody(req);
-      const userId = String(body.userId || '');
-      const vote = body.vote;
-      if (!userId) {
-        sendJson(res, 400, { error: 'user_required' });
-        return;
-      }
-      const post = data.posts.find(p => p.id === parts[2]);
-      if (!post) {
-        sendJson(res, 404, { error: 'not_found' });
-        return;
-      }
-      normalizePostEntry(post);
-      delete post.likes[userId];
-      delete post.dislikes[userId];
-      if (vote === 'up') post.likes[userId] = Date.now();
-      else if (vote === 'down') post.dislikes[userId] = Date.now();
-      await saveDataWithActivity(data);
-      sendJson(res, 200, {
-        ok: true,
-        likes: Object.keys(post.likes).length,
-        dislikes: Object.keys(post.dislikes).length
-      });
-      return;
-    }
-    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && parts[3] === 'comments') {
-      const body = await readBody(req);
-      const post = data.posts.find(p => p.id === parts[2]);
-      if (!post) {
-        sendJson(res, 404, { error: 'not_found' });
-        return;
-      }
-      normalizePostEntry(post);
-      post.comments.push({
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
-        userId: String(body.userId || ''),
-        userName: body.userName || 'ユーザー',
-        userAvatar: body.userAvatar || null,
-        text: String(body.text || '').slice(0, 2000),
-        createdAt: Date.now()
-      });
-      if (post.comments.length > 500) post.comments = post.comments.slice(-500);
-      const added = post.comments[post.comments.length - 1];
-      await saveDataWithActivity(data);
-      sendJson(res, 200, { ok: true, comment: added });
-      return;
-    }
-    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && parts[3] === 'comments' && parts[4]) {
-      const body = await readBody(req);
-      const post = data.posts.find(p => p.id === parts[2]);
-      if (!post) {
-        sendJson(res, 404, { error: 'not_found' });
-        return;
-      }
-      const comment = (post.comments || []).find(c => c.id === parts[4]);
-      if (!comment || String(comment.userId) !== String(body.userId || '')) {
-        sendJson(res, 403, { error: 'forbidden' });
-        return;
-      }
-      post.comments = post.comments.filter(c => c.id !== parts[4]);
-      await saveDataWithActivity(data);
-      sendJson(res, 200, { ok: true });
-      return;
-    }
-    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts' && parts.length === 2) {
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts') {
       const body = await readBody(req);
       if (!body.authorId) {
         sendJson(res, 400, { error: 'author_required' });
         return;
       }
-      const entry = normalizePostEntry({
+      const entry = {
         id: body.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
         kind: body.kind || 'photo',
         text: body.text || '',
         authorId: String(body.authorId),
         authorName: body.authorName || 'ユーザー',
         authorAvatar: body.authorAvatar || null,
-        media: sanitizePostMediaForSave(body.media, body.kind || 'photo'),
+        media: body.media || null,
         attachment: body.attachment || null,
-        createdAt: body.createdAt || Date.now(),
-        likes: {},
-        dislikes: {},
-        comments: []
-      });
-      if (entry.kind === 'video' && (!entry.media || (!entry.media.mediaId && !entry.media.data))) {
-        sendJson(res, 400, { error: 'video_media_required' });
-        return;
-      }
+        createdAt: body.createdAt || Date.now()
+      };
       const exists = data.posts.find(p => p.id === entry.id);
       if (!exists) data.posts.unshift(entry);
-      else Object.assign(exists, entry);
       if (data.posts.length > 300) data.posts = data.posts.slice(0, 300);
       await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, id: entry.id });
       return;
     }
-    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && !parts[3]) {
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2]) {
       const body = await readBody(req);
       const post = data.posts.find(p => p.id === parts[2]);
       if (!post) {

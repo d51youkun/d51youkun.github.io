@@ -419,7 +419,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13-v29b');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13-stable-v22');
   } catch (e) { /* ignore */ }
 }
 
@@ -2262,8 +2262,7 @@ function setupGlobalClickDelegation() {
       if (typeof showCreatePostModal === 'function') showCreatePostModal('notice');
     },
     'btn-refresh-feed': () => {
-      if (typeof refreshFeedFromServer === 'function') refreshFeedFromServer();
-      else if (typeof renderFeed === 'function') renderFeed();
+      if (typeof renderFeed === 'function') renderFeed();
     },
     'btn-submit-post': (e) => {
       if (e && typeof e.preventDefault === 'function') e.preventDefault();
@@ -2284,22 +2283,12 @@ function setupGlobalClickDelegation() {
     }
   };
 
-  let lastDelegatedId = '';
-  let lastDelegatedAt = 0;
-
-  function runDelegatedAction(e) {
+  document.body.addEventListener('click', (e) => {
     const el = e.target.closest('button[id], a[id]');
     if (!el || !actions[el.id]) return;
-    const now = Date.now();
-    if (el.id === lastDelegatedId && now - lastDelegatedAt < 450) return;
-    lastDelegatedId = el.id;
-    lastDelegatedAt = now;
     if (el.tagName === 'A') e.preventDefault();
     actions[el.id](e);
-  }
-
-  document.body.addEventListener('click', runDelegatedAction);
-  document.body.addEventListener('touchend', runDelegatedAction, { passive: true });
+  });
 }
 
 onAppInit(() => {
