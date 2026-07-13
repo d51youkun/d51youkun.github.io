@@ -385,14 +385,15 @@ function decodeInviteJson(b64) {
 
 function decodeInvite(str) {
   if (!str) return null;
-  const text = String(str).trim().replace(/^\uFEFF/, '');
-  if (!text || text.includes(TRANSFER_PREFIX)) return null;
+  let text = String(str).trim().replace(/^\uFEFF/, '');
+  try { text = decodeURIComponent(text); } catch (e) { /* keep */ }
+  if (!text || text.toLowerCase().includes(TRANSFER_PREFIX)) return null;
   let raw = null;
   let prefixLen = 0;
   for (const prefix of [INVITE_PREFIX, INVITE_PREFIX_LEGACY]) {
     const idx = text.toLowerCase().indexOf(prefix.toLowerCase());
     if (idx < 0) continue;
-    const slice = text.slice(idx).split(/[\s\r\n]/)[0];
+    const slice = text.slice(idx).split(/[\s\r\n,;]+/)[0];
     if (prefix === INVITE_PREFIX_LEGACY && slice.toLowerCase().startsWith(TRANSFER_PREFIX)) continue;
     raw = slice;
     prefixLen = prefix.length;
@@ -413,18 +414,121 @@ function decodeInvite(str) {
   }
 }
 
+function extractQrDecodedText(decoded) {
+  if (typeof decoded === 'string') return decoded.trim();
+  if (decoded && typeof decoded.decodedText === 'string') return decoded.decodedText.trim();
+  if (decoded && decoded.result && typeof decoded.result.text === 'string') return decoded.result.text.trim();
+  return '';
+}
+
+function renderScannableQr(container, text, size = 300) {
+  if (!container || typeof QRCode === 'undefined' || !text) return false;
+  container.innerHTML = '';
+  try {
+    new QRCode(container, {
+      text: String(text),
+      width: size,
+      height: size,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.L
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function getHtml5QrScanConfig() {
+  const config = {
+    fps: 12,
+    aspectRatio: 1.0,
+    disableFlip: false,
+    rememberLastUsedCamera: true,
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+  };
+  if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
+    config.formatsToSupport = [Html5QrcodeSupportedFormats.QR_CODE];
+  }
+  config.qrbox = (viewfinderWidth, viewfinderHeight) => {
+    const side = Math.min(viewfinderWidth, viewfinderHeight);
+    const size = Math.max(240, Math.floor(side * 0.88));
+    return { width: size, height: size };
+  };
+  return config;
+}
+
+async function createHtml5QrScanner(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) throw new Error('QR reader element not found');
+  el.innerHTML = '';
+  return new Html5Qrcode(elementId, { verbose: false });
+}
+
+async function startHtml5QrCamera(scanner, onSuccess) {
+  const scanConfig = getHtml5QrScanConfig();
+  const wrappedSuccess = (decodedText, decodedResult) => {
+    const text = extractQrDecodedText(decodedResult) || extractQrDecodedText(decodedText);
+    if (text) onSuccess(text);
+  };
+  const attempts = [
+    { facingMode: 'environment' },
+    { facingMode: 'user' }
+  ];
+  let lastError = null;
+  for (const camera of attempts) {
+    try {
+      await scanner.start(camera, scanConfig, wrappedSuccess, () => {});
+      return true;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  const cameras = await Html5Qrcode.getCameras();
+  if (cameras && cameras.length) {
+    const back = cameras.find(c => /back|rear|環境|environment/i.test(c.label || ''));
+    const cam = back || cameras[cameras.length - 1];
+    await scanner.start(cam.id, scanConfig, wrappedSuccess, () => {});
+    return true;
+  }
+  throw lastError || new Error('カメラを起動できません');
+}
+
+async function scanQrTextFromImageFile(file) {
+  const tempId = 'qr-reader-file-temp';
+  let el = document.getElementById(tempId);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = tempId;
+    el.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;overflow:hidden';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = '';
+  const scanner = new Html5Qrcode(tempId, { verbose: false });
+  try {
+    if (typeof scanner.scanFileV2 === 'function') {
+      const result = await scanner.scanFileV2(file, false);
+      return extractQrDecodedText(result);
+    }
+    return extractQrDecodedText(await scanner.scanFile(file, false));
+  } finally {
+    try { scanner.clear(); } catch (e) { /* ignore */ }
+  }
+}
+
 function normalizeInviteFromScan(raw) {
-  const text = String(raw || '').trim().replace(/^\uFEFF/, '');
-  if (!text || text.includes(TRANSFER_PREFIX)) return null;
-  if (decodeInvite(text)) return text.split(/[\s\r\n]/)[0];
+  let text = extractQrDecodedText(raw) || String(raw || '').trim().replace(/^\uFEFF/, '');
+  try { text = decodeURIComponent(text); } catch (e) { /* keep */ }
+  if (!text || text.toLowerCase().includes(TRANSFER_PREFIX)) return null;
+  if (decodeInvite(text)) return text.split(/[\s\r\n,;]+/)[0];
   const candidates = [];
-  const re = /(?:bc|bluechat):[A-Za-z0-9_-]+/gi;
+  const re = /(?:bc|bluechat):[A-Za-z0-9_+\/=-]+/gi;
   let match;
   while ((match = re.exec(text)) !== null) {
     candidates.push(match[0]);
   }
   if (!candidates.length && /^(?:bc|bluechat):/i.test(text)) {
-    candidates.push(text.split(/[\s\r\n]/)[0]);
+    candidates.push(text.split(/[\s\r\n,;]+/)[0]);
   }
   for (const candidate of candidates) {
     if (decodeInvite(candidate)) return candidate;
@@ -445,16 +549,7 @@ function waitForNextFrames(count = 2) {
 }
 
 function getQrScannerConfig() {
-  return {
-    fps: 15,
-    qrbox: (viewfinderWidth, viewfinderHeight) => {
-      const side = Math.min(viewfinderWidth, viewfinderHeight);
-      const size = Math.max(200, Math.floor(side * 0.82));
-      return { width: size, height: size };
-    },
-    aspectRatio: 1.0,
-    disableFlip: false
-  };
+  return getHtml5QrScanConfig();
 }
 
 let lastInvalidQrToastAt = 0;
@@ -569,16 +664,7 @@ function renderMyQR() {
   document.getElementById('qr-expiry-note').textContent = '有効期限: 24時間（更新ボタンで再発行）';
   const codeEl = document.getElementById('invite-code-text');
   if (codeEl) codeEl.textContent = invite;
-  try {
-    new QRCode(container, {
-      text: invite,
-      width: 280,
-      height: 280,
-      colorDark: '#000000',
-      colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.M
-    });
-  } catch (e) {
+  if (!renderScannableQr(container, invite, 300)) {
     showToast('QRコードの生成に失敗しました');
   }
 }
@@ -604,52 +690,19 @@ async function startQrScanner() {
   await waitForNextFrames(3);
 
   try {
-    if (!qrScanner) {
-      qrScanner = new Html5Qrcode('qr-reader', { verbose: false });
-    }
-
-    const configs = [
-      { facingMode: 'environment' },
-      { facingMode: 'user' }
-    ];
-    const scanConfig = getQrScannerConfig();
-
-    let started = false;
-    let lastError = null;
-    for (const config of configs) {
+    if (qrScanner) {
       try {
-        await qrScanner.start(
-          config,
-          scanConfig,
-          onQrScanSuccess,
-          () => {}
-        );
-        started = true;
-        break;
-      } catch (e) {
-        lastError = e;
-      }
+        if (qrScanner.isScanning) await qrScanner.stop();
+        qrScanner.clear();
+      } catch (e) { /* ignore */ }
+      qrScanner = null;
     }
-
-    if (!started) {
-      const cameras = await Html5Qrcode.getCameras();
-      if (cameras.length > 0) {
-        await qrScanner.start(
-          cameras[0].id,
-          scanConfig,
-          onQrScanSuccess,
-          () => {}
-        );
-        started = true;
-      }
-    }
-
-    if (!started) {
-      throw lastError || new Error('カメラを起動できません');
-    }
+    qrScanner = await createHtml5QrScanner('qr-reader');
+    await startHtml5QrCamera(qrScanner, onQrScanSuccess);
     return true;
   } catch (e) {
     resetScanUI();
+    qrScanner = null;
     const msg = (e && e.name === 'NotAllowedError')
       ? 'カメラの使用が拒否されました。ブラウザの設定で許可してください'
       : 'カメラを起動できません。権限を確認してください';
@@ -695,9 +748,10 @@ async function stopQrScanner() {
   resetScanUI();
 }
 
-function onQrScanSuccess(decodedText) {
+function onQrScanSuccess(decodedText, decodedResult) {
   if (qrScanHandled) return;
-  const code = normalizeInviteFromScan(decodedText);
+  const raw = extractQrDecodedText(decodedResult) || extractQrDecodedText(decodedText);
+  const code = normalizeInviteFromScan(raw);
   if (!code) {
     const now = Date.now();
     if (now - lastInvalidQrToastAt > 2500) {
@@ -743,17 +797,8 @@ async function scanInviteFromImageFile(file) {
     showToast('画像の読み取りに対応していません');
     return;
   }
-  const tempId = 'qr-reader-file-temp';
-  let el = document.getElementById(tempId);
-  if (!el) {
-    el = document.createElement('div');
-    el.id = tempId;
-    el.style.display = 'none';
-    document.body.appendChild(el);
-  }
-  const scanner = new Html5Qrcode(tempId, { verbose: false });
   try {
-    const text = await scanner.scanFile(file, false);
+    const text = await scanQrTextFromImageFile(file);
     const code = normalizeInviteFromScan(text);
     if (!code) {
       showToast('友だち追加用QRを画像から認識できませんでした');
@@ -762,8 +807,6 @@ async function scanInviteFromImageFile(file) {
     await processFriendInviteScan(code);
   } catch (e) {
     showToast('画像からQRを読み取れませんでした');
-  } finally {
-    try { scanner.clear(); } catch (err) { /* ignore */ }
   }
 }
 
@@ -781,7 +824,7 @@ function switchAddFriendTab(tab) {
   if (tab === 'scan') {
     stopQrScanner();
     updateSecureContextHint();
-    setTimeout(() => startQrScanner(), 500);
+    setTimeout(() => startQrScanner(), 650);
   } else {
     stopQrScanner();
     if (tab === 'show') setTimeout(() => renderMyQR(), 150);

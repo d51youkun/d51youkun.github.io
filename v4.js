@@ -390,16 +390,7 @@ function renderTransferQR() {
     container.innerHTML = '';
     const codeEl = document.getElementById('transfer-code-text');
     if (codeEl) codeEl.textContent = code;
-    try {
-      new QRCode(container, {
-        text: code,
-        width: 220,
-        height: 220,
-        colorDark: '#1a6fd4',
-        colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.L
-      });
-    } catch (e) {
+    if (!renderScannableQr(container, code, 300)) {
       showToast('QRコードの生成に失敗しました');
       return;
     }

@@ -944,16 +944,11 @@ function renderTransferQR() {
     if (!code) return;
     const container = document.getElementById('transfer-qr-canvas');
     if (!container) return;
-    container.innerHTML = '';
     document.getElementById('transfer-code-text').textContent = code;
-    new QRCode(container, {
-      text: code,
-      width: 220,
-      height: 220,
-      colorDark: '#1a6fd4',
-      colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.L
-    });
+    if (!renderScannableQr(container, code, 300)) {
+      showToast('QRコードの生成に失敗しました');
+      return;
+    }
     pollTransferConsumed(code.slice(TRANSFER_PREFIX.length));
   });
 }
@@ -999,10 +994,13 @@ async function redeemTransferCode(code) {
 }
 
 function parseTransferCodeFromScan(raw) {
-  const text = String(raw || '').trim();
-  const idx = text.indexOf(TRANSFER_PREFIX);
+  let text = extractQrDecodedText(raw) || String(raw || '').trim();
+  try { text = decodeURIComponent(text); } catch (e) { /* keep */ }
+  const lower = text.toLowerCase();
+  const prefix = TRANSFER_PREFIX.toLowerCase();
+  const idx = lower.indexOf(prefix);
   if (idx < 0) return null;
-  return text.slice(idx).split(/\s/)[0].trim();
+  return text.slice(idx).split(/[\s\r\n,;]+/)[0].trim();
 }
 
 function handleTransferRedeemResult(result) {
@@ -1069,30 +1067,9 @@ async function startQrScannerForTransfer() {
 
   if (!document.getElementById('qr-reader-transfer')) return;
 
-  const config = { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 };
-  const onSuccess = (text) => onTransferScanSuccess(text);
-  const onError = () => {};
-
   try {
-    transferScanner = new Html5Qrcode('qr-reader-transfer', { verbose: false });
-    try {
-      await transferScanner.start({ facingMode: 'environment' }, config, onSuccess, onError);
-      return;
-    } catch (e1) {
-      try {
-        await transferScanner.start({ facingMode: 'user' }, config, onSuccess, onError);
-        return;
-      } catch (e2) {
-        const cameras = await Html5Qrcode.getCameras();
-        if (cameras && cameras.length) {
-          const back = cameras.find(c => /back|rear|環境/i.test(c.label || ''));
-          const camId = (back || cameras[cameras.length - 1]).id;
-          await transferScanner.start(camId, config, onSuccess, onError);
-          return;
-        }
-        throw e2;
-      }
-    }
+    transferScanner = await createHtml5QrScanner('qr-reader-transfer');
+    await startHtml5QrCamera(transferScanner, onTransferScanSuccess);
   } catch (e) {
     transferScanner = null;
     showToast('カメラを起動できません。下のコード入力も使えます');
@@ -2030,6 +2007,15 @@ function setupGlobalClickDelegation() {
       } else {
         showToast('投稿機能の読み込みに失敗しました。ページを再読み込みしてください');
       }
+    },
+    'btn-start-camera': () => {
+      if (typeof startQrScanner === 'function') startQrScanner();
+    },
+    'btn-start-transfer-camera': () => {
+      if (typeof startQrScannerForTransfer === 'function') startQrScannerForTransfer();
+    },
+    'btn-scan-invite-image': () => {
+      document.getElementById('input-invite-image')?.click();
     }
   };
 
