@@ -202,7 +202,10 @@ function setUserAvatar(userId, dataUrl) {
   data.users[userId].avatarUpdatedAt = Date.now();
   try {
     saveData(data);
-    cloudPushUser(data.users[userId]);
+    const user = data.users[userId];
+    cloudPushUser(user).then(ok => {
+      if (!ok) showToast('プロフィール画像の同期に失敗しました。しばらくして再試行されます');
+    });
     return true;
   } catch (e) {
     return false;
@@ -298,6 +301,75 @@ function addFriendship(id1, id2, options = {}) {
   return convId;
 }
 
+function shouldUpdateRemoteAvatar(local, remote, isSelf) {
+  const remoteTs = remote.avatarUpdatedAt || 0;
+  const localTs = local.avatarUpdatedAt || 0;
+  const remoteAv = remote.avatar || null;
+  const localAv = local.avatar || null;
+  if (remoteAv === localAv && remoteTs <= localTs) return false;
+  if (isSelf) {
+    return remoteTs > localTs || (remoteTs === localTs && remoteAv !== localAv);
+  }
+  if (remoteTs > localTs) return true;
+  if (remoteTs === localTs && remoteAv !== localAv) return true;
+  if (remoteAv && remoteAv !== localAv) return true;
+  if (!remoteAv && localAv && remoteTs >= localTs) return true;
+  return false;
+}
+
+function applyRemoteUserFields(uid, remoteUser) {
+  if (!remoteUser || !remoteUser.id) return false;
+  const data = getData();
+  const local = data.users[uid];
+  if (!local) return false;
+  const isSelf = String(uid) === String(data.currentUserId);
+  let changed = false;
+
+  if (remoteUser.name && remoteUser.name !== local.name) {
+    local.name = remoteUser.name;
+    changed = true;
+  }
+  if (remoteUser.avatar !== undefined && shouldUpdateRemoteAvatar(local, remoteUser, isSelf)) {
+    if (remoteUser.avatar) local.avatar = remoteUser.avatar;
+    else delete local.avatar;
+    local.avatarUpdatedAt = remoteUser.avatarUpdatedAt || Date.now();
+    changed = true;
+  }
+  if (remoteUser.title !== undefined) {
+    if (remoteUser.title && remoteUser.title.text) {
+      if (JSON.stringify(local.title) !== JSON.stringify(remoteUser.title)) {
+        local.title = remoteUser.title;
+        changed = true;
+      }
+    } else if (local.title) {
+      delete local.title;
+      changed = true;
+    }
+  }
+  if (remoteUser.suspendedUntil !== undefined && local.suspendedUntil !== remoteUser.suspendedUntil) {
+    local.suspendedUntil = remoteUser.suspendedUntil;
+    changed = true;
+  }
+  if (remoteUser.banned !== undefined && local.banned !== remoteUser.banned) {
+    local.banned = remoteUser.banned;
+    changed = true;
+  }
+  if (remoteUser.bannedUntil !== undefined && local.bannedUntil !== remoteUser.bannedUntil) {
+    local.bannedUntil = remoteUser.bannedUntil;
+    changed = true;
+  }
+  if (remoteUser.premium !== undefined && local.premium !== remoteUser.premium) {
+    local.premium = remoteUser.premium;
+    changed = true;
+  }
+  if (remoteUser.superPremium !== undefined && local.superPremium !== remoteUser.superPremium) {
+    local.superPremium = remoteUser.superPremium;
+    changed = true;
+  }
+  if (changed) saveData(data);
+  return changed;
+}
+
 function ensureLocalUser(userInfo) {
   if (!userInfo || !userInfo.id) return null;
   const uid = String(userInfo.id);
@@ -307,52 +379,14 @@ function ensureLocalUser(userInfo) {
       id: uid,
       name: userInfo.name || '不明',
       createdAt: userInfo.createdAt || Date.now(),
-      isRemote: true
+      isRemote: String(uid) !== String(data.currentUserId)
     };
     saveData(data);
   } else if (userInfo.name && data.users[uid].name !== userInfo.name) {
     data.users[uid].name = userInfo.name;
     saveData(data);
   }
-  if (userInfo.avatar !== undefined) {
-    const local = data.users[uid];
-    const remoteTs = userInfo.avatarUpdatedAt || 0;
-    const localTs = local.avatarUpdatedAt || 0;
-    if (userInfo.avatar && remoteTs >= localTs && local.avatar !== userInfo.avatar) {
-      local.avatar = userInfo.avatar;
-      local.avatarUpdatedAt = remoteTs;
-      saveData(data);
-    } else if (!userInfo.avatar && remoteTs > localTs && local.avatar) {
-      delete local.avatar;
-      local.avatarUpdatedAt = remoteTs;
-      saveData(data);
-    }
-  }
-  if (userInfo.title !== undefined) {
-    if (userInfo.title && userInfo.title.text) data.users[uid].title = userInfo.title;
-    else delete data.users[uid].title;
-    saveData(data);
-  }
-  if (userInfo.suspendedUntil !== undefined) {
-    data.users[uid].suspendedUntil = userInfo.suspendedUntil;
-    saveData(data);
-  }
-  if (userInfo.banned !== undefined) {
-    data.users[uid].banned = userInfo.banned;
-    saveData(data);
-  }
-  if (userInfo.bannedUntil !== undefined) {
-    data.users[uid].bannedUntil = userInfo.bannedUntil;
-    saveData(data);
-  }
-  if (userInfo.premium !== undefined) {
-    data.users[uid].premium = userInfo.premium;
-    saveData(data);
-  }
-  if (userInfo.superPremium !== undefined) {
-    data.users[uid].superPremium = userInfo.superPremium;
-    saveData(data);
-  }
+  applyRemoteUserFields(uid, userInfo);
   return data.users[uid];
 }
 
@@ -1333,6 +1367,30 @@ async function cloudFetchFriendIds(userId) {
   return Array.isArray(data) ? data : [];
 }
 
+async function syncFriendProfiles() {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return false;
+  let friendIds = getFriends(user.id).map(f => String(f.id));
+  const remoteIds = await cloudFetchFriendIds(user.id);
+  if (Array.isArray(remoteIds)) {
+    remoteIds.forEach(id => {
+      const fid = String(id);
+      if (fid !== String(user.id) && !friendIds.includes(fid)) friendIds.push(fid);
+    });
+  }
+  let changed = false;
+  for (const friendId of friendIds) {
+    if (String(friendId) === String(user.id)) continue;
+    const remoteUser = await cloudFetchUser(friendId);
+    if (!remoteUser || !remoteUser.id) continue;
+    const before = getUser(friendId)?.avatarUpdatedAt || 0;
+    ensureLocalUser(remoteUser);
+    if (applyRemoteUserFields(friendId, remoteUser)) changed = true;
+    else if ((getUser(friendId)?.avatarUpdatedAt || 0) > before) changed = true;
+  }
+  return changed;
+}
+
 async function syncFriendships() {
   const user = getCurrentUser();
   if (!user || !getSyncUrl()) return 0;
@@ -1340,36 +1398,23 @@ async function syncFriendships() {
   await cloudPushUser(user);
   const friendIds = await cloudFetchFriendIds(user.id);
   let added = 0;
-  let avatarsUpdated = false;
+  let profilesUpdated = false;
 
   for (const friendId of friendIds) {
     if (String(friendId) === String(user.id)) continue;
     const remoteUser = await cloudFetchUser(friendId);
     if (remoteUser && remoteUser.id) {
-      const before = getUser(friendId)?.avatar;
+      const beforeTs = getUser(friendId)?.avatarUpdatedAt || 0;
       ensureLocalUser(remoteUser);
-      if (getUser(friendId)?.avatar !== before) avatarsUpdated = true;
-      const u = getUser(friendId);
-      if (u) {
-        if (remoteUser.title !== undefined) {
-          if (remoteUser.title && remoteUser.title.text) u.title = remoteUser.title;
-          else delete u.title;
-        }
-        if (remoteUser.suspendedUntil !== undefined) u.suspendedUntil = remoteUser.suspendedUntil;
-        if (remoteUser.banned !== undefined) u.banned = remoteUser.banned;
-        if (remoteUser.bannedUntil !== undefined) u.bannedUntil = remoteUser.bannedUntil;
-        if (remoteUser.premium !== undefined) u.premium = remoteUser.premium;
-        if (remoteUser.superPremium !== undefined) u.superPremium = remoteUser.superPremium;
-        if (remoteUser.name) u.name = remoteUser.name;
-        saveData(getData());
-      }
+      if (applyRemoteUserFields(friendId, remoteUser)) profilesUpdated = true;
+      else if ((getUser(friendId)?.avatarUpdatedAt || 0) > beforeTs) profilesUpdated = true;
     }
     if (!areFriends(user.id, friendId)) {
       addFriendship(user.id, friendId, { skipCloud: true });
       added++;
     }
   }
-  if (added > 0 || avatarsUpdated) refreshMainUI();
+  if (added > 0 || profilesUpdated) refreshMainUI();
   return added;
 }
 

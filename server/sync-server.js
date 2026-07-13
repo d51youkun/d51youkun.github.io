@@ -625,6 +625,7 @@ const server = http.createServer(async (req, res) => {
         name: u.name,
         createdAt: u.createdAt,
         avatar: u.avatar || null,
+        avatarUpdatedAt: u.avatarUpdatedAt || 0,
         title: u.title || null,
         suspendedUntil: u.suspendedUntil || null,
         banned: u.banned || false,
