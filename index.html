@@ -5977,6 +5977,7 @@ const RTC_CONFIG = {
 
 let iceCandidateQueue = [];
 let callDisconnectTimer = null;
+let endingCall = false;
 let callState = { active: false, type: null, remoteUserId: null, convId: null, startedAt: 0 };
 
 function updateCallButtons(convId) {
@@ -6048,13 +6049,8 @@ function bumpCallSignalSince() {
 function shouldAcceptCallHangup(sig) {
   if (!sig || sig.type !== 'hangup') return false;
   const from = String(sig.from || '');
-  const ts = sig.timestamp || 0;
-  if (pendingIncomingCall && String(pendingIncomingCall.from) === from) {
-    return ts >= (pendingIncomingCall.timestamp || 0) - 3000;
-  }
-  if (callState.active && String(callState.remoteUserId) === from) {
-    return ts >= (callState.startedAt || 0) - 3000;
-  }
+  if (callState.active && String(callState.remoteUserId) === from) return true;
+  if (pendingIncomingCall && String(pendingIncomingCall.from) === from) return true;
   return false;
 }
 
@@ -6102,6 +6098,11 @@ function setupCallConnectionHandlers(pc, callType) {
           endCall();
         }
       }, 8000);
+    } else if (s === 'closed') {
+      clearCallDisconnectTimer();
+      if (callState.active && peerConnection === pc) {
+        endCall({ notifyRemote: false, remoteEnded: true });
+      }
     } else if (s === 'failed') {
       clearCallDisconnectTimer();
       if (!pc.remoteDescription) {
@@ -6117,7 +6118,11 @@ function setupCallConnectionHandlers(pc, callType) {
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'connected') onConnected();
-    else if (pc.connectionState === 'failed' && pc.remoteDescription) {
+    else if (pc.connectionState === 'closed') {
+      if (callState.active && peerConnection === pc) {
+        endCall({ notifyRemote: false, remoteEnded: true });
+      }
+    } else if (pc.connectionState === 'failed' && pc.remoteDescription) {
       showToast('通話を確立できませんでした');
       setTimeout(() => endCall(), 2000);
     }
@@ -6146,27 +6151,38 @@ function hideCallOverlay() {
   if (remoteV) remoteV.srcObject = null;
 }
 
-async function endCall() {
-  clearCallConnectTimeout();
-  clearCallDisconnectTimer();
-  iceCandidateQueue.length = 0;
-  if (callState.remoteUserId) {
-    await sendCallSignal(callState.remoteUserId, 'hangup', {});
+async function endCall(options = {}) {
+  const { notifyRemote = true, remoteEnded = false } = options;
+  if (endingCall) return;
+  endingCall = true;
+  try {
+    clearCallConnectTimeout();
+    clearCallDisconnectTimer();
+    iceCandidateQueue.length = 0;
+    const remoteUserId = callState.remoteUserId;
+    if (notifyRemote && remoteUserId) {
+      await sendCallSignal(remoteUserId, 'hangup', { endedAt: Date.now() });
+    }
+    pendingIncomingCall = null;
+    stopRingtone();
+    hideIncomingCallUI();
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+      localStream = null;
+    }
+    if (peerConnection) {
+      peerConnection.close();
+      peerConnection = null;
+    }
+    callState = { active: false, type: null, remoteUserId: null, convId: null, startedAt: 0 };
+    hideCallOverlay();
+    stopCallPolling();
+    if (remoteEnded) {
+      showToast('相手が通話を終了しました');
+    }
+  } finally {
+    endingCall = false;
   }
-  pendingIncomingCall = null;
-  stopRingtone();
-  hideIncomingCallUI();
-  if (localStream) {
-    localStream.getTracks().forEach(t => t.stop());
-    localStream = null;
-  }
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-  }
-  callState = { active: false, type: null, remoteUserId: null, convId: null, startedAt: 0 };
-  hideCallOverlay();
-  stopCallPolling();
 }
 
 function hideIncomingCallUI() {
@@ -6308,8 +6324,12 @@ async function handleCallSignal(sig) {
       pendingIncomingCall = null;
       stopRingtone();
       hideIncomingCallUI();
+      showToast('相手が通話をキャンセルしました');
+      return;
     }
-    if (callState.active) endCall();
+    if (callState.active) {
+      await endCall({ notifyRemote: false, remoteEnded: true });
+    }
     return;
   }
 
@@ -6366,14 +6386,16 @@ function startGlobalCallPolling() {
   setInterval(async () => {
     const user = getCurrentUser();
     if (!user || !getEffectiveSyncUrl()) return;
-    if (callState.active) return;
     const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 60000);
     if (!Array.isArray(signals)) return;
     for (const sig of signals) {
       lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
-      if (sig.type === 'offer' && !callState.active) {
+      if (sig.type === 'hangup') {
         await handleCallSignal(sig);
-      } else if (sig.type === 'hangup' && pendingIncomingCall) {
+        continue;
+      }
+      if (callState.active) continue;
+      if (sig.type === 'offer' && !pendingIncomingCall) {
         await handleCallSignal(sig);
       }
     }
