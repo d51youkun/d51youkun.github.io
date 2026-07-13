@@ -35,43 +35,87 @@ async function createDevicePairSession() {
     showToast('同期サーバーに接続できません');
     return null;
   }
-  if (!user.passwordHash) {
-    showToast('先にマイページでパスワードを設定してください');
-    return null;
-  }
-  showToast('ペアリング準備中…');
-  if (typeof pushAccountToCloud === 'function') {
-    await pushAccountToCloud().catch(() => {});
+  let currentUser = user;
+  if (!currentUser.passwordHash) {
+    const pw = document.getElementById('input-account-password')?.value?.trim() || '';
+    if (pw) {
+      setUserAccountPassword(currentUser.id, pw);
+      currentUser = getCurrentUser();
+    } else {
+      showToast('ペアリングにはパスワードが必要です。上で入力して「保存」を押してください');
+      return null;
+    }
   }
   const token = generateId() + generateId();
+  if (typeof schedulePushAccountToCloud === 'function') {
+    schedulePushAccountToCloud();
+  } else if (typeof pushAccountToCloud === 'function') {
+    pushAccountToCloud().catch(() => {});
+  }
   const ok = await cloudRequestExt(`/api/device-pair/${token}`, {
     method: 'PUT',
     body: JSON.stringify({
-      userId: user.id,
-      userName: user.name,
-      passwordHash: user.passwordHash,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      passwordHash: currentUser.passwordHash,
       syncUrl: getEffectiveSyncUrl(),
       expiresAt: Date.now() + DEVICE_PAIR_EXPIRY_MS
     })
-  }, 60000);
+  }, 30000);
   if (!ok || !ok.ok) {
-    showToast('ペアリングQRの作成に失敗しました');
-    return null;
+    const fallback = await createDevicePairViaTransferFallback(token, currentUser);
+    if (!fallback) {
+      showToast('ペアリングQRの作成に失敗しました。同期サーバー接続を確認してください');
+      return null;
+    }
   }
   return DEVICE_PAIR_PREFIX + token;
+}
+
+async function createDevicePairViaTransferFallback(token, user) {
+  let payload = typeof buildTransferBackupWithPassword === 'function'
+    ? buildTransferBackupWithPassword(null)
+    : null;
+  if (payload && JSON.stringify(payload).length > 300000) {
+    payload = {
+      cloudBackupUserId: user.id,
+      passwordHash: user.passwordHash || null,
+      syncUrl: getEffectiveSyncUrl(),
+      version: 2,
+      exportedAt: Date.now(),
+      pairMode: true
+    };
+  }
+  if (!payload) return false;
+  const res = await cloudRequestExt(`/api/transfer/${token}`, {
+    method: 'PUT',
+    body: JSON.stringify({ backup: payload, expiresAt: Date.now() + DEVICE_PAIR_EXPIRY_MS })
+  }, 60000);
+  return !!(res && res.ok);
 }
 
 function renderDevicePairQR() {
   const user = getCurrentUser();
   if (!user) return;
+  const container = document.getElementById('device-pair-qr-canvas');
+  const textEl = document.getElementById('device-pair-code-text');
+  if (container) {
+    container.innerHTML = '<p class="qr-hint" style="padding:32px;text-align:center">QRを生成中…</p>';
+  }
+  if (textEl) textEl.textContent = '';
   createDevicePairSession().then(code => {
-    if (!code) return;
-    const container = document.getElementById('device-pair-qr-canvas');
+    if (!code) {
+      if (container) {
+        container.innerHTML = '<p class="qr-hint" style="padding:32px;text-align:center">QRを表示できませんでした。<br>パスワードを保存してから再試行してください。</p>';
+      }
+      return;
+    }
     if (!container) return;
-    const textEl = document.getElementById('device-pair-code-text');
+    container.innerHTML = '';
     if (textEl) textEl.textContent = code;
     if (!renderScannableQr(container, code, 300)) {
-      showToast('QRコードの生成に失敗しました');
+      if (textEl) textEl.textContent = code + '（QR画像の生成に失敗。上のコードを手入力できます）';
+      showToast('QR画像の生成に失敗しました。コードを表示しています');
       return;
     }
     pollDevicePairConsumed(code.slice(DEVICE_PAIR_PREFIX.length));
@@ -108,26 +152,40 @@ async function redeemDevicePairCode(code) {
   if (!getEffectiveSyncUrl()) {
     return { error: '同期サーバーに接続できません' };
   }
-  const info = await cloudRequestExt(`/api/device-pair/${token}`, {}, 60000);
-  if (!info || !info.userId) {
+  const info = await cloudRequestExt(`/api/device-pair/${token}`, {}, 30000);
+  let pairInfo = info;
+  if (!pairInfo || !pairInfo.userId) {
+    const transfer = await cloudRequestExt(`/api/transfer/${token}`, {}, 30000);
+    const backup = transfer && transfer.backup;
+    if (backup && backup.cloudBackupUserId) {
+      pairInfo = {
+        userId: backup.cloudBackupUserId,
+        userName: backup.data?.users?.[backup.cloudBackupUserId]?.name || 'ユーザー',
+        requiresPassword: !!backup.passwordHash,
+        syncUrl: backup.syncUrl || null
+      };
+    }
+  }
+  if (!pairInfo || !pairInfo.userId) {
     return { error: 'ペアリングQRの期限が切れたか、無効です' };
   }
-  if (info.syncUrl && typeof setSyncUrl === 'function') {
-    const migrated = typeof resolveSyncUrl === 'function' ? resolveSyncUrl(info.syncUrl) : info.syncUrl;
+  if (pairInfo.syncUrl && typeof setSyncUrl === 'function') {
+    const migrated = typeof resolveSyncUrl === 'function' ? resolveSyncUrl(pairInfo.syncUrl) : pairInfo.syncUrl;
     if (migrated) setSyncUrl(migrated);
   }
   let password = '';
   const pwEl = document.getElementById('input-transfer-password');
   if (pwEl && pwEl.value) password = pwEl.value;
-  if (info.requiresPassword && !password) {
+  if (pairInfo.requiresPassword && !password) {
     password = prompt('ペアリング用パスワードを入力してください') || '';
     if (!password) return { error: 'パスワードが必要です' };
   }
   const result = typeof loginAccountOnDevice === 'function'
-    ? await loginAccountOnDevice(info.userId, password)
-    : await restoreAccountByUserId(info.userId, password);
+    ? await loginAccountOnDevice(pairInfo.userId, password)
+    : await restoreAccountByUserId(pairInfo.userId, password);
   if (result.error) return result;
-  await cloudRequestExt(`/api/device-pair/${token}/consumed`, { method: 'POST', body: '{}' }, 30000);
+  await cloudRequestExt(`/api/device-pair/${token}/consumed`, { method: 'POST', body: '{}' }, 30000)
+    .catch(() => cloudRequestExt(`/api/transfer/${token}/consumed`, { method: 'POST', body: '{}' }, 30000));
   if (typeof pushAccountToCloud === 'function') {
     await pushAccountToCloud().catch(() => {});
   }

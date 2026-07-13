@@ -1943,11 +1943,23 @@ function setupGlobalClickDelegation() {
       renderTransferQR();
       showModal('modal-transfer-qr');
     },
+    'btn-show-device-pair-qr': () => {
+      if (typeof showDevicePairQRModal === 'function') showDevicePairQRModal();
+      else showToast('ペアリング機能を読み込めませんでした。ページを再読み込みしてください');
+    },
+    'btn-scan-device-pair': () => {
+      if (typeof showDevicePairScanModal === 'function') showDevicePairScanModal();
+      else openTransferScanModal();
+    },
     'btn-download-backup': () => downloadLocalBackupFile(),
     'btn-restore-backup': () => document.getElementById('input-backup-file')?.click(),
     'btn-transfer-onboarding': () => {
       if (!getEffectiveSyncUrl()) showToast('同期サーバーが未設定です。引き継ぎ後にマイページで設定できます');
       openTransferScanModal();
+    },
+    'btn-account-login-onboarding': () => {
+      if (typeof showDevicePairScanModal === 'function') showDevicePairScanModal();
+      else openTransferScanModal();
     },
     'btn-start-transfer-camera': () => startQrScannerForTransfer(),
     'btn-stop-transfer-camera': () => stopTransferScanner(),
