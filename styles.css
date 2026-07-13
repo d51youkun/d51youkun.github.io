@@ -1574,6 +1574,9 @@ input:focus {
   padding-top: 10px;
   border-top: 1px solid var(--gray-200);
   flex-wrap: wrap;
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
 }
 .btn-feed-vote {
   display: inline-flex;
@@ -1586,6 +1589,23 @@ input:focus {
   color: var(--gray-700);
   font-size: 13px;
   cursor: pointer;
+  touch-action: manipulation;
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
+}
+.btn-feed-vote:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.feed-comment-form {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+}
+.btn-feed-comment {
+  touch-action: manipulation;
+  pointer-events: auto;
 }
 .btn-feed-vote.active-like {
   border-color: var(--blue-primary);

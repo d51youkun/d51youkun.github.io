@@ -747,7 +747,10 @@ function initV11Features() {
   bindClick('btn-create-post', () => showCreatePostModal('photo'));
   bindClick('btn-create-post-video', () => showCreatePostModal('video'));
   bindClick('btn-create-post-notice', () => showCreatePostModal('notice'));
-  bindClick('btn-refresh-feed', () => renderFeed());
+  bindClick('btn-refresh-feed', () => {
+    if (typeof refreshFeedFromServer === 'function') refreshFeedFromServer();
+    else renderFeed();
+  });
 
   document.querySelectorAll('.tab[data-tab="notices"]').forEach(tab => {
     tab.addEventListener('click', () => renderFeed());

@@ -1163,37 +1163,10 @@ const server = http.createServer(async (req, res) => {
       if (!Array.isArray(p.comments)) p.comments = [];
       return p;
     };
-    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts') {
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts' && parts.length === 2) {
       const list = data.posts.map(normalizePostEntry)
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       sendJson(res, 200, list.slice(0, 300));
-      return;
-    }
-    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts') {
-      const body = await readBody(req);
-      if (!body.authorId) {
-        sendJson(res, 400, { error: 'author_required' });
-        return;
-      }
-      const entry = normalizePostEntry({
-        id: body.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
-        kind: body.kind || 'photo',
-        text: body.text || '',
-        authorId: String(body.authorId),
-        authorName: body.authorName || 'ユーザー',
-        authorAvatar: body.authorAvatar || null,
-        media: body.media || null,
-        attachment: body.attachment || null,
-        createdAt: body.createdAt || Date.now(),
-        likes: {},
-        dislikes: {},
-        comments: []
-      });
-      const exists = data.posts.find(p => p.id === entry.id);
-      if (!exists) data.posts.unshift(entry);
-      if (data.posts.length > 300) data.posts = data.posts.slice(0, 300);
-      await saveDataWithActivity(data);
-      sendJson(res, 200, { ok: true, id: entry.id });
       return;
     }
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && parts[3] === 'vote') {
@@ -1239,8 +1212,9 @@ const server = http.createServer(async (req, res) => {
         createdAt: Date.now()
       });
       if (post.comments.length > 500) post.comments = post.comments.slice(-500);
+      const added = post.comments[post.comments.length - 1];
       await saveDataWithActivity(data);
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, { ok: true, comment: added });
       return;
     }
     if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && parts[3] === 'comments' && parts[4]) {
@@ -1260,7 +1234,35 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { ok: true });
       return;
     }
-    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2]) {
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts' && parts.length === 2) {
+      const body = await readBody(req);
+      if (!body.authorId) {
+        sendJson(res, 400, { error: 'author_required' });
+        return;
+      }
+      const entry = normalizePostEntry({
+        id: body.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
+        kind: body.kind || 'photo',
+        text: body.text || '',
+        authorId: String(body.authorId),
+        authorName: body.authorName || 'ユーザー',
+        authorAvatar: body.authorAvatar || null,
+        media: body.media || null,
+        attachment: body.attachment || null,
+        createdAt: body.createdAt || Date.now(),
+        likes: {},
+        dislikes: {},
+        comments: []
+      });
+      const exists = data.posts.find(p => p.id === entry.id);
+      if (!exists) data.posts.unshift(entry);
+      else Object.assign(exists, entry);
+      if (data.posts.length > 300) data.posts = data.posts.slice(0, 300);
+      await saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true, id: entry.id });
+      return;
+    }
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && !parts[3]) {
       const body = await readBody(req);
       const post = data.posts.find(p => p.id === parts[2]);
       if (!post) {

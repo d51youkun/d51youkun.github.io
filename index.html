@@ -1588,6 +1588,9 @@ input:focus {
   padding-top: 10px;
   border-top: 1px solid var(--gray-200);
   flex-wrap: wrap;
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
 }
 .btn-feed-vote {
   display: inline-flex;
@@ -1600,6 +1603,23 @@ input:focus {
   color: var(--gray-700);
   font-size: 13px;
   cursor: pointer;
+  touch-action: manipulation;
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
+}
+.btn-feed-vote:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.feed-comment-form {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+}
+.btn-feed-comment {
+  touch-action: manipulation;
+  pointer-events: auto;
 }
 .btn-feed-vote.active-like {
   border-color: var(--blue-primary);
@@ -7534,7 +7554,8 @@ function setupGlobalClickDelegation() {
       if (typeof showCreatePostModal === 'function') showCreatePostModal('notice');
     },
     'btn-refresh-feed': () => {
-      if (typeof renderFeed === 'function') renderFeed();
+      if (typeof refreshFeedFromServer === 'function') refreshFeedFromServer();
+      else if (typeof renderFeed === 'function') renderFeed();
     },
     'btn-submit-post': (e) => {
       if (e && typeof e.preventDefault === 'function') e.preventDefault();
@@ -11216,7 +11237,10 @@ function initV11Features() {
   bindClick('btn-create-post', () => showCreatePostModal('photo'));
   bindClick('btn-create-post-video', () => showCreatePostModal('video'));
   bindClick('btn-create-post-notice', () => showCreatePostModal('notice'));
-  bindClick('btn-refresh-feed', () => renderFeed());
+  bindClick('btn-refresh-feed', () => {
+    if (typeof refreshFeedFromServer === 'function') refreshFeedFromServer();
+    else renderFeed();
+  });
 
   document.querySelectorAll('.tab[data-tab="notices"]').forEach(tab => {
     tab.addEventListener('click', () => renderFeed());
@@ -13174,6 +13198,529 @@ onAppInit(() => {
   startFeedAutoRefresh();
   if (getLocalPostCache().length) renderFeed();
 });
+
+
+/**
+ * BlueChat v24 — 投稿の評価・コメント即時反映 + サーバー同期の安定化
+ */
+var APP_VERSION = 'v24';
+
+async function feedCloudRequest(path, options = {}, timeoutMs = 60000) {
+  const base = getUsableSyncUrl();
+  if (!base) return { ok: false, status: 0, data: null, error: 'no_sync' };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(base + path, {
+      ...options,
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { /* non-json */ }
+    return {
+      ok: res.ok,
+      status: res.status,
+      data,
+      error: data?.error || (res.ok ? null : 'request_failed')
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      data: null,
+      error: e?.name === 'AbortError' ? 'timeout' : 'network'
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function repaintFeedFromCache() {
+  const user = getCurrentUser();
+  const cachedPosts = getLocalPostCache().map(normalizePostClient);
+  const cachedAnn = typeof getAnnouncementCache === 'function' ? getAnnouncementCache() : [];
+  paintFeedList(buildFeedItems(cachedPosts, cachedAnn), user);
+}
+
+function updateLocalPostInCache(postId, updater) {
+  const cached = getLocalPostCache().map(p => {
+    if (p.id !== postId) return p;
+    return updater(normalizePostClient(p));
+  });
+  saveLocalPostCache(cached);
+}
+
+function applyVoteToLocalPost(postId, userId, nextVote) {
+  updateLocalPostInCache(postId, (n) => {
+    delete n.likes[userId];
+    delete n.dislikes[userId];
+    if (nextVote === 'up') n.likes[userId] = Date.now();
+    else if (nextVote === 'down') n.dislikes[userId] = Date.now();
+    return n;
+  });
+}
+
+function appendCommentToLocalPost(postId, comment) {
+  updateLocalPostInCache(postId, (n) => {
+    n.comments = [...(n.comments || []), comment];
+    return n;
+  });
+}
+
+function removeCommentFromLocalPost(postId, commentId) {
+  updateLocalPostInCache(postId, (n) => {
+    n.comments = (n.comments || []).filter(c => c.id !== commentId);
+    return n;
+  });
+}
+
+async function ensurePostOnServer(postId) {
+  const post = getLocalPostCache().find(p => p.id === postId);
+  if (!post || !getUsableSyncUrl()) return false;
+  const res = await feedCloudRequest('/api/posts', {
+    method: 'POST',
+    body: JSON.stringify({
+      id: post.id,
+      kind: post.kind,
+      text: post.text || '',
+      authorId: post.authorId,
+      authorName: post.authorName,
+      authorAvatar: post.authorAvatar || null,
+      media: post.media || null,
+      attachment: post.attachment || null,
+      createdAt: post.createdAt || Date.now()
+    })
+  }, 300000);
+  return res.ok;
+}
+
+function feedActionErrorMessage(res) {
+  if (!res) return '通信に失敗しました';
+  if (res.error === 'no_sync') return '同期サーバーに接続できません';
+  if (res.error === 'timeout') return 'サーバー応答がタイムアウトしました';
+  if (res.status === 404) return '投稿がサーバーに見つかりません';
+  if (res.status === 400) return '送信内容が不正です';
+  return 'サーバーへの保存に失敗しました';
+}
+
+bindFeedItemEvents = function (el, item, user) {
+  el.addEventListener('click', (e) => {
+    if (e.target.closest('.feed-author-card, .feed-comment-form, .feed-engage-bar, .btn-delete-post, .feed-attachment-link, .btn-feed-vote, .btn-feed-comment')) return;
+    if (item.isPost) markFeedItemRead(item.id);
+    else if (typeof markAnnouncementRead === 'function') markAnnouncementRead(item.annId);
+    el.classList.remove('unread');
+  });
+
+  el.querySelectorAll('.btn-feed-vote').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await voteOnPost(btn.dataset.postId, btn.dataset.vote);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  const commentsKey = item.isPost ? item.postId : item.annId;
+  const commentsEl = el.querySelector(`#feed-comments-${commentsKey}`);
+  paintFeedComments(commentsEl, item.comments, user, item);
+
+  const commentBtn = el.querySelector('.btn-feed-comment');
+  const commentInput = el.querySelector('.feed-comment-input');
+  if (commentBtn) {
+    commentBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (commentBtn.disabled) return;
+      const text = commentInput?.value || '';
+      commentBtn.disabled = true;
+      try {
+        if (item.isPost) await postPostComment(item.postId, text);
+        else if (typeof postAnnouncementComment === 'function') await postAnnouncementComment(item.annId, text);
+        if (commentInput) commentInput.value = '';
+      } finally {
+        commentBtn.disabled = false;
+      }
+    });
+  }
+  commentInput?.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    commentBtn?.click();
+  });
+
+  el.querySelectorAll('.btn-delete-feed-comment').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('コメントを削除しますか？')) return;
+      if (btn.dataset.postId) await deletePostComment(btn.dataset.postId, btn.dataset.commentId);
+      else if (typeof deleteAnnouncementComment === 'function') await deleteAnnouncementComment(btn.dataset.annId, btn.dataset.commentId);
+      repaintFeedFromCache();
+      fetchPublicPosts().then(() => repaintFeedFromCache());
+    });
+  });
+
+  el.querySelectorAll('.btn-delete-post[data-comment-id]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('コメントを削除しますか？')) return;
+      if (typeof deleteAnnouncementComment === 'function') await deleteAnnouncementComment(btn.dataset.annId, btn.dataset.commentId);
+      repaintFeedFromCache();
+    });
+  });
+
+  el.querySelector('.btn-delete-post[data-post-id]:not([data-comment-id])')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await deletePublicPost(e.target.dataset.postId);
+  });
+
+  el.querySelector('.btn-feed-friend-request')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await sendFriendRequest(e.target.dataset.userId);
+  });
+};
+
+voteOnPost = async function (postId, vote) {
+  const user = getCurrentUser();
+  if (!user || !getUsableSyncUrl()) {
+    showToast('ログインと同期サーバーが必要です');
+    return;
+  }
+  const post = normalizePostClient(getLocalPostCache().find(p => p.id === postId));
+  if (!post) {
+    showToast('投稿が見つかりません');
+    return;
+  }
+  const current = getUserPostVote(post, user.id);
+  let nextVote = vote;
+  if (current === vote) nextVote = 'none';
+
+  applyVoteToLocalPost(postId, user.id, nextVote);
+  repaintFeedFromCache();
+
+  let res = await feedCloudRequest(`/api/posts/${encodeURIComponent(postId)}/vote`, {
+    method: 'PUT',
+    body: JSON.stringify({ userId: user.id, vote: nextVote })
+  });
+  if (!res.ok && res.status === 404) {
+    const synced = await ensurePostOnServer(postId);
+    if (synced) {
+      res = await feedCloudRequest(`/api/posts/${encodeURIComponent(postId)}/vote`, {
+        method: 'PUT',
+        body: JSON.stringify({ userId: user.id, vote: nextVote })
+      });
+    }
+  }
+  if (!res.ok) {
+    applyVoteToLocalPost(postId, user.id, current === 'up' ? 'up' : current === 'down' ? 'down' : 'none');
+    repaintFeedFromCache();
+    showToast(feedActionErrorMessage(res));
+    return;
+  }
+  fetchPublicPosts().then(() => repaintFeedFromCache());
+};
+
+postPostComment = async function (postId, text) {
+  const user = getCurrentUser();
+  if (!user || !getUsableSyncUrl()) return;
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return;
+
+  const tempId = 'tmp_' + Date.now().toString(36);
+  const optimistic = {
+    id: tempId,
+    userId: user.id,
+    userName: user.name,
+    userAvatar: user.avatar || null,
+    text: trimmed,
+    createdAt: Date.now()
+  };
+  appendCommentToLocalPost(postId, optimistic);
+  repaintFeedFromCache();
+
+  let res = await feedCloudRequest(`/api/posts/${encodeURIComponent(postId)}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: user.id,
+      userName: user.name,
+      userAvatar: user.avatar || null,
+      text: trimmed
+    })
+  });
+  if (!res.ok && res.status === 404) {
+    const synced = await ensurePostOnServer(postId);
+    if (synced) {
+      res = await feedCloudRequest(`/api/posts/${encodeURIComponent(postId)}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: user.id,
+          userName: user.name,
+          userAvatar: user.avatar || null,
+          text: trimmed
+        })
+      });
+    }
+  }
+  if (!res.ok) {
+    removeCommentFromLocalPost(postId, tempId);
+    repaintFeedFromCache();
+    showToast('コメントの送信に失敗しました。' + feedActionErrorMessage(res));
+    return;
+  }
+  if (res.data?.comment?.id) {
+    removeCommentFromLocalPost(postId, tempId);
+    appendCommentToLocalPost(postId, res.data.comment);
+    repaintFeedFromCache();
+  }
+  fetchPublicPosts().then(() => repaintFeedFromCache());
+};
+
+deletePostComment = async function (postId, commentId) {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return;
+  const prev = normalizePostClient(getLocalPostCache().find(p => p.id === postId));
+  const removed = (prev?.comments || []).find(c => c.id === commentId);
+  removeCommentFromLocalPost(postId, commentId);
+  repaintFeedFromCache();
+  const res = await feedCloudRequest(`/api/posts/${encodeURIComponent(postId)}/comments/${encodeURIComponent(commentId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ userId: user.id })
+  });
+  if (!res.ok && removed) {
+    appendCommentToLocalPost(postId, removed);
+    repaintFeedFromCache();
+    showToast(feedActionErrorMessage(res));
+    return;
+  }
+  fetchPublicPosts().then(() => repaintFeedFromCache());
+};
+
+renderFeed = async function (options = {}) {
+  const list = document.getElementById('feed-list') || document.getElementById('notice-list');
+  if (!list) return;
+  const gen = ++feedRenderGen;
+  const user = getCurrentUser();
+
+  repaintFeedFromCache();
+  if (options.cacheOnly) return;
+
+  const [posts, announcements] = await Promise.all([
+    fetchPublicPosts(),
+    typeof fetchAnnouncements === 'function' ? fetchAnnouncements() : Promise.resolve([])
+  ]);
+  if (gen !== feedRenderGen) return;
+  paintFeedList(buildFeedItems(posts, announcements || []), user);
+  if (typeof updateTabBadges === 'function') updateTabBadges();
+};
+
+createPublicPost = async function (kind, text, mediaFile, attachmentFile) {
+  const ok = await _createPublicPostV23(kind, text, mediaFile, attachmentFile);
+  if (ok) {
+    repaintFeedFromCache();
+    fetchPublicPosts().then(() => repaintFeedFromCache());
+  }
+  return ok;
+};
+
+startFeedAutoRefresh = function () {
+  if (feedAutoRefreshTimer) clearInterval(feedAutoRefreshTimer);
+  feedAutoRefreshTimer = setInterval(() => {
+    if (currentTab === 'notices') renderFeed();
+  }, 25000);
+};
+
+
+/**
+ * BlueChat v25 — 投稿の即時完了 + フィード更新ボタンの実効化
+ */
+var APP_VERSION = 'v25';
+
+let feedRefreshInProgress = false;
+
+function resetPostSubmitUi(submitBtn) {
+  postSubmitInProgress = false;
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.textContent = '投稿する';
+  }
+}
+
+async function buildPostPayload(kind, text, mediaFile, attachmentFile, submitBtn) {
+  const user = getCurrentUser();
+  if (!user) throw new Error('ログインが必要です');
+  if (!getUsableSyncUrl()) throw new Error('同期サーバーに接続できません。マイページで設定を確認してください');
+
+  let media = null;
+  let attachment = null;
+  if (mediaFile) {
+    if (submitBtn) submitBtn.textContent = 'メディアを処理中…';
+    media = await withAsyncTimeout(
+      readPostMediaFile(mediaFile),
+      POST_MEDIA_TIMEOUT_MS,
+      'メディアの処理がタイムアウトしました'
+    );
+  }
+  if (attachmentFile) {
+    if (submitBtn) submitBtn.textContent = '添付を処理中…';
+    attachment = await withAsyncTimeout(
+      readPostAttachmentFile(attachmentFile),
+      POST_MEDIA_TIMEOUT_MS,
+      '添付ファイルの処理がタイムアウトしました'
+    );
+  }
+  if (kind === 'photo' && !media) throw new Error('写真を選択してください');
+  if (kind === 'video' && !media) throw new Error('動画を選択してください');
+  if (kind === 'notice' && !text.trim() && !media && !attachment) {
+    throw new Error('説明・写真・動画・ファイルのいずれかを入力してください');
+  }
+
+  return {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    kind,
+    text: text.trim(),
+    authorId: user.id,
+    authorName: user.name,
+    authorAvatar: user.avatar || null,
+    media,
+    attachment,
+    createdAt: Date.now(),
+    likes: {},
+    dislikes: {},
+    comments: []
+  };
+}
+
+function publishPostLocally(savedPost) {
+  cachePostLocally(normalizePostClient(savedPost));
+  showToast('投稿しました');
+  repaintFeedFromCache();
+  if (typeof updateTabBadges === 'function') updateTabBadges();
+  uploadPostToServerAsync(savedPost)
+    .then((ok) => {
+      if (ok) fetchPublicPosts().then(() => repaintFeedFromCache());
+      else if (typeof scheduleResyncOrphanPosts === 'function') scheduleResyncOrphanPosts();
+    })
+    .catch(() => {
+      if (typeof scheduleResyncOrphanPosts === 'function') scheduleResyncOrphanPosts();
+    });
+}
+
+createPublicPost = async function (kind, text, mediaFile, attachmentFile) {
+  try {
+    const savedPost = await buildPostPayload(kind, text, mediaFile, attachmentFile, null);
+    publishPostLocally(savedPost);
+    return true;
+  } catch (e) {
+    showToast(e?.message || '投稿に失敗しました');
+    return false;
+  }
+};
+
+submitPublicPostFromModal = async function () {
+  if (postSubmitInProgress) return;
+  const submitBtn = document.getElementById('btn-submit-post');
+  const kind = document.getElementById('input-post-kind')?.value || 'photo';
+  const text = document.getElementById('input-post-text')?.value || '';
+  const mediaFile = document.getElementById('input-post-media')?.files?.[0];
+  const attachFile = document.getElementById('input-post-attachment')?.files?.[0];
+
+  postSubmitInProgress = true;
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = '準備中…';
+  }
+
+  try {
+    const savedPost = await buildPostPayload(kind, text, mediaFile, attachFile, submitBtn);
+    publishPostLocally(savedPost);
+    hideModal('modal-create-post');
+    const textEl = document.getElementById('input-post-text');
+    const mediaEl = document.getElementById('input-post-media');
+    const attachEl = document.getElementById('input-post-attachment');
+    if (textEl) textEl.value = '';
+    if (mediaEl) mediaEl.value = '';
+    if (attachEl) attachEl.value = '';
+  } catch (e) {
+    showToast(e?.message || '投稿に失敗しました');
+  } finally {
+    resetPostSubmitUi(submitBtn);
+  }
+};
+
+async function refreshFeedFromServer() {
+  if (feedRefreshInProgress) return;
+  const btn = document.getElementById('btn-refresh-feed');
+  feedRefreshInProgress = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '取得中…';
+  }
+  try {
+    if (typeof resyncOrphanPostsToServer === 'function') {
+      await resyncOrphanPostsToServer();
+    }
+    const user = getCurrentUser();
+    let posts = getLocalPostCache().map(normalizePostClient);
+    let announcements = typeof getAnnouncementCache === 'function' ? getAnnouncementCache() : [];
+
+    if (getUsableSyncUrl()) {
+      const [postRes, annList] = await Promise.all([
+        feedCloudRequest('/api/posts', {}, 30000),
+        typeof fetchAnnouncements === 'function' ? fetchAnnouncements() : Promise.resolve([])
+      ]);
+      if (postRes.ok && Array.isArray(postRes.data)) {
+        const server = postRes.data.map(normalizePostClient);
+        const merged = mergePostLists(server, posts);
+        if (server.length < posts.length && typeof scheduleResyncOrphanPosts === 'function') {
+          scheduleResyncOrphanPosts();
+        }
+        posts = merged;
+        saveLocalPostCache(posts);
+      } else if (!postRes.ok) {
+        throw new Error(feedActionErrorMessage(postRes));
+      }
+      if (Array.isArray(annList)) announcements = annList;
+    }
+
+    paintFeedList(buildFeedItems(posts, announcements), user);
+    if (typeof updateTabBadges === 'function') updateTabBadges();
+    const count = buildFeedItems(posts, announcements).length;
+    showToast('フィードを更新しました（' + count + '件）');
+  } catch (e) {
+    repaintFeedFromCache();
+    showToast(e?.message || '更新に失敗しました');
+  } finally {
+    feedRefreshInProgress = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '更新';
+    }
+  }
+}
+
+fetchPublicPosts = async function () {
+  const local = getLocalPostCache().map(normalizePostClient);
+  if (!getUsableSyncUrl()) return local;
+  try {
+    const remote = await feedCloudRequest('/api/posts', {}, 30000);
+    if (!remote.ok || !Array.isArray(remote.data)) return local;
+    const server = remote.data.map(normalizePostClient);
+    const merged = mergePostLists(server, local);
+    saveLocalPostCache(merged);
+    if (server.length < local.length && typeof scheduleResyncOrphanPosts === 'function') {
+      scheduleResyncOrphanPosts();
+    }
+    return merged;
+  } catch (e) {
+    return local;
+  }
+};
 
   </script>
 </body>

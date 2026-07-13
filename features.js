@@ -2262,7 +2262,8 @@ function setupGlobalClickDelegation() {
       if (typeof showCreatePostModal === 'function') showCreatePostModal('notice');
     },
     'btn-refresh-feed': () => {
-      if (typeof renderFeed === 'function') renderFeed();
+      if (typeof refreshFeedFromServer === 'function') refreshFeedFromServer();
+      else if (typeof renderFeed === 'function') renderFeed();
     },
     'btn-submit-post': (e) => {
       if (e && typeof e.preventDefault === 'function') e.preventDefault();
