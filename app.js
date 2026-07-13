@@ -106,6 +106,14 @@ function getInitial(name) {
   return (name || '?').charAt(0).toUpperCase();
 }
 
+function avatarDisplaySrc(user) {
+  if (!user?.avatar) return '';
+  const v = user.avatarUpdatedAt || 0;
+  if (user.avatar.startsWith('data:')) return user.avatar + '#v=' + v;
+  const sep = user.avatar.includes('?') ? '&' : '?';
+  return user.avatar + sep + 'v=' + v;
+}
+
 function avatarHtml(user, opts = {}) {
   const { group = false, small = false } = opts;
   const classes = ['list-avatar'];
@@ -117,7 +125,7 @@ function avatarHtml(user, opts = {}) {
   }
 
   if (user && user.avatar) {
-    return `<div class="${classes.join(' ')} has-image"><img src="${user.avatar}" alt="${escapeHtml(user.name)}"></div>`;
+    return `<div class="${classes.join(' ')} has-image"><img src="${avatarDisplaySrc(user)}" alt="${escapeHtml(user.name)}"></div>`;
   }
 
   const name = user ? user.name : '?';
@@ -1317,8 +1325,27 @@ async function syncConversation(convId) {
   return added;
 }
 
+async function syncCurrentUserProfile() {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return false;
+  const remote = await cloudFetchUser(user.id);
+  if (!remote || !remote.id) return false;
+  const changed = applyRemoteUserFields(user.id, remote);
+  if (changed) renderProfile();
+  return changed;
+}
+
 async function cloudPushUser(user) {
   if (!user || !user.id || !getSyncUrl()) return false;
+  const remote = await cloudFetchUser(user.id);
+  if (remote?.id) {
+    const remoteTs = remote.avatarUpdatedAt || 0;
+    const localTs = user.avatarUpdatedAt || 0;
+    if (remoteTs > localTs || (remoteTs === localTs && remote.avatar && remote.avatar !== user.avatar)) {
+      applyRemoteUserFields(user.id, remote);
+      user = getUser(user.id) || user;
+    }
+  }
   const payload = {
     id: user.id,
     name: user.name,
@@ -1395,7 +1422,7 @@ async function syncFriendships() {
   const user = getCurrentUser();
   if (!user || !getSyncUrl()) return 0;
 
-  await cloudPushUser(user);
+  await syncCurrentUserProfile();
   const friendIds = await cloudFetchFriendIds(user.id);
   let added = 0;
   let profilesUpdated = false;
@@ -1958,7 +1985,7 @@ function renderProfile() {
   if (user.avatar) {
     avatarEl.classList.add('has-image');
     const img = document.createElement('img');
-    img.src = user.avatar;
+    img.src = avatarDisplaySrc(user);
     img.alt = user.name;
     avatarEl.appendChild(img);
   } else {
@@ -2706,6 +2733,7 @@ function init() {
         showToast('保存に失敗しました。画像サイズを小さくしてください');
         return;
       }
+      await cloudPushUser(getUser(user.id));
       renderProfile();
       refreshMainUI();
       showToast('プロフィール画像を設定しました');

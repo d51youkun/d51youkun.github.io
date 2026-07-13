@@ -162,12 +162,10 @@ function unlockAudioOnce() {
 
 const _onNewMessageReceivedOrig = onNewMessageReceived;
 onNewMessageReceived = function (convId, msg) {
-  _onNewMessageReceivedOrig(convId, msg);
+  const delivered = _onNewMessageReceivedOrig(convId, msg);
+  if (!delivered) return;
   const user = getCurrentUser();
-  if (!user || String(msg.senderId) === String(user.id)) return;
-  if (!shouldNotifyForConv(convId)) return;
   const conv = getData().conversations[convId];
-  if (!conv) return;
   const name = getConvDisplayName(conv, user.id);
   const preview = getMessagePreview(msg);
   showInAppPopup(name, preview, () => openChat(convId));

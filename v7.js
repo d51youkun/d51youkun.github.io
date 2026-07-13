@@ -273,7 +273,6 @@ function startSyncVersionPolling() {
     }
     if (last === 0) {
       localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
-      await handleRemoteActivity();
       return;
     }
   };

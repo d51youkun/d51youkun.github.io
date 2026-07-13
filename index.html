@@ -9,8 +9,8 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>BlueChatX</title>
-  <link rel="icon" type="image/png" href="icon.png">
-  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="icon" type="image/png" href="icon.png?v=20260713">
+  <link rel="apple-touch-icon" href="icon.png?v=20260713">
   <style>
 /* BlueChat - Blue LINE-like theme */
 :root {
@@ -2577,6 +2577,14 @@ function getInitial(name) {
   return (name || '?').charAt(0).toUpperCase();
 }
 
+function avatarDisplaySrc(user) {
+  if (!user?.avatar) return '';
+  const v = user.avatarUpdatedAt || 0;
+  if (user.avatar.startsWith('data:')) return user.avatar + '#v=' + v;
+  const sep = user.avatar.includes('?') ? '&' : '?';
+  return user.avatar + sep + 'v=' + v;
+}
+
 function avatarHtml(user, opts = {}) {
   const { group = false, small = false } = opts;
   const classes = ['list-avatar'];
@@ -2588,7 +2596,7 @@ function avatarHtml(user, opts = {}) {
   }
 
   if (user && user.avatar) {
-    return `<div class="${classes.join(' ')} has-image"><img src="${user.avatar}" alt="${escapeHtml(user.name)}"></div>`;
+    return `<div class="${classes.join(' ')} has-image"><img src="${avatarDisplaySrc(user)}" alt="${escapeHtml(user.name)}"></div>`;
   }
 
   const name = user ? user.name : '?';
@@ -3788,8 +3796,27 @@ async function syncConversation(convId) {
   return added;
 }
 
+async function syncCurrentUserProfile() {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return false;
+  const remote = await cloudFetchUser(user.id);
+  if (!remote || !remote.id) return false;
+  const changed = applyRemoteUserFields(user.id, remote);
+  if (changed) renderProfile();
+  return changed;
+}
+
 async function cloudPushUser(user) {
   if (!user || !user.id || !getSyncUrl()) return false;
+  const remote = await cloudFetchUser(user.id);
+  if (remote?.id) {
+    const remoteTs = remote.avatarUpdatedAt || 0;
+    const localTs = user.avatarUpdatedAt || 0;
+    if (remoteTs > localTs || (remoteTs === localTs && remote.avatar && remote.avatar !== user.avatar)) {
+      applyRemoteUserFields(user.id, remote);
+      user = getUser(user.id) || user;
+    }
+  }
   const payload = {
     id: user.id,
     name: user.name,
@@ -3866,7 +3893,7 @@ async function syncFriendships() {
   const user = getCurrentUser();
   if (!user || !getSyncUrl()) return 0;
 
-  await cloudPushUser(user);
+  await syncCurrentUserProfile();
   const friendIds = await cloudFetchFriendIds(user.id);
   let added = 0;
   let profilesUpdated = false;
@@ -4429,7 +4456,7 @@ function renderProfile() {
   if (user.avatar) {
     avatarEl.classList.add('has-image');
     const img = document.createElement('img');
-    img.src = user.avatar;
+    img.src = avatarDisplaySrc(user);
     img.alt = user.name;
     avatarEl.appendChild(img);
   } else {
@@ -5177,6 +5204,7 @@ function init() {
         showToast('保存に失敗しました。画像サイズを小さくしてください');
         return;
       }
+      await cloudPushUser(getUser(user.id));
       renderProfile();
       refreshMainUI();
       showToast('プロフィール画像を設定しました');
@@ -5227,31 +5255,105 @@ let transferScanHandled = false;
 let pendingIncomingCall = null;
 let ringToneTimer = null;
 let audioCtx = null;
-const NOTIFY_BASELINE_KEY = 'bluechat_notify_baseline';
+const NOTIFY_STATE_PREFIX = 'bluechat_notify_v2_';
+const LEGACY_NOTIFY_KEYS = [
+  'bluechat_notify_baseline',
+  'bluechat_notify_baseline_',
+  'bluechat_notified_ids_'
+];
+let notifySuppressedUntil = 0;
+
+function getNotifyStateKey() {
+  return NOTIFY_STATE_PREFIX + (getCurrentUser()?.id || '_anon');
+}
+
+function readNotifyState() {
+  try {
+    const raw = localStorage.getItem(getNotifyStateKey());
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (e) { /* ignore */ }
+  return { baseline: 0, ids: [], bootedAt: 0 };
+}
+
+function writeNotifyState(state) {
+  const ids = Array.isArray(state.ids) ? state.ids.slice(-8000) : [];
+  localStorage.setItem(getNotifyStateKey(), JSON.stringify({
+    baseline: state.baseline || 0,
+    ids,
+    bootedAt: state.bootedAt || Date.now()
+  }));
+}
+
+function purgeLegacyNotifyKeys() {
+  try {
+    sessionStorage.removeItem('bluechat_notify_baseline');
+    const uid = getCurrentUser()?.id;
+    const keys = Object.keys(localStorage);
+    keys.forEach(key => {
+      if (key === 'bluechat_notify_baseline') localStorage.removeItem(key);
+      if (uid && (key === 'bluechat_notify_baseline_' + uid || key === 'bluechat_notified_ids_' + uid)) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch (e) { /* ignore */ }
+}
 
 function initNotifyBaseline() {
+  purgeLegacyNotifyKeys();
   const data = getData();
-  let maxTs = Date.now();
+  const ids = new Set();
+  let baseline = Date.now();
   Object.values(data.messages || {}).forEach(msgs => {
     (msgs || []).forEach(m => {
-      if (m && m.timestamp > maxTs) maxTs = m.timestamp;
+      if (!m?.id) return;
+      ids.add(String(m.id));
+      if (m.timestamp > baseline) baseline = m.timestamp;
     });
   });
-  const prev = parseInt(sessionStorage.getItem(NOTIFY_BASELINE_KEY) || '0', 10);
-  if (!prev || prev < maxTs) {
-    sessionStorage.setItem(NOTIFY_BASELINE_KEY, String(maxTs));
-  }
+  writeNotifyState({
+    baseline,
+    ids: Array.from(ids),
+    bootedAt: Date.now()
+  });
+}
+
+function refreshNotifyBaselineFromLocal() {
+  initNotifyBaseline();
 }
 
 function getNotifyBaseline() {
-  const v = parseInt(sessionStorage.getItem(NOTIFY_BASELINE_KEY) || '0', 10);
-  return v || Date.now();
+  return readNotifyState().baseline || Date.now();
 }
 
 function bumpNotifyBaseline(ts) {
-  const cur = getNotifyBaseline();
-  if (ts > cur) sessionStorage.setItem(NOTIFY_BASELINE_KEY, String(ts));
+  const state = readNotifyState();
+  if (ts > (state.baseline || 0)) {
+    state.baseline = ts;
+    writeNotifyState(state);
+  }
 }
+
+function markMessageNotified(msg) {
+  if (!msg?.id) return;
+  const state = readNotifyState();
+  const id = String(msg.id);
+  if (!state.ids.includes(id)) state.ids.push(id);
+  if (msg.timestamp > (state.baseline || 0)) state.baseline = msg.timestamp;
+  writeNotifyState(state);
+}
+
+function isMessageNotified(msg) {
+  return !!(msg?.id && readNotifyState().ids.includes(String(msg.id)));
+}
+
+function suppressNotificationsFor(ms = 5000) {
+  notifySuppressedUntil = Math.max(notifySuppressedUntil, Date.now() + ms);
+}
+
+function resetNotifiedIdsCache() {}
 
 // ─── Notifications ───────────────────────────────────────
 function notificationsSupported() {
@@ -5398,31 +5500,40 @@ function shouldNotifyForConv(convId) {
   return document.hidden || !onChat;
 }
 
-function onNewMessageReceived(convId, msg) {
+function shouldNotifyForNewMessage(convId, msg) {
   const user = getCurrentUser();
-  if (!user || String(msg.senderId) === String(user.id)) return;
-  if (!msg.timestamp || msg.timestamp <= getNotifyBaseline()) return;
+  if (!user || String(msg.senderId) === String(user.id)) return false;
+  if (!msg?.id || isMessageNotified(msg)) return false;
+  if (!msg.timestamp || msg.timestamp <= getNotifyBaseline()) return false;
+  if (Date.now() < notifySuppressedUntil) return false;
   const reads = getData().readReceipts?.[convId] || {};
   const myRead = reads[user.id] || 0;
-  if (msg.timestamp <= myRead) return;
-  if (!shouldNotifyForConv(convId)) return;
+  if (msg.timestamp <= myRead) return false;
+  if (!shouldNotifyForConv(convId)) return false;
+  if (!getData().conversations[convId]) return false;
+  return true;
+}
+
+function onNewMessageReceived(convId, msg) {
+  if (!shouldNotifyForNewMessage(convId, msg)) return false;
+  markMessageNotified(msg);
+  const user = getCurrentUser();
   const conv = getData().conversations[convId];
-  if (!conv) return;
-  bumpNotifyBaseline(msg.timestamp);
   const name = getConvDisplayName(conv, user.id);
   const preview = getMessagePreview(msg);
   playMessageSound();
   showAppNotification(name, preview, {
-    tag: 'msg-' + convId,
+    tag: 'msg-' + convId + '-' + msg.id,
     convId,
     onClick: () => openChat(convId)
   });
+  return true;
 }
 
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13');
   } catch (e) { /* ignore */ }
 }
 
@@ -6040,6 +6151,7 @@ function importTransferBackup(backup) {
   if (!payload.currentUserId || !payload.users || !payload.users[payload.currentUserId]) {
     throw new Error('バックアップにユーザー情報がありません');
   }
+  suppressNotificationsFor(8000);
   const merged = {
     currentUserId: payload.currentUserId,
     users: payload.users || {},
@@ -6064,6 +6176,7 @@ function importTransferBackup(backup) {
     if (migrated) setSyncUrl(migrated);
   }
   localStorage.removeItem(ACTIVITY_VERSION_KEY);
+  refreshNotifyBaselineFromLocal();
 }
 
 // ─── Local file backup ─────────────────────────────────────
@@ -7291,8 +7404,13 @@ function setupGlobalClickDelegation() {
 onAppInit(() => {
   initExtendedFeatures();
   setupGlobalClickDelegation();
-  initNotifyBaseline();
 });
+
+const _initNotifyEarly = init;
+init = function () {
+  initNotifyBaseline();
+  _initNotifyEarly();
+};
 
 function bootBlueChat() {
   init();
@@ -7469,12 +7587,10 @@ function unlockAudioOnce() {
 
 const _onNewMessageReceivedOrig = onNewMessageReceived;
 onNewMessageReceived = function (convId, msg) {
-  _onNewMessageReceivedOrig(convId, msg);
+  const delivered = _onNewMessageReceivedOrig(convId, msg);
+  if (!delivered) return;
   const user = getCurrentUser();
-  if (!user || String(msg.senderId) === String(user.id)) return;
-  if (!shouldNotifyForConv(convId)) return;
   const conv = getData().conversations[convId];
-  if (!conv) return;
   const name = getConvDisplayName(conv, user.id);
   const preview = getMessagePreview(msg);
   showInAppPopup(name, preview, () => openChat(convId));
@@ -8905,7 +9021,6 @@ function startSyncVersionPolling() {
     }
     if (last === 0) {
       localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
-      await handleRemoteActivity();
       return;
     }
   };
@@ -12337,6 +12452,107 @@ startGlobalSync = function () {
 };
 
 onAppInit(() => {});
+
+
+/**
+ * BlueChat v17 — 古い通知の再表示を防止
+ */
+var APP_VERSION = 'v17';
+
+const _mergeCloudBackupV17 = typeof mergeCloudBackupDataIntoLocal === 'function'
+  ? mergeCloudBackupDataIntoLocal
+  : null;
+
+if (_mergeCloudBackupV17) {
+  mergeCloudBackupDataIntoLocal = function (backup) {
+    suppressNotificationsFor(8000);
+    const changed = _mergeCloudBackupV17(backup);
+    resetNotifiedIdsCache();
+    refreshNotifyBaselineFromLocal();
+    return changed;
+  };
+}
+
+
+/**
+ * BlueChat v18 — プロフィール画像同期と通知の再定義
+ */
+var APP_VERSION = 'v18';
+
+function syncFriendProfilesBatch() {
+  const user = getCurrentUser();
+  if (!user || !getSyncUrl()) return Promise.resolve(false);
+  let friendIds = getFriends(user.id).map(f => String(f.id));
+  return cloudFetchFriendIds(user.id).then(remoteIds => {
+    if (Array.isArray(remoteIds)) {
+      remoteIds.forEach(id => {
+        const fid = String(id);
+        if (fid !== String(user.id) && !friendIds.includes(fid)) friendIds.push(fid);
+      });
+    }
+    return cloudRequest('/api/users/list');
+  }).then(allUsers => {
+    if (!Array.isArray(allUsers)) return false;
+    const byId = new Map(allUsers.map(u => [String(u.id), u]));
+    let changed = false;
+    friendIds.forEach(friendId => {
+      if (String(friendId) === String(user.id)) return;
+      const remoteUser = byId.get(String(friendId));
+      if (!remoteUser) return;
+      ensureLocalUser(remoteUser);
+      if (applyRemoteUserFields(friendId, remoteUser)) changed = true;
+    });
+    return changed;
+  }).catch(() => false);
+}
+
+if (typeof syncFriendProfiles === 'function') {
+  const _syncFriendProfilesV18 = syncFriendProfiles;
+  syncFriendProfiles = async function () {
+    const batchChanged = await syncFriendProfilesBatch();
+    const legacyChanged = await _syncFriendProfilesV18();
+    return batchChanged || legacyChanged;
+  };
+}
+
+const _syncCurrentUserModerationV18 = syncCurrentUserModeration;
+syncCurrentUserModeration = async function () {
+  await syncCurrentUserProfile();
+  return _syncCurrentUserModerationV18();
+};
+
+const _handleRemoteActivityV18 = handleRemoteActivity;
+handleRemoteActivity = async function () {
+  if (typeof suppressNotificationsFor === 'function') suppressNotificationsFor(4000);
+  if (typeof syncCurrentUserProfile === 'function') await syncCurrentUserProfile();
+  if (typeof syncFriendProfiles === 'function') {
+    const profilesChanged = await syncFriendProfiles();
+    if (profilesChanged) {
+      if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
+      else refreshMainUI();
+    }
+  }
+  await _handleRemoteActivityV18();
+};
+
+const _setUserAvatarV18 = setUserAvatar;
+setUserAvatar = function (userId, dataUrl) {
+  const ok = _setUserAvatarV18(userId, dataUrl);
+  if (ok) {
+    const user = getUser(userId);
+    if (user) cloudPushUser(user).catch(() => {});
+    refreshMainUI();
+  }
+  return ok;
+};
+
+const _removeUserAvatarV18 = removeUserAvatar;
+removeUserAvatar = function (userId) {
+  _removeUserAvatarV18(userId);
+  const user = getUser(userId);
+  if (user) cloudPushUser(user).catch(() => {});
+  refreshMainUI();
+};
 
   </script>
 </body>

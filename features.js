@@ -17,31 +17,105 @@ let transferScanHandled = false;
 let pendingIncomingCall = null;
 let ringToneTimer = null;
 let audioCtx = null;
-const NOTIFY_BASELINE_KEY = 'bluechat_notify_baseline';
+const NOTIFY_STATE_PREFIX = 'bluechat_notify_v2_';
+const LEGACY_NOTIFY_KEYS = [
+  'bluechat_notify_baseline',
+  'bluechat_notify_baseline_',
+  'bluechat_notified_ids_'
+];
+let notifySuppressedUntil = 0;
+
+function getNotifyStateKey() {
+  return NOTIFY_STATE_PREFIX + (getCurrentUser()?.id || '_anon');
+}
+
+function readNotifyState() {
+  try {
+    const raw = localStorage.getItem(getNotifyStateKey());
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (e) { /* ignore */ }
+  return { baseline: 0, ids: [], bootedAt: 0 };
+}
+
+function writeNotifyState(state) {
+  const ids = Array.isArray(state.ids) ? state.ids.slice(-8000) : [];
+  localStorage.setItem(getNotifyStateKey(), JSON.stringify({
+    baseline: state.baseline || 0,
+    ids,
+    bootedAt: state.bootedAt || Date.now()
+  }));
+}
+
+function purgeLegacyNotifyKeys() {
+  try {
+    sessionStorage.removeItem('bluechat_notify_baseline');
+    const uid = getCurrentUser()?.id;
+    const keys = Object.keys(localStorage);
+    keys.forEach(key => {
+      if (key === 'bluechat_notify_baseline') localStorage.removeItem(key);
+      if (uid && (key === 'bluechat_notify_baseline_' + uid || key === 'bluechat_notified_ids_' + uid)) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch (e) { /* ignore */ }
+}
 
 function initNotifyBaseline() {
+  purgeLegacyNotifyKeys();
   const data = getData();
-  let maxTs = Date.now();
+  const ids = new Set();
+  let baseline = Date.now();
   Object.values(data.messages || {}).forEach(msgs => {
     (msgs || []).forEach(m => {
-      if (m && m.timestamp > maxTs) maxTs = m.timestamp;
+      if (!m?.id) return;
+      ids.add(String(m.id));
+      if (m.timestamp > baseline) baseline = m.timestamp;
     });
   });
-  const prev = parseInt(sessionStorage.getItem(NOTIFY_BASELINE_KEY) || '0', 10);
-  if (!prev || prev < maxTs) {
-    sessionStorage.setItem(NOTIFY_BASELINE_KEY, String(maxTs));
-  }
+  writeNotifyState({
+    baseline,
+    ids: Array.from(ids),
+    bootedAt: Date.now()
+  });
+}
+
+function refreshNotifyBaselineFromLocal() {
+  initNotifyBaseline();
 }
 
 function getNotifyBaseline() {
-  const v = parseInt(sessionStorage.getItem(NOTIFY_BASELINE_KEY) || '0', 10);
-  return v || Date.now();
+  return readNotifyState().baseline || Date.now();
 }
 
 function bumpNotifyBaseline(ts) {
-  const cur = getNotifyBaseline();
-  if (ts > cur) sessionStorage.setItem(NOTIFY_BASELINE_KEY, String(ts));
+  const state = readNotifyState();
+  if (ts > (state.baseline || 0)) {
+    state.baseline = ts;
+    writeNotifyState(state);
+  }
 }
+
+function markMessageNotified(msg) {
+  if (!msg?.id) return;
+  const state = readNotifyState();
+  const id = String(msg.id);
+  if (!state.ids.includes(id)) state.ids.push(id);
+  if (msg.timestamp > (state.baseline || 0)) state.baseline = msg.timestamp;
+  writeNotifyState(state);
+}
+
+function isMessageNotified(msg) {
+  return !!(msg?.id && readNotifyState().ids.includes(String(msg.id)));
+}
+
+function suppressNotificationsFor(ms = 5000) {
+  notifySuppressedUntil = Math.max(notifySuppressedUntil, Date.now() + ms);
+}
+
+function resetNotifiedIdsCache() {}
 
 // ─── Notifications ───────────────────────────────────────
 function notificationsSupported() {
@@ -188,31 +262,40 @@ function shouldNotifyForConv(convId) {
   return document.hidden || !onChat;
 }
 
-function onNewMessageReceived(convId, msg) {
+function shouldNotifyForNewMessage(convId, msg) {
   const user = getCurrentUser();
-  if (!user || String(msg.senderId) === String(user.id)) return;
-  if (!msg.timestamp || msg.timestamp <= getNotifyBaseline()) return;
+  if (!user || String(msg.senderId) === String(user.id)) return false;
+  if (!msg?.id || isMessageNotified(msg)) return false;
+  if (!msg.timestamp || msg.timestamp <= getNotifyBaseline()) return false;
+  if (Date.now() < notifySuppressedUntil) return false;
   const reads = getData().readReceipts?.[convId] || {};
   const myRead = reads[user.id] || 0;
-  if (msg.timestamp <= myRead) return;
-  if (!shouldNotifyForConv(convId)) return;
+  if (msg.timestamp <= myRead) return false;
+  if (!shouldNotifyForConv(convId)) return false;
+  if (!getData().conversations[convId]) return false;
+  return true;
+}
+
+function onNewMessageReceived(convId, msg) {
+  if (!shouldNotifyForNewMessage(convId, msg)) return false;
+  markMessageNotified(msg);
+  const user = getCurrentUser();
   const conv = getData().conversations[convId];
-  if (!conv) return;
-  bumpNotifyBaseline(msg.timestamp);
   const name = getConvDisplayName(conv, user.id);
   const preview = getMessagePreview(msg);
   playMessageSound();
   showAppNotification(name, preview, {
-    tag: 'msg-' + convId,
+    tag: 'msg-' + convId + '-' + msg.id,
     convId,
     onClick: () => openChat(convId)
   });
+  return true;
 }
 
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13');
   } catch (e) { /* ignore */ }
 }
 
@@ -830,6 +913,7 @@ function importTransferBackup(backup) {
   if (!payload.currentUserId || !payload.users || !payload.users[payload.currentUserId]) {
     throw new Error('バックアップにユーザー情報がありません');
   }
+  suppressNotificationsFor(8000);
   const merged = {
     currentUserId: payload.currentUserId,
     users: payload.users || {},
@@ -854,6 +938,7 @@ function importTransferBackup(backup) {
     if (migrated) setSyncUrl(migrated);
   }
   localStorage.removeItem(ACTIVITY_VERSION_KEY);
+  refreshNotifyBaselineFromLocal();
 }
 
 // ─── Local file backup ─────────────────────────────────────
@@ -2081,8 +2166,13 @@ function setupGlobalClickDelegation() {
 onAppInit(() => {
   initExtendedFeatures();
   setupGlobalClickDelegation();
-  initNotifyBaseline();
 });
+
+const _initNotifyEarly = init;
+init = function () {
+  initNotifyBaseline();
+  _initNotifyEarly();
+};
 
 function bootBlueChat() {
   init();
