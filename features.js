@@ -17,6 +17,31 @@ let transferScanHandled = false;
 let pendingIncomingCall = null;
 let ringToneTimer = null;
 let audioCtx = null;
+const NOTIFY_BASELINE_KEY = 'bluechat_notify_baseline';
+
+function initNotifyBaseline() {
+  const data = getData();
+  let maxTs = Date.now();
+  Object.values(data.messages || {}).forEach(msgs => {
+    (msgs || []).forEach(m => {
+      if (m && m.timestamp > maxTs) maxTs = m.timestamp;
+    });
+  });
+  const prev = parseInt(sessionStorage.getItem(NOTIFY_BASELINE_KEY) || '0', 10);
+  if (!prev || prev < maxTs) {
+    sessionStorage.setItem(NOTIFY_BASELINE_KEY, String(maxTs));
+  }
+}
+
+function getNotifyBaseline() {
+  const v = parseInt(sessionStorage.getItem(NOTIFY_BASELINE_KEY) || '0', 10);
+  return v || Date.now();
+}
+
+function bumpNotifyBaseline(ts) {
+  const cur = getNotifyBaseline();
+  if (ts > cur) sessionStorage.setItem(NOTIFY_BASELINE_KEY, String(ts));
+}
 
 // ─── Notifications ───────────────────────────────────────
 function notificationsSupported() {
@@ -111,15 +136,42 @@ function playMessageSound() {
   setTimeout(() => playTone(1100, 0.1), 90);
 }
 
+function playPurururuRing() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') ctx.resume();
+  const now = ctx.currentTime;
+  const pattern = [
+    { t: 0, f: 400, d: 0.22 },
+    { t: 0.28, f: 480, d: 0.22 },
+    { t: 0.56, f: 400, d: 0.22 },
+    { t: 0.84, f: 480, d: 0.28 }
+  ];
+  pattern.forEach(({ t, f, d }) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.0001, now + t);
+    gain.gain.exponentialRampToValueAtTime(0.28, now + t + 0.02);
+    gain.gain.setValueAtTime(0.28, now + t + d - 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + t + d);
+    osc.start(now + t);
+    osc.stop(now + t + d + 0.01);
+  });
+}
+
 function startRingtone() {
   stopRingtone();
+  if (!notificationsSupported() || Notification.permission !== 'granted') return;
   const ring = () => {
-    playTone(800, 0.2);
-    setTimeout(() => playTone(1000, 0.2), 220);
-    if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+    playPurururuRing();
+    if (navigator.vibrate) navigator.vibrate([500, 150, 500, 150, 500, 800]);
   };
   ring();
-  ringToneTimer = setInterval(ring, 2200);
+  ringToneTimer = setInterval(ring, 3200);
 }
 
 function stopRingtone() {
@@ -139,9 +191,14 @@ function shouldNotifyForConv(convId) {
 function onNewMessageReceived(convId, msg) {
   const user = getCurrentUser();
   if (!user || String(msg.senderId) === String(user.id)) return;
+  if (!msg.timestamp || msg.timestamp <= getNotifyBaseline()) return;
+  const reads = getData().readReceipts?.[convId] || {};
+  const myRead = reads[user.id] || 0;
+  if (msg.timestamp <= myRead) return;
   if (!shouldNotifyForConv(convId)) return;
   const conv = getData().conversations[convId];
   if (!conv) return;
+  bumpNotifyBaseline(msg.timestamp);
   const name = getConvDisplayName(conv, user.id);
   const preview = getMessagePreview(msg);
   playMessageSound();
@@ -1409,11 +1466,13 @@ function showIncomingCallUI(sig) {
   if (iconEl) iconEl.textContent = callType === 'video' ? '📹' : '📞';
   document.getElementById('modal-incoming-call')?.classList.remove('hidden');
   startRingtone();
-  showAppNotification(
-    `${name}から着信`,
-    callType === 'video' ? 'ビデオ通話' : '音声通話',
-    { tag: 'incoming-call' }
-  );
+  if (notificationsSupported() && Notification.permission === 'granted') {
+    showAppNotification(
+      `${name}から着信`,
+      callType === 'video' ? 'ビデオ通話 — プルルル' : '音声通話 — プルルル',
+      { tag: 'incoming-call', silent: false }
+    );
+  }
 }
 
 async function acceptIncomingOffer(sig) {
@@ -1985,6 +2044,7 @@ function setupGlobalClickDelegation() {
 onAppInit(() => {
   initExtendedFeatures();
   setupGlobalClickDelegation();
+  initNotifyBaseline();
 });
 
 function bootBlueChat() {

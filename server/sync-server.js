@@ -273,7 +273,7 @@ async function upstashCommand(command) {
   return json.result;
 }
 
-async function loadData() {
+async function loadDataFromStorage() {
   if (USE_UPSTASH) {
     try {
       const raw = await upstashCommand(['GET', UPSTASH_KEY]);
@@ -290,13 +290,36 @@ async function loadData() {
   }
 }
 
-async function saveData(data) {
+let memData = null;
+let dataLock = Promise.resolve();
+
+function withDataLock(fn) {
+  const run = dataLock.then(fn);
+  dataLock = run.catch(() => {});
+  return run;
+}
+
+async function loadData() {
+  return withDataLock(async () => {
+    if (!memData) memData = await loadDataFromStorage();
+    return JSON.parse(JSON.stringify(memData));
+  });
+}
+
+async function saveDataToStorage(data) {
   const normalized = normalizeData(data);
   if (USE_UPSTASH) {
     await upstashCommand(['SET', UPSTASH_KEY, JSON.stringify(normalized)]);
     return;
   }
   fs.writeFileSync(DATA_FILE, JSON.stringify(normalized));
+}
+
+async function saveData(data) {
+  return withDataLock(async () => {
+    memData = normalizeData(JSON.parse(JSON.stringify(data)));
+    await saveDataToStorage(memData);
+  });
 }
 
 async function saveDataWithActivity(data) {
@@ -1018,7 +1041,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const entry = {
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        id: body.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
         kind: body.kind || 'photo',
         text: body.text || '',
         authorId: String(body.authorId),
@@ -1026,9 +1049,10 @@ const server = http.createServer(async (req, res) => {
         authorAvatar: body.authorAvatar || null,
         media: body.media || null,
         attachment: body.attachment || null,
-        createdAt: Date.now()
+        createdAt: body.createdAt || Date.now()
       };
-      data.posts.unshift(entry);
+      const exists = data.posts.find(p => p.id === entry.id);
+      if (!exists) data.posts.unshift(entry);
       if (data.posts.length > 300) data.posts = data.posts.slice(0, 300);
       await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, id: entry.id });

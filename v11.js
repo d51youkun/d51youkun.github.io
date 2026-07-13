@@ -1,7 +1,73 @@
 // v11 — 公開投稿フィード・友だち申請・スタンプ共有
 
 const FEED_READ_KEY = 'bluechat_feed_read';
+const FEED_CACHE_KEY = 'bluechat_feed_cache';
 const STICKER_SHARE_PREFIX = 'bc-sticker:';
+
+function getLocalPostCache() {
+  try {
+    const list = JSON.parse(localStorage.getItem(FEED_CACHE_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch (e) { return []; }
+}
+
+function saveLocalPostCache(posts) {
+  try {
+    localStorage.setItem(FEED_CACHE_KEY, JSON.stringify((posts || []).slice(0, 300)));
+  } catch (e) { /* quota */ }
+}
+
+function mergePostLists(...lists) {
+  const map = new Map();
+  lists.forEach(list => {
+    (list || []).forEach(p => {
+      if (p && p.id) map.set(p.id, p);
+    });
+  });
+  return [...map.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+function cachePostLocally(post) {
+  if (!post || !post.id) return;
+  const merged = mergePostLists(getLocalPostCache(), [post]);
+  saveLocalPostCache(merged);
+}
+
+let resyncPostsTimer = null;
+
+async function resyncOrphanPostsToServer() {
+  if (!getUsableSyncUrl()) return;
+  const user = getCurrentUser();
+  if (!user) return;
+  const local = getLocalPostCache();
+  if (!local.length) return;
+  const remote = await cloudRequest('/api/posts');
+  const server = Array.isArray(remote) ? remote : [];
+  const serverIds = new Set(server.map(p => p.id));
+  const orphans = local.filter(p => p.authorId === user.id && !serverIds.has(p.id));
+  for (const post of orphans.slice(0, 10)) {
+    const res = await cloudRequest('/api/posts', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: post.id,
+        kind: post.kind,
+        text: post.text || '',
+        authorId: post.authorId,
+        authorName: post.authorName,
+        authorAvatar: post.authorAvatar || null,
+        media: post.media || null,
+        attachment: post.attachment || null,
+        createdAt: post.createdAt || Date.now()
+      })
+    }, 300000);
+    if (res && res.ok) serverIds.add(res.id || post.id);
+  }
+}
+
+function scheduleResyncOrphanPosts() {
+  if (resyncPostsTimer) clearTimeout(resyncPostsTimer);
+  resyncPostsTimer = setTimeout(() => resyncOrphanPostsToServer(), 800);
+}
 
 function getFeedReadMap() {
   try {
@@ -17,9 +83,14 @@ function markFeedItemRead(itemId) {
 }
 
 async function fetchPublicPosts() {
-  if (!getUsableSyncUrl()) return [];
-  const list = await cloudRequest('/api/posts');
-  return Array.isArray(list) ? list : [];
+  const local = getLocalPostCache();
+  if (!getUsableSyncUrl()) return local;
+  const remote = await cloudRequest('/api/posts');
+  const server = Array.isArray(remote) ? remote : [];
+  const merged = mergePostLists(server, local);
+  saveLocalPostCache(merged);
+  if (server.length < local.length) scheduleResyncOrphanPosts();
+  return merged;
 }
 
 function getUsableSyncUrl() {
@@ -153,6 +224,18 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
       showToast('投稿に失敗しました。同期サーバー接続を確認してください');
       return false;
     }
+    const savedPost = {
+      id: res.id,
+      kind,
+      text: text.trim(),
+      authorId: user.id,
+      authorName: user.name,
+      authorAvatar: user.avatar || null,
+      media,
+      attachment,
+      createdAt: Date.now()
+    };
+    cachePostLocally(savedPost);
     showToast('投稿しました');
     await renderFeed();
     updateTabBadges();
@@ -171,6 +254,7 @@ async function deletePublicPost(postId) {
     method: 'DELETE',
     body: JSON.stringify({ userId: user.id })
   });
+  saveLocalPostCache(getLocalPostCache().filter(p => p.id !== postId));
   showToast('投稿を削除しました');
   renderFeed();
 }
@@ -603,7 +687,7 @@ renderAnnouncements = function () {
 const _handleRemoteActivityV11 = handleRemoteActivity;
 handleRemoteActivity = async function () {
   await _handleRemoteActivityV11();
-  if (currentTab === 'notices') await renderFeed();
+  await renderFeed();
   await renderFriendRequests();
 };
 
