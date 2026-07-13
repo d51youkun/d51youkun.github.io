@@ -199,6 +199,7 @@ function emptyData() {
     readReceipts: {},
     transfers: {},
     shortTransfers: {},
+    devicePairs: {},
     adminSessions: {},
     callSignals: {},
     feedback: [],
@@ -715,6 +716,66 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'reads' && parts[2]) {
       sendJson(res, 200, data.readReceipts[parts[2]] || {});
+      return;
+    }
+
+    // Device pair (QR multi-device sync)
+    if (!data.devicePairs) data.devicePairs = {};
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'device-pair' && parts[2]) {
+      const body = await readBody(req);
+      if (!body.userId) {
+        sendJson(res, 400, { error: 'user_required' });
+        return;
+      }
+      data.devicePairs[parts[2]] = {
+        userId: String(body.userId),
+        userName: body.userName || 'ユーザー',
+        passwordHash: body.passwordHash || null,
+        syncUrl: body.syncUrl || null,
+        expiresAt: body.expiresAt || Date.now() + 15 * 60 * 1000,
+        consumed: false,
+        consumedAt: null,
+        createdAt: Date.now()
+      };
+      await saveData(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'device-pair' && parts[2] && parts[3] === 'status') {
+      const entry = data.devicePairs[parts[2]];
+      if (!entry || Date.now() > entry.expiresAt) {
+        sendJson(res, 200, { consumed: false, exists: false });
+        return;
+      }
+      sendJson(res, 200, {
+        consumed: !!entry.consumed,
+        exists: true,
+        consumedAt: entry.consumedAt || null
+      });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'device-pair' && parts[2]) {
+      const entry = data.devicePairs[parts[2]];
+      if (!entry || Date.now() > entry.expiresAt) {
+        sendJson(res, 404, { error: 'expired' });
+        return;
+      }
+      sendJson(res, 200, {
+        userId: entry.userId,
+        userName: entry.userName,
+        requiresPassword: !!entry.passwordHash,
+        syncUrl: entry.syncUrl || null
+      });
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'device-pair' && parts[2] && parts[3] === 'consumed') {
+      const entry = data.devicePairs[parts[2]];
+      if (entry) {
+        entry.consumed = true;
+        entry.consumedAt = Date.now();
+        await saveDataWithActivity(data);
+      }
+      sendJson(res, 200, { ok: true });
       return;
     }
 

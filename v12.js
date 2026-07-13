@@ -306,27 +306,18 @@ function initV12Features() {
     await syncAccountAcrossDevices();
     showToast('全端末へ同期しました');
   });
-  bindClick('btn-login-other-device', () => showAccountLoginModal());
-  bindClick('btn-account-login-onboarding', () => showAccountLoginModal());
-  bindClick('btn-account-login-submit', async () => {
-    const uid = document.getElementById('input-account-login-id')?.value?.trim() || '';
-    const pw = document.getElementById('input-account-login-password')?.value || '';
-    if (!uid) {
-      showToast('ユーザーIDを入力してください');
-      return;
-    }
-    showToast('ログイン中…');
-    finishAccountLogin(await loginAccountOnDevice(uid, pw));
-  });
-  bindClick('btn-cloud-restore', () => showAccountLoginModal());
-  bindClick('btn-cloud-restore-onboarding', () => showAccountLoginModal());
+  bindClick('btn-show-device-pair-qr', () => showDevicePairQRModal());
+  bindClick('btn-scan-device-pair', () => showDevicePairScanModal());
+  bindClick('btn-account-login-onboarding', () => showDevicePairScanModal());
+  bindClick('btn-cloud-restore', () => showDevicePairScanModal());
+  bindClick('btn-cloud-restore-onboarding', () => showDevicePairScanModal());
   bindClick('btn-save-password', () => {
     const user = getCurrentUser();
     const pw = document.getElementById('input-account-password')?.value || '';
     setUserAccountPassword(user.id, pw);
     document.getElementById('input-account-password').value = '';
     showToast(pw
-      ? 'パスワードを設定しました。他の端末でも同じIDとパスワードでログインできます'
+      ? 'パスワードを設定しました。ペアリングQRを表示して他端末と接続できます'
       : 'パスワードを解除しました');
     updateAccountSyncStatusUI();
   });

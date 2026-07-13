@@ -17,10 +17,10 @@
         <p class="tagline">シンプルなチャットアプリ</p>
       </div>
       <div class="onboarding-form">
-        <p class="form-desc">お名前を入力して新規作成するか、すでに使っている端末からログインしてください。</p>
+        <p class="form-desc">お名前を入力して新規作成するか、すでに使っている端末のQRでペアリングしてください。</p>
         <input type="text" id="input-name" placeholder="名前を入力" maxlength="20" autocomplete="off">
         <button id="btn-start" class="btn-primary">はじめる</button>
-        <button type="button" id="btn-account-login-onboarding" class="btn-secondary" style="margin-top:12px">他の端末で使っている（ログイン）</button>
+        <button type="button" id="btn-account-login-onboarding" class="btn-secondary" style="margin-top:12px">他の端末とQRでペアリング</button>
         <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:8px">引き継ぎ（QR / コード）</button>
       </div>
       <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
@@ -123,13 +123,14 @@
       </div>
       <div class="profile-menu">
         <div class="sync-settings">
-          <p class="form-label">複数端末で使う（メールのように同期）</p>
-          <p class="qr-hint">パスワードを設定すると、iPad・Macなど別の端末でも同じトーク・友だち・プロフィールが見られます。</p>
+          <p class="form-label">複数端末で使う（QRペアリング）</p>
+          <p class="qr-hint">パスワードを設定し、メイン端末で「ペアリングQRを表示」→ 新しい端末でQRをスキャンすると同期が始まります。</p>
           <input type="password" id="input-account-password" placeholder="アカウントパスワード" autocomplete="new-password">
           <button type="button" id="btn-save-password" class="btn-secondary btn-sm">パスワードを保存</button>
           <p class="qr-hint" id="account-sync-status"></p>
+          <button type="button" id="btn-show-device-pair-qr" class="btn-primary btn-sm">ペアリングQRを表示</button>
+          <button type="button" id="btn-scan-device-pair" class="btn-secondary btn-sm">QRをスキャンしてペアリング</button>
           <button type="button" id="btn-account-sync-now" class="btn-secondary btn-sm">今すぐ全端末に同期</button>
-          <button type="button" id="btn-login-other-device" class="btn-secondary btn-sm">他の端末でログイン</button>
         </div>
         <div class="sync-settings">
           <p class="form-label">他の端末と同期</p>
@@ -169,8 +170,8 @@
         </button>
         <input type="file" id="input-backup-file" accept="*/*" hidden>
         <button type="button" id="btn-cloud-restore" class="menu-item">
-          <span class="menu-icon">☁️</span>
-          <span>他の端末でログイン（ユーザーID）</span>
+          <span class="menu-icon">📷</span>
+          <span>QRをスキャンしてペアリング</span>
         </button>
         <button id="btn-reset-data" class="menu-item danger">
           <span class="menu-icon">🗑️</span>
@@ -466,6 +467,18 @@
     </div>
   </div>
 
+  <!-- 端末ペアリングQR表示 -->
+  <div id="modal-device-pair-qr" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3>端末ペアリングQR</h3>
+      <p class="qr-hint">別の端末（iPad・Macなど）で「QRをスキャンしてペアリング」を選び、このQRを読み取ってください。スキャン後、自動で同期が始まります。QRは15分間有効です。</p>
+      <div id="device-pair-qr-canvas" class="qr-canvas-wrap"></div>
+      <p id="device-pair-code-text" class="invite-code-text"></p>
+      <button class="btn-close-modal">閉じる</button>
+    </div>
+  </div>
+
   <!-- 引き継ぎQR表示 -->
   <div id="modal-transfer-qr" class="modal hidden">
     <div class="modal-backdrop"></div>
@@ -495,30 +508,32 @@
     </div>
   </div>
 
-  <!-- 引き継ぎスキャン -->
+  <!-- 引き継ぎ・ペアリングスキャン -->
   <div id="modal-transfer-scan" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
-      <h3>引き継ぎ</h3>
-      <p><strong>おすすめ:</strong> ユーザーIDで復元（QR不要）</p>
+      <h3>QRで端末ペアリング</h3>
+      <p class="qr-hint">メイン端末のマイページで表示した「ペアリングQR」をスキャンしてください。パスワード設定済みの場合は入力が必要です。</p>
       <div class="sticker-import" style="margin-bottom:16px">
-        <p class="form-label">ユーザーIDでログイン</p>
-        <input type="text" id="input-transfer-user-id" placeholder="マイページに表示されるID" class="sync-settings input-url" autocomplete="off">
-        <input type="password" id="input-transfer-password" placeholder="パスワード（未設定なら空欄）" class="sync-settings input-url" autocomplete="current-password" style="margin-top:8px">
-        <button type="button" id="btn-restore-by-user-id" class="btn-primary btn-sm">IDでログイン</button>
+        <p class="form-label">パスワード（設定している場合）</p>
+        <input type="password" id="input-transfer-password" placeholder="ペアリング用パスワード" class="sync-settings input-url" autocomplete="current-password">
       </div>
-      <p class="qr-hint">または QR / コードで引き継ぎ</p>
       <div id="qr-reader-transfer-wrap" class="qr-reader-wrap">
         <div id="qr-reader-transfer"></div>
       </div>
       <button type="button" id="btn-start-transfer-camera" class="btn-primary">カメラを起動</button>
       <button type="button" id="btn-stop-transfer-camera" class="btn-secondary btn-sm">停止</button>
+      <p class="qr-hint" style="margin-top:12px">または引き継ぎコードで復元</p>
+      <div class="sticker-import" style="margin-top:8px">
+        <p class="form-label">ユーザーIDで復元（QRが使えない場合）</p>
+        <input type="text" id="input-transfer-user-id" placeholder="マイページに表示されるID" class="sync-settings input-url" autocomplete="off">
+        <button type="button" id="btn-restore-by-user-id" class="btn-secondary btn-sm">IDで復元</button>
+      </div>
       <div class="sticker-import" style="margin-top:16px">
         <p class="form-label">引き継ぎコードを入力</p>
-        <input type="text" id="input-transfer-code" placeholder="bluechat-transfer:... または短縮コード" class="sync-settings input-url" autocomplete="off">
-        <button type="button" id="btn-redeem-transfer-code" class="btn-secondary btn-sm">コードで引き継ぐ</button>
+        <input type="text" id="input-transfer-code" placeholder="bc-pair:... / bluechat-transfer:..." class="sync-settings input-url" autocomplete="off">
+        <button type="button" id="btn-redeem-transfer-code" class="btn-secondary btn-sm">コードで復元</button>
       </div>
-      <p class="qr-hint" style="margin-top:12px">QRの期限が切れた場合は、マイページの「クラウドから復元」（ユーザーID）も使えます（30日間保存）。</p>
       <button class="btn-close-modal">閉じる</button>
     </div>
   </div>

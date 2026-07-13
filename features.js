@@ -375,6 +375,12 @@ function finishAccountRestore(result) {
 async function redeemTransferCodeExt(code) {
   const raw = String(code || '').trim();
   if (!raw) return { error: 'コードを入力してください' };
+  if (typeof parseDevicePairFromScan === 'function') {
+    const pairCode = parseDevicePairFromScan(raw);
+    if (pairCode && typeof redeemDevicePairCode === 'function') {
+      return redeemDevicePairCode(pairCode);
+    }
+  }
   ensureSyncUrlForRestore();
 
   let transferCode = raw;
@@ -517,7 +523,6 @@ function showMainAdminTab() {
   const panel = document.getElementById('tab-admin');
   if (panel) panel.classList.remove('hidden');
   renderAdminUsers();
-  renderAdminConversations();
   if (typeof renderAdminFeedback === 'function') renderAdminFeedback();
 }
 
@@ -1012,6 +1017,10 @@ function parseTransferCodeFromScan(raw) {
 }
 
 function handleTransferRedeemResult(result) {
+  if (result && result.source === 'pair' && typeof handleDevicePairResult === 'function') {
+    handleDevicePairResult(result);
+    return;
+  }
   if (result.error) {
     showToast(result.error);
     transferScanHandled = false;
@@ -1762,7 +1771,6 @@ function initExtendedFeatures() {
       document.querySelectorAll('#screen-main .tab-content').forEach(c => c.classList.add('hidden'));
       document.getElementById('tab-admin').classList.remove('hidden');
       renderAdminUsers();
-      renderAdminConversations();
     });
   });
 
