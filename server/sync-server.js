@@ -9,7 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8766;
-const SERVER_VERSION = '2026-07-13-v27';
+const SERVER_VERSION = '2026-07-13-v28';
 
 function resolveWritableDataFile() {
   const legacy = path.join(__dirname, 'data.json');
@@ -60,6 +60,13 @@ function resolveMediaDir() {
 const MEDIA_DIR = resolveMediaDir();
 const MEDIA_KEY_PREFIX = 'bluechat:media:';
 const POST_MEDIA_MAX_B64 = 96 * 1024 * 1024;
+const POST_MEDIA_MAX_RAW = 80 * 1024 * 1024;
+const POST_INLINE_VIDEO_MAX_B64 = 12 * 1024 * 1024;
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token, X-Bluechat-Author, X-Bluechat-Mime, X-Bluechat-Filename, X-Bluechat-Encoding'
+};
 
 function normalizePostMedia(media) {
   if (!media) return null;
@@ -77,8 +84,16 @@ function normalizePostMedia(media) {
 function sanitizePostMediaForSave(media, kind) {
   const normalized = normalizePostMedia(media);
   if (kind === 'video') {
-    if (!normalized || !normalized.mediaId) return null;
-    return normalized;
+    if (normalized?.mediaId) return normalized;
+    if (media?.data && String(media.data).length <= POST_INLINE_VIDEO_MAX_B64) {
+      return {
+        type: 'video',
+        mimeType: media.mimeType || 'video/mp4',
+        fileName: media.fileName || 'video.mp4',
+        data: media.data
+      };
+    }
+    return null;
   }
   if (normalized?.type === 'video' && normalized.data && String(normalized.data).length > 400000) {
     return normalized.mediaId ? normalizePostMedia(normalized) : null;
@@ -442,23 +457,35 @@ function readBody(req) {
   });
 }
 
+function readBodyRaw(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error('too_large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 function sendJson(res, status, data) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token'
+    ...CORS_HEADERS
   });
   res.end(JSON.stringify(data));
 }
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token'
-    });
+    res.writeHead(204, CORS_HEADERS);
     res.end();
     return;
   }
@@ -1240,6 +1267,38 @@ const server = http.createServer(async (req, res) => {
     };
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] === 'media' && parts[3]) {
       const mediaId = String(parts[3] || '').slice(0, 120);
+      const contentType = String(req.headers['content-type'] || '').toLowerCase();
+      const isRaw = contentType.includes('octet-stream') ||
+        String(req.headers['x-bluechat-encoding'] || '').toLowerCase() === 'raw';
+      if (isRaw) {
+        const authorId = String(req.headers['x-bluechat-author'] || '');
+        if (!authorId) {
+          sendJson(res, 400, { error: 'author_required' });
+          return;
+        }
+        try {
+          const buf = await readBodyRaw(req, POST_MEDIA_MAX_RAW);
+          const mimeType = String(req.headers['x-bluechat-mime'] || 'video/mp4');
+          const fileName = String(req.headers['x-bluechat-filename'] || 'video.mp4');
+          const data = 'data:' + mimeType + ';base64,' + buf.toString('base64');
+          if (data.length > POST_MEDIA_MAX_B64) {
+            sendJson(res, 413, { error: 'too_large' });
+            return;
+          }
+          await savePostMediaEntry(mediaId, {
+            mimeType,
+            fileName,
+            kind: 'video',
+            authorId,
+            createdAt: Date.now(),
+            data
+          });
+          sendJson(res, 200, { ok: true, mediaId });
+        } catch (e) {
+          sendJson(res, e?.message === 'too_large' ? 413 : 500, { error: e?.message || 'upload_failed' });
+        }
+        return;
+      }
       const body = await readBody(req);
       if (!body.authorId) {
         sendJson(res, 400, { error: 'author_required' });
@@ -1379,7 +1438,7 @@ const server = http.createServer(async (req, res) => {
         dislikes: {},
         comments: []
       });
-      if (entry.kind === 'video' && (!entry.media || !entry.media.mediaId)) {
+      if (entry.kind === 'video' && (!entry.media || (!entry.media.mediaId && !entry.media.data))) {
         sendJson(res, 400, { error: 'video_media_required' });
         return;
       }
