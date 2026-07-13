@@ -60,6 +60,13 @@ function loadDotEnv() {
 
 loadDotEnv();
 
+// Upstash Redis (REST API) 経由の永続化。Render無料プランはディスクが消えるため、
+// UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN を設定すると自動でこちらを使う。
+const UPSTASH_URL = (process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/$/, '');
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+const USE_UPSTASH = !!(UPSTASH_URL && UPSTASH_TOKEN);
+const UPSTASH_KEY = 'bluechat:data';
+
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const MODERATOR_EMAIL = (process.env.MODERATOR_EMAIL || '').trim().toLowerCase();
@@ -181,21 +188,54 @@ function createTransferEntry(data, backup, hours) {
   return { token, shortCode, code: 'bluechat-transfer:' + token, expiresAt };
 }
 
-function loadData() {
+function emptyData() {
+  return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, shortTransfers: {}, adminSessions: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {}, announcements: [], announcementReads: {}, activityVersion: 0, titlePresets: [] };
+}
+
+// Upstash REST の pipeline エンドポイントに1コマンド投げるヘルパー
+async function upstashCommand(command) {
+  const res = await fetch(UPSTASH_URL + '/', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + UPSTASH_TOKEN,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(command)
+  });
+  if (!res.ok) throw new Error('Upstash HTTP ' + res.status);
+  const json = await res.json();
+  if (json.error) throw new Error('Upstash error: ' + json.error);
+  return json.result;
+}
+
+async function loadData() {
+  if (USE_UPSTASH) {
+    try {
+      const raw = await upstashCommand(['GET', UPSTASH_KEY]);
+      return raw ? JSON.parse(raw) : emptyData();
+    } catch (e) {
+      console.error('Upstash loadData failed, falling back to empty data:', e.message);
+      return emptyData();
+    }
+  }
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch (e) {
-    return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, shortTransfers: {}, adminSessions: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {}, announcements: [], announcementReads: {}, activityVersion: 0, titlePresets: [] };
+    return emptyData();
   }
 }
 
-function saveData(data) {
+async function saveData(data) {
+  if (USE_UPSTASH) {
+    await upstashCommand(['SET', UPSTASH_KEY, JSON.stringify(data)]);
+    return;
+  }
   fs.writeFileSync(DATA_FILE, JSON.stringify(data));
 }
 
-function saveDataWithActivity(data) {
+async function saveDataWithActivity(data) {
   data.activityVersion = (data.activityVersion || 0) + 1;
-  saveData(data);
+  await saveData(data);
 }
 
 function readBody(req) {
@@ -250,14 +290,29 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'health') {
       let writable = true;
-      try {
-        const probe = path.join(path.dirname(DATA_FILE), '.bluechat-health-probe');
-        fs.writeFileSync(probe, String(Date.now()));
-        fs.unlinkSync(probe);
-      } catch (e) {
-        writable = false;
+      if (USE_UPSTASH) {
+        try {
+          await upstashCommand(['SET', 'bluechat:health-probe', String(Date.now())]);
+        } catch (e) {
+          writable = false;
+        }
+      } else {
+        try {
+          const probe = path.join(path.dirname(DATA_FILE), '.bluechat-health-probe');
+          fs.writeFileSync(probe, String(Date.now()));
+          fs.unlinkSync(probe);
+        } catch (e) {
+          writable = false;
+        }
       }
-      sendJson(res, 200, { ok: writable, service: 'BlueChat Sync', version: SERVER_VERSION, writable, dataFile: DATA_FILE });
+      sendJson(res, 200, {
+        ok: writable,
+        service: 'BlueChat Sync',
+        version: SERVER_VERSION,
+        writable,
+        storage: USE_UPSTASH ? 'upstash' : 'file',
+        dataFile: USE_UPSTASH ? null : DATA_FILE
+      });
       return;
     }
 
@@ -268,14 +323,14 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 401, { error: 'invalid' });
         return;
       }
-      const data = loadData();
+      const data = await loadData();
       const token = issueAdminSession(data, role);
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, { ok: true, role, token });
       return;
     }
 
-    const data = loadData();
+    const data = await loadData();
 
     const adminToken = req.headers['x-admin-token'] || req.headers['X-Admin-Token'] || '';
     const adminRoleFromToken = verifyAdminSession(data, adminToken, false);
@@ -288,7 +343,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 401, { error: 'unauthorized' });
         return;
       }
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, version: data.activityVersion || 0 });
       return;
     }
@@ -313,7 +368,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const entry = createTransferEntry(data, backup, body.hours || 72);
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, {
         ok: true,
         code: entry.code,
@@ -360,8 +415,8 @@ const server = http.createServer(async (req, res) => {
         if (!data.userConversations[memberId]) data.userConversations[memberId] = {};
         data.userConversations[memberId][convId] = true;
       });
-      if (isNewConv) saveDataWithActivity(data);
-      else saveData(data);
+      if (isNewConv) await saveDataWithActivity(data);
+      else await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -370,7 +425,7 @@ const server = http.createServer(async (req, res) => {
       const convId = parts[2];
       const msgId = parts[3];
       if (data.messages[convId]) delete data.messages[convId][msgId];
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -389,8 +444,8 @@ const server = http.createServer(async (req, res) => {
       if (!data.messages[convId]) data.messages[convId] = {};
       const isNew = !data.messages[convId][msgId];
       data.messages[convId][msgId] = { ...msg, id: msgId };
-      if (isNew) saveDataWithActivity(data);
-      else saveData(data);
+      if (isNew) await saveDataWithActivity(data);
+      else await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -437,8 +492,8 @@ const server = http.createServer(async (req, res) => {
         || prev.premium !== user.premium
         || prev.superPremium !== user.superPremium
         || JSON.stringify(prev.title) !== JSON.stringify(user.title);
-      if (moderationChanged) saveDataWithActivity(data);
-      else saveData(data);
+      if (moderationChanged) await saveDataWithActivity(data);
+      else await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -504,7 +559,7 @@ const server = http.createServer(async (req, res) => {
       Object.keys(data.callSignals || {}).forEach(uid => {
         if (String(uid) === userId) delete data.callSignals[uid];
       });
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -541,7 +596,7 @@ const server = http.createServer(async (req, res) => {
         if (!data.userConversations[uid]) data.userConversations[uid] = {};
         data.userConversations[uid][convId] = true;
       });
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -559,7 +614,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!data.readReceipts[parts[2]]) data.readReceipts[parts[2]] = {};
       data.readReceipts[parts[2]][parts[3]] = body.timestamp || Date.now();
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -578,7 +633,7 @@ const server = http.createServer(async (req, res) => {
         consumed: false,
         createdAt: Date.now()
       };
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -599,7 +654,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'transfer' && parts[2] && parts[3] === 'consumed') {
       if (data.transfers[parts[2]]) {
         data.transfers[parts[2]].consumed = true;
-        saveData(data);
+        await saveData(data);
       }
       sendJson(res, 200, { ok: true });
       return;
@@ -615,7 +670,7 @@ const server = http.createServer(async (req, res) => {
       if (data.callSignals[body.to].length > 100) {
         data.callSignals[body.to] = data.callSignals[body.to].slice(-50);
       }
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -642,7 +697,7 @@ const server = http.createServer(async (req, res) => {
         text: String(p.text || '').trim().slice(0, 20),
         color: String(p.color || '#1a6fd4').trim()
       })).filter(p => p.text);
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, presets: data.titlePresets });
       return;
     }
@@ -655,7 +710,7 @@ const server = http.createServer(async (req, res) => {
         packs: body.packs || [],
         updatedAt: body.updatedAt || Date.now()
       };
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -673,7 +728,7 @@ const server = http.createServer(async (req, res) => {
         updatedAt: body.updatedAt || Date.now(),
         expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
       };
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -692,7 +747,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'presence' && parts[2]) {
       const body = await readBody(req);
       data.presence[parts[2]] = { lastSeen: body.lastSeen || Date.now() };
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -817,7 +872,7 @@ const server = http.createServer(async (req, res) => {
       };
       data.announcements.unshift(entry);
       if (data.announcements.length > 200) data.announcements = data.announcements.slice(0, 200);
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, id: entry.id });
       return;
     }
@@ -833,7 +888,7 @@ const server = http.createServer(async (req, res) => {
         text: body.text || '',
         createdAt: Date.now()
       });
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -847,13 +902,13 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       ann.comments = ann.comments.filter(c => c.id !== parts[4]);
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
     if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'announcements' && parts[2]) {
       data.announcements = data.announcements.filter(a => a.id !== parts[2]);
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -862,7 +917,7 @@ const server = http.createServer(async (req, res) => {
       const annId = parts[3];
       if (!data.announcementReads[userId]) data.announcementReads[userId] = {};
       data.announcementReads[userId][annId] = Date.now();
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -889,13 +944,13 @@ const server = http.createServer(async (req, res) => {
       };
       data.feedback.push(entry);
       if (data.feedback.length > 500) data.feedback = data.feedback.slice(-200);
-      saveDataWithActivity(data);
+      await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, id: entry.id });
       return;
     }
     if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'feedback' && parts[2]) {
       data.feedback = (data.feedback || []).filter(f => f.id !== parts[2]);
-      saveData(data);
+      await saveData(data);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -908,6 +963,11 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`BlueChat sync server: http://0.0.0.0:${PORT}`);
-  console.log('Data file:', DATA_FILE);
+  if (USE_UPSTASH) {
+    console.log('Storage: Upstash Redis (persistent across restarts) —', UPSTASH_URL);
+  } else {
+    console.log('Storage: local file (LOST on every Render free-tier restart/spin-down):', DATA_FILE);
+    console.log('  → Set UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN to fix this.');
+  }
   console.log('Health check: GET /api/health');
 });
