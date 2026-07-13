@@ -2478,6 +2478,7 @@ function init() {
       currentTab = tab.dataset.tab;
       document.querySelectorAll('#screen-main .tab-content').forEach(c => c.classList.add('hidden'));
       document.getElementById('tab-' + currentTab).classList.remove('hidden');
+      if (currentTab === 'notices' && typeof renderFeed === 'function') renderFeed();
     });
   });
 

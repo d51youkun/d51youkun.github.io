@@ -1156,8 +1156,16 @@ const server = http.createServer(async (req, res) => {
 
     // Public feed posts (photo / video / notice)
     if (!data.posts) data.posts = [];
+    const normalizePostEntry = (p) => {
+      if (!p) return p;
+      if (!p.likes || typeof p.likes !== 'object') p.likes = {};
+      if (!p.dislikes || typeof p.dislikes !== 'object') p.dislikes = {};
+      if (!Array.isArray(p.comments)) p.comments = [];
+      return p;
+    };
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts') {
-      const list = [...data.posts].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      const list = data.posts.map(normalizePostEntry)
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       sendJson(res, 200, list.slice(0, 300));
       return;
     }
@@ -1167,7 +1175,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { error: 'author_required' });
         return;
       }
-      const entry = {
+      const entry = normalizePostEntry({
         id: body.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
         kind: body.kind || 'photo',
         text: body.text || '',
@@ -1176,13 +1184,80 @@ const server = http.createServer(async (req, res) => {
         authorAvatar: body.authorAvatar || null,
         media: body.media || null,
         attachment: body.attachment || null,
-        createdAt: body.createdAt || Date.now()
-      };
+        createdAt: body.createdAt || Date.now(),
+        likes: {},
+        dislikes: {},
+        comments: []
+      });
       const exists = data.posts.find(p => p.id === entry.id);
       if (!exists) data.posts.unshift(entry);
       if (data.posts.length > 300) data.posts = data.posts.slice(0, 300);
       await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, id: entry.id });
+      return;
+    }
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && parts[3] === 'vote') {
+      const body = await readBody(req);
+      const userId = String(body.userId || '');
+      const vote = body.vote;
+      if (!userId) {
+        sendJson(res, 400, { error: 'user_required' });
+        return;
+      }
+      const post = data.posts.find(p => p.id === parts[2]);
+      if (!post) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      normalizePostEntry(post);
+      delete post.likes[userId];
+      delete post.dislikes[userId];
+      if (vote === 'up') post.likes[userId] = Date.now();
+      else if (vote === 'down') post.dislikes[userId] = Date.now();
+      await saveDataWithActivity(data);
+      sendJson(res, 200, {
+        ok: true,
+        likes: Object.keys(post.likes).length,
+        dislikes: Object.keys(post.dislikes).length
+      });
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && parts[3] === 'comments') {
+      const body = await readBody(req);
+      const post = data.posts.find(p => p.id === parts[2]);
+      if (!post) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      normalizePostEntry(post);
+      post.comments.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 4),
+        userId: String(body.userId || ''),
+        userName: body.userName || 'ユーザー',
+        userAvatar: body.userAvatar || null,
+        text: String(body.text || '').slice(0, 2000),
+        createdAt: Date.now()
+      });
+      if (post.comments.length > 500) post.comments = post.comments.slice(-500);
+      await saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && parts[3] === 'comments' && parts[4]) {
+      const body = await readBody(req);
+      const post = data.posts.find(p => p.id === parts[2]);
+      if (!post) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      const comment = (post.comments || []).find(c => c.id === parts[4]);
+      if (!comment || String(comment.userId) !== String(body.userId || '')) {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      post.comments = post.comments.filter(c => c.id !== parts[4]);
+      await saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true });
       return;
     }
     if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2]) {
