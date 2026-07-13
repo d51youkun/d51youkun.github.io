@@ -419,7 +419,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13-stable-v22');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13-stable-v23');
   } catch (e) { /* ignore */ }
 }
 
@@ -2262,7 +2262,8 @@ function setupGlobalClickDelegation() {
       if (typeof showCreatePostModal === 'function') showCreatePostModal('notice');
     },
     'btn-refresh-feed': () => {
-      if (typeof renderFeed === 'function') renderFeed();
+      if (typeof refreshFeedFromServer === 'function') refreshFeedFromServer();
+      else if (typeof renderFeed === 'function') renderFeed();
     },
     'btn-submit-post': (e) => {
       if (e && typeof e.preventDefault === 'function') e.preventDefault();

@@ -1522,6 +1522,26 @@ input:focus {
 .notice-comment-input { flex: 1; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--gray-300); }
 
 /* v11: public feed */
+#tab-notices { position: relative; padding-bottom: 52px; }
+.feed-refresh-status {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  padding: 12px 16px calc(12px + var(--safe-bottom));
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--blue-primary);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
+  transition: opacity 0.2s ease;
+}
+.feed-refresh-status.hidden { display: none; }
+.feed-refresh-status.loading { background: var(--blue-primary); }
+.feed-refresh-status.done { background: #16a34a; }
+.feed-refresh-status.error { background: #dc2626; }
 .feed-action-bar { flex-wrap: wrap; gap: 8px; }
 .feed-list { padding: 12px; }
 .feed-item {
