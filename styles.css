@@ -775,6 +775,7 @@ input:focus {
 
 .modal-content {
   position: relative;
+  z-index: 1;
   background: var(--white);
   border-radius: var(--radius) var(--radius) 0 0;
   padding: 24px;

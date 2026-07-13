@@ -17,9 +17,58 @@ function markFeedItemRead(itemId) {
 }
 
 async function fetchPublicPosts() {
-  if (!getSyncUrl()) return [];
+  if (!getUsableSyncUrl()) return [];
   const list = await cloudRequest('/api/posts');
   return Array.isArray(list) ? list : [];
+}
+
+function getUsableSyncUrl() {
+  const candidates = typeof getSyncUrlCandidates === 'function'
+    ? getSyncUrlCandidates()
+    : [getSyncUrl()].filter(Boolean);
+  const usable = candidates.filter(u =>
+    typeof isMixedContentBlocked !== 'function' || !isMixedContentBlocked(u)
+  );
+  return usable[0] || '';
+}
+
+let postSubmitInProgress = false;
+
+async function submitPublicPostFromModal() {
+  if (postSubmitInProgress) return;
+  const submitBtn = document.getElementById('btn-submit-post');
+  const kind = document.getElementById('input-post-kind')?.value || 'photo';
+  const text = document.getElementById('input-post-text')?.value || '';
+  const mediaFile = document.getElementById('input-post-media')?.files?.[0];
+  const attachFile = document.getElementById('input-post-attachment')?.files?.[0];
+
+  postSubmitInProgress = true;
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = '投稿中…';
+  }
+  showToast('投稿中…', 1200);
+
+  try {
+    const ok = await createPublicPost(kind, text, mediaFile, attachFile);
+    if (ok) {
+      hideModal('modal-create-post');
+      const textEl = document.getElementById('input-post-text');
+      const mediaEl = document.getElementById('input-post-media');
+      const attachEl = document.getElementById('input-post-attachment');
+      if (textEl) textEl.value = '';
+      if (mediaEl) mediaEl.value = '';
+      if (attachEl) attachEl.value = '';
+    }
+  } catch (e) {
+    showToast(e?.message || '投稿に失敗しました');
+  } finally {
+    postSubmitInProgress = false;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '投稿する';
+    }
+  }
 }
 
 async function compressPostImage(file) {
@@ -65,8 +114,12 @@ async function readPostAttachmentFile(file) {
 
 async function createPublicPost(kind, text, mediaFile, attachmentFile) {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) {
-    showToast('同期サーバーが必要です');
+  if (!user) {
+    showToast('ログインが必要です');
+    return false;
+  }
+  if (!getUsableSyncUrl()) {
+    showToast('同期サーバーに接続できません。マイページで設定を確認してください');
     return false;
   }
   try {
@@ -84,7 +137,7 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
       showToast('説明・写真・動画・ファイルのいずれかを入力してください');
       return false;
     }
-    await cloudRequestExt('/api/posts', {
+    const res = await cloudRequest('/api/posts', {
       method: 'POST',
       body: JSON.stringify({
         kind,
@@ -96,6 +149,10 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
         attachment
       })
     }, 300000);
+    if (!res || !res.ok) {
+      showToast('投稿に失敗しました。同期サーバー接続を確認してください');
+      return false;
+    }
     showToast('投稿しました');
     await renderFeed();
     updateTabBadges();
@@ -619,23 +676,6 @@ function initV11Features() {
   if (postKind) {
     postKind.addEventListener('change', () => updateCreatePostForm(postKind.value));
   }
-
-  bindClick('btn-submit-post', async () => {
-    const kind = document.getElementById('input-post-kind')?.value || 'photo';
-    const text = document.getElementById('input-post-text')?.value || '';
-    const mediaFile = document.getElementById('input-post-media')?.files?.[0];
-    const attachFile = document.getElementById('input-post-attachment')?.files?.[0];
-    const ok = await createPublicPost(kind, text, mediaFile, attachFile);
-    if (ok) {
-      hideModal('modal-create-post');
-      const textEl = document.getElementById('input-post-text');
-      const mediaEl = document.getElementById('input-post-media');
-      const attachEl = document.getElementById('input-post-attachment');
-      if (textEl) textEl.value = '';
-      if (mediaEl) mediaEl.value = '';
-      if (attachEl) attachEl.value = '';
-    }
-  });
 
   bindClick('btn-import-sticker-share', () => {
     const code = document.getElementById('input-sticker-share-code')?.value || '';

@@ -1951,6 +1951,26 @@ function setupGlobalClickDelegation() {
         document.getElementById('input-custom-sticker-images').value = '';
         renderStickerPicker();
       }
+    },
+    'btn-create-post': () => {
+      if (typeof showCreatePostModal === 'function') showCreatePostModal('photo');
+    },
+    'btn-create-post-video': () => {
+      if (typeof showCreatePostModal === 'function') showCreatePostModal('video');
+    },
+    'btn-create-post-notice': () => {
+      if (typeof showCreatePostModal === 'function') showCreatePostModal('notice');
+    },
+    'btn-refresh-feed': () => {
+      if (typeof renderFeed === 'function') renderFeed();
+    },
+    'btn-submit-post': (e) => {
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      if (typeof submitPublicPostFromModal === 'function') {
+        submitPublicPostFromModal();
+      } else {
+        showToast('投稿機能の読み込みに失敗しました。ページを再読み込みしてください');
+      }
     }
   };
 
@@ -1958,7 +1978,7 @@ function setupGlobalClickDelegation() {
     const el = e.target.closest('button[id], a[id]');
     if (!el || !actions[el.id]) return;
     if (el.tagName === 'A') e.preventDefault();
-    actions[el.id]();
+    actions[el.id](e);
   });
 }
 
