@@ -270,7 +270,10 @@
         <div id="qr-scan-idle">
           <div class="qr-scan-placeholder">📷</div>
           <button type="button" id="btn-start-camera" class="btn-primary">カメラを起動する</button>
+          <button type="button" id="btn-scan-invite-image" class="btn-secondary btn-sm">画像から読み取る</button>
+          <input type="file" id="input-invite-image" accept="image/*" class="hidden" />
           <p class="qr-hint" id="qr-secure-hint"></p>
+          <p class="qr-hint">うまく読めない場合は「コード入力」タブで bc:... を貼り付けてください</p>
         </div>
         <div id="qr-scan-active" class="hidden">
           <div class="qr-reader-wrap">
@@ -287,6 +290,7 @@
       </div>
       <div id="modal-tab-show" class="modal-tab-content hidden">
         <p>このQRコードまたは下のコードを友だちに共有してください。<br>有効期限は24時間です。</p>
+        <p class="qr-hint">画面のQRが読み取りにくい場合は、下のコードをコピーして送ってください</p>
         <div class="qr-display-wrap">
           <div id="qr-canvas" class="qr-canvas-wrap"></div>
           <p class="qr-user-name" id="qr-user-name"></p>

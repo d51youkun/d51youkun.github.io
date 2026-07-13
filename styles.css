@@ -863,7 +863,7 @@ input:focus {
 }
 
 #qr-canvas {
-  min-height: 220px;
+  min-height: 280px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -873,6 +873,9 @@ input:focus {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   display: block;
+  width: 280px !important;
+  height: 280px !important;
+  image-rendering: pixelated;
 }
 
 .qr-user-name {
@@ -932,7 +935,12 @@ input:focus {
 
 #qr-scan-idle .btn-primary {
   max-width: 280px;
-  margin: 0 auto;
+  margin: 0 auto 8px;
+}
+
+#qr-scan-idle .btn-secondary {
+  max-width: 280px;
+  margin: 0 auto 8px;
 }
 
 #qr-scan-active {
