@@ -1551,6 +1551,44 @@ input:focus {
 .ios-webapp .feed-action-bar button {
   cursor: pointer;
 }
+
+.post-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(10, 18, 32, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.post-upload-panel {
+  width: 100%;
+  max-width: 360px;
+  padding: 20px;
+  text-align: center;
+}
+.post-upload-status {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text-primary);
+}
+.post-upload-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--gray-200);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.post-upload-bar-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--blue-primary), var(--blue-light));
+  transition: width 0.2s ease;
+}
 .feed-list { padding: 12px; }
 .feed-item {
   padding: 16px;

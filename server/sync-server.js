@@ -9,7 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8766;
-const SERVER_VERSION = '2026-07-13-v28';
+const SERVER_VERSION = '2026-07-13-v29';
 
 function resolveWritableDataFile() {
   const legacy = path.join(__dirname, 'data.json');
@@ -65,8 +65,9 @@ const POST_INLINE_VIDEO_MAX_B64 = 12 * 1024 * 1024;
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token, X-Bluechat-Author, X-Bluechat-Mime, X-Bluechat-Filename, X-Bluechat-Encoding'
+  'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token, X-Bluechat-Author, X-Bluechat-Mime, X-Bluechat-Filename, X-Bluechat-Encoding, X-Bluechat-Total-Chunks, X-Bluechat-Chunk-Index'
 };
+const POST_MEDIA_CHUNK_MAX = 3 * 1024 * 1024;
 
 function normalizePostMedia(media) {
   if (!media) return null;
@@ -125,6 +126,20 @@ function decodeMediaDataUrl(dataStr) {
   const m = /^data:([^;]+);base64,(.+)$/s.exec(raw);
   if (m) return { mime: m[1], buffer: Buffer.from(m[2], 'base64') };
   return { mime: 'application/octet-stream', buffer: Buffer.from(raw, 'base64') };
+}
+
+async function finalizeMediaChunks(entry, total) {
+  const buffers = [];
+  for (let i = 0; i < total; i++) {
+    if (!entry.chunks || entry.chunks[i] === undefined) return false;
+    buffers.push(Buffer.from(entry.chunks[i], 'base64'));
+  }
+  const merged = Buffer.concat(buffers);
+  const data = 'data:' + (entry.mimeType || 'video/mp4') + ';base64,' + merged.toString('base64');
+  if (data.length > POST_MEDIA_MAX_B64) throw new Error('too_large');
+  entry.data = data;
+  delete entry.chunks;
+  return true;
 }
 
 function loadDotEnv() {
@@ -1265,6 +1280,57 @@ const server = http.createServer(async (req, res) => {
       if (p.media) p.media = normalizePostMedia(p.media);
       return p;
     };
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] === 'media' && parts[3] && parts[4] === 'chunk' && parts[5] !== undefined) {
+      const mediaId = String(parts[3] || '').slice(0, 120);
+      const chunkIndex = parseInt(parts[5], 10);
+      const totalChunks = parseInt(String(req.headers['x-bluechat-total-chunks'] || '0'), 10);
+      const authorId = String(req.headers['x-bluechat-author'] || '');
+      if (!authorId || !Number.isFinite(chunkIndex) || chunkIndex < 0) {
+        sendJson(res, 400, { error: 'invalid_chunk' });
+        return;
+      }
+      if (!totalChunks || totalChunks < 1 || totalChunks > 200) {
+        sendJson(res, 400, { error: 'invalid_total_chunks' });
+        return;
+      }
+      try {
+        const buf = await readBodyRaw(req, POST_MEDIA_CHUNK_MAX);
+        let entry = await loadPostMediaEntry(mediaId);
+        if (!entry || !entry.data) {
+          if (!entry) {
+            entry = {
+              mimeType: String(req.headers['x-bluechat-mime'] || 'video/mp4'),
+              fileName: String(req.headers['x-bluechat-filename'] || 'video.mp4'),
+              kind: 'video',
+              authorId,
+              createdAt: Date.now(),
+              chunks: {}
+            };
+          }
+          if (!entry.chunks) entry.chunks = {};
+          entry.chunks[chunkIndex] = buf.toString('base64');
+          let complete = false;
+          let ready = true;
+          for (let i = 0; i < totalChunks; i++) {
+            if (entry.chunks[i] === undefined) { ready = false; break; }
+          }
+          if (ready) {
+            complete = await finalizeMediaChunks(entry, totalChunks);
+            if (!complete) {
+              sendJson(res, 400, { error: 'incomplete_chunks' });
+              return;
+            }
+          }
+          await savePostMediaEntry(mediaId, entry);
+          sendJson(res, 200, { ok: true, mediaId, chunkIndex, totalChunks, complete });
+        } else {
+          sendJson(res, 200, { ok: true, mediaId, complete: true });
+        }
+      } catch (e) {
+        sendJson(res, e?.message === 'too_large' ? 413 : 500, { error: e?.message || 'chunk_failed' });
+      }
+      return;
+    }
     if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] === 'media' && parts[3]) {
       const mediaId = String(parts[3] || '').slice(0, 120);
       const contentType = String(req.headers['content-type'] || '').toLowerCase();
