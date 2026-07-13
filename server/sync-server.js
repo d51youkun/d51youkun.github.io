@@ -583,7 +583,11 @@ const server = http.createServer(async (req, res) => {
         || prev.premium !== user.premium
         || prev.superPremium !== user.superPremium
         || JSON.stringify(prev.title) !== JSON.stringify(user.title);
-      if (moderationChanged) await saveDataWithActivity(data);
+      const profileChanged = prev.avatar !== user.avatar
+        || (prev.avatarUpdatedAt || 0) !== (user.avatarUpdatedAt || 0)
+        || prev.name !== user.name
+        || prev.passwordHash !== user.passwordHash;
+      if (moderationChanged || profileChanged) await saveDataWithActivity(data);
       else await saveData(data);
       sendJson(res, 200, { ok: true });
       return;

@@ -335,6 +335,14 @@ async function restoreAccountByUserId(userId, password) {
     }
   }
 
+  const remoteUser = await cloudFetchUser(uid);
+  if (remoteUser && remoteUser.passwordHash) {
+    if (password === null || password === undefined) return { error: 'パスワードが必要です' };
+    if (remoteUser.passwordHash !== simpleHash(password || '')) {
+      return { error: 'パスワードが正しくありません' };
+    }
+  }
+
   const bundle = await pullServerSyncBundle(uid);
   if (bundle && bundle.data) {
     try {
@@ -1041,9 +1049,16 @@ function restoreByUserIdFromModal() {
     showToast('ユーザーIDを入力してください');
     return;
   }
-  const password = prompt('引き継ぎパスワード（未設定なら空欄でOK）');
-  if (password === null) return;
+  const pwEl = document.getElementById('input-transfer-password');
+  const password = pwEl ? pwEl.value : '';
   showToast('サーバーから復元中…');
+  if (typeof loginAccountOnDevice === 'function') {
+    loginAccountOnDevice(userId, password).then(result => {
+      if (typeof finishAccountLogin === 'function') finishAccountLogin(result);
+      else finishAccountRestore(result);
+    });
+    return;
+  }
   restoreAccountByUserId(userId, password).then(finishAccountRestore);
 }
 

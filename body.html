@@ -17,11 +17,11 @@
         <p class="tagline">シンプルなチャットアプリ</p>
       </div>
       <div class="onboarding-form">
-        <p class="form-desc">お名前を入力してください。<br>別のブラウザや端末で使っていた場合は、下の「復元」から同じアカウントを読み込めます。</p>
+        <p class="form-desc">お名前を入力して新規作成するか、すでに使っている端末からログインしてください。</p>
         <input type="text" id="input-name" placeholder="名前を入力" maxlength="20" autocomplete="off">
         <button id="btn-start" class="btn-primary">はじめる</button>
-        <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:12px">引き継ぎ（QR / コード）</button>
-        <button type="button" id="btn-cloud-restore-onboarding" class="btn-secondary" style="margin-top:8px">あとから復元（ユーザーID）</button>
+        <button type="button" id="btn-account-login-onboarding" class="btn-secondary" style="margin-top:12px">他の端末で使っている（ログイン）</button>
+        <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:8px">引き継ぎ（QR / コード）</button>
       </div>
       <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
     </div>
@@ -123,9 +123,13 @@
       </div>
       <div class="profile-menu">
         <div class="sync-settings">
-          <p class="form-label">アカウントパスワード（引き継ぎ用・任意）</p>
-          <input type="password" id="input-account-password" placeholder="新しいパスワード" autocomplete="new-password">
+          <p class="form-label">複数端末で使う（メールのように同期）</p>
+          <p class="qr-hint">パスワードを設定すると、iPad・Macなど別の端末でも同じトーク・友だち・プロフィールが見られます。</p>
+          <input type="password" id="input-account-password" placeholder="アカウントパスワード" autocomplete="new-password">
           <button type="button" id="btn-save-password" class="btn-secondary btn-sm">パスワードを保存</button>
+          <p class="qr-hint" id="account-sync-status"></p>
+          <button type="button" id="btn-account-sync-now" class="btn-secondary btn-sm">今すぐ全端末に同期</button>
+          <button type="button" id="btn-login-other-device" class="btn-secondary btn-sm">他の端末でログイン</button>
         </div>
         <div class="sync-settings">
           <p class="form-label">他の端末と同期</p>
@@ -166,7 +170,7 @@
         <input type="file" id="input-backup-file" accept="*/*" hidden>
         <button type="button" id="btn-cloud-restore" class="menu-item">
           <span class="menu-icon">☁️</span>
-          <span>あとから復元（ユーザーID）</span>
+          <span>他の端末でログイン（ユーザーID）</span>
         </button>
         <button id="btn-reset-data" class="menu-item danger">
           <span class="menu-icon">🗑️</span>
@@ -474,6 +478,23 @@
     </div>
   </div>
 
+  <!-- アカウントログイン -->
+  <div id="modal-account-login" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3>他の端末でログイン</h3>
+      <p class="qr-hint">マイページに表示されているユーザーIDとパスワードを入力してください。iPadで送ったメッセージもMacで見られます。</p>
+      <div class="sticker-import">
+        <p class="form-label">ユーザーID</p>
+        <input type="text" id="input-account-login-id" placeholder="ユーザーID" class="sync-settings input-url" autocomplete="username">
+        <p class="form-label" style="margin-top:12px">パスワード</p>
+        <input type="password" id="input-account-login-password" placeholder="パスワード" class="sync-settings input-url" autocomplete="current-password">
+        <button type="button" id="btn-account-login-submit" class="btn-primary btn-sm" style="margin-top:12px">ログイン</button>
+      </div>
+      <button class="btn-close-modal">閉じる</button>
+    </div>
+  </div>
+
   <!-- 引き継ぎスキャン -->
   <div id="modal-transfer-scan" class="modal hidden">
     <div class="modal-backdrop"></div>
@@ -481,9 +502,10 @@
       <h3>引き継ぎ</h3>
       <p><strong>おすすめ:</strong> ユーザーIDで復元（QR不要）</p>
       <div class="sticker-import" style="margin-bottom:16px">
-        <p class="form-label">ユーザーIDで引き継ぎ</p>
+        <p class="form-label">ユーザーIDでログイン</p>
         <input type="text" id="input-transfer-user-id" placeholder="マイページに表示されるID" class="sync-settings input-url" autocomplete="off">
-        <button type="button" id="btn-restore-by-user-id" class="btn-primary btn-sm">IDで引き継ぐ</button>
+        <input type="password" id="input-transfer-password" placeholder="パスワード（未設定なら空欄）" class="sync-settings input-url" autocomplete="current-password" style="margin-top:8px">
+        <button type="button" id="btn-restore-by-user-id" class="btn-primary btn-sm">IDでログイン</button>
       </div>
       <p class="qr-hint">または QR / コードで引き継ぎ</p>
       <div id="qr-reader-transfer-wrap" class="qr-reader-wrap">
