@@ -284,8 +284,12 @@ function feedAuthorCardHtml(authorId, authorName, authorAvatar) {
     </div>`;
 }
 
-function renderFeedMedia(media) {
-  if (!media || !media.data) return '';
+function renderFeedMedia(media, postId) {
+  if (!media) return '';
+  if (!media.data && media._hasRemoteData && postId) {
+    return `<div class="feed-media-slot feed-media-loading" data-hydrate-post-id="${escapeHtml(postId)}">メディアを読み込み中…</div>`;
+  }
+  if (!media.data) return '';
   if (media.type === 'video' || (media.mimeType || '').startsWith('video/')) {
     return `<video src="${media.data}" class="feed-media feed-video" controls playsinline preload="metadata"></video>`;
   }
@@ -294,8 +298,13 @@ function renderFeedMedia(media) {
   return `<img src="${media.data}" alt="" class="${cls}" loading="lazy">`;
 }
 
-function renderFeedAttachment(att) {
-  if (!att || !att.data) return '';
+function renderFeedAttachment(att, postId) {
+  if (!att) return '';
+  if (!att.data && att._hasRemoteData && postId) {
+    const name = escapeHtml(att.fileName || 'file');
+    return `<div class="feed-media-slot feed-media-loading" data-hydrate-attach-id="${escapeHtml(postId)}">📎 ${name} を読み込み中…</div>`;
+  }
+  if (!att.data) return '';
   const name = escapeHtml(att.fileName || 'file');
   return `<a href="${att.data}" download="${name}" class="feed-attachment-link">📎 ${name} をダウンロード</a>`;
 }
@@ -380,8 +389,8 @@ async function renderFeed() {
         ${canDelete ? `<button type="button" class="btn-delete-post btn-sm" data-post-id="${item.postId}">削除</button>` : ''}
       </div>
       ${textHtml}
-      ${renderFeedMedia(item.media)}
-      ${renderFeedAttachment(item.attachment)}
+      ${renderFeedMedia(item.media, item.postId)}
+      ${renderFeedAttachment(item.attachment, item.postId)}
       ${feedAuthorCardHtml(item.authorId, item.authorName, item.authorAvatar)}
       ${!item.isPost ? `<div class="feed-comments" id="feed-comments-${item.annId}"></div>
         <div class="feed-comment-form">

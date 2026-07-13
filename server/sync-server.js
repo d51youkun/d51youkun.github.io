@@ -1156,12 +1156,52 @@ const server = http.createServer(async (req, res) => {
 
     // Public feed posts (photo / video / notice)
     if (!data.posts) data.posts = [];
-    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts') {
-      const list = [...data.posts].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const normalizePostEntry = (p) => {
+      if (!p) return p;
+      if (!p.likes || typeof p.likes !== 'object') p.likes = {};
+      if (!p.dislikes || typeof p.dislikes !== 'object') p.dislikes = {};
+      if (!Array.isArray(p.comments)) p.comments = [];
+      return p;
+    };
+    const stripPostForList = (p) => {
+      const o = normalizePostEntry({ ...p });
+      if (o.authorAvatar && String(o.authorAvatar).length > 256) o.authorAvatar = null;
+      if (o.media && o.media.data) {
+        o.media = {
+          type: o.media.type || 'image',
+          mimeType: o.media.mimeType || '',
+          fileName: o.media.fileName || '',
+          _hasRemoteData: true
+        };
+      }
+      if (o.attachment && o.attachment.data) {
+        o.attachment = {
+          fileName: o.attachment.fileName || 'file',
+          mimeType: o.attachment.mimeType || '',
+          size: o.attachment.size || 0,
+          _hasRemoteData: true
+        };
+      }
+      return o;
+    };
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts' && parts.length === 2) {
+      const lite = url.searchParams.get('lite') === '1';
+      const list = data.posts
+        .map(p => lite ? stripPostForList(p) : normalizePostEntry(p))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       sendJson(res, 200, list.slice(0, 300));
       return;
     }
-    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts') {
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && !parts[3]) {
+      const post = data.posts.find(p => p.id === parts[2]);
+      if (!post) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      sendJson(res, 200, normalizePostEntry(post));
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts' && parts.length === 2) {
       const body = await readBody(req);
       if (!body.authorId) {
         sendJson(res, 400, { error: 'author_required' });
@@ -1185,7 +1225,7 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { ok: true, id: entry.id });
       return;
     }
-    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2]) {
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] && !parts[3]) {
       const body = await readBody(req);
       const post = data.posts.find(p => p.id === parts[2]);
       if (!post) {

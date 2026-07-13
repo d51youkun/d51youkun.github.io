@@ -1542,6 +1542,15 @@ input:focus {
 .feed-refresh-status.loading { background: var(--blue-primary); }
 .feed-refresh-status.done { background: #16a34a; }
 .feed-refresh-status.error { background: #dc2626; }
+.feed-media-missing,
+.feed-media-loading {
+  font-size: 13px;
+  color: var(--gray-500);
+  padding: 12px;
+  background: var(--gray-100);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
 .feed-action-bar { flex-wrap: wrap; gap: 8px; }
 .feed-list { padding: 12px; }
 .feed-item {
