@@ -21,6 +21,31 @@ const NOTIFY_STATE_PREFIX = 'bluechat_notify_v3_';
 let sessionNotifyBootedAt = 0;
 let notifySuppressedUntil = 0;
 let syncNotifyMutedUntil = 0;
+let notifyMemState = null;
+let notifyMemDirty = false;
+
+function messageTimestamp(msg) {
+  const ts = msg?.timestamp;
+  if (typeof ts === 'number' && Number.isFinite(ts)) return ts;
+  const n = parseInt(ts, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function getNotifyMemState() {
+  if (!notifyMemState) notifyMemState = readNotifyState();
+  return notifyMemState;
+}
+
+function flushNotifyMemState() {
+  if (!notifyMemState || !notifyMemDirty) return;
+  writeNotifyState(notifyMemState);
+  notifyMemDirty = false;
+}
+
+function resetNotifyMemState() {
+  notifyMemState = null;
+  notifyMemDirty = false;
+}
 
 function getNotifyStateKey() {
   const data = getData();
@@ -63,37 +88,58 @@ function writeNotifyState(state) {
   localStorage.setItem(getNotifyStateKey(), JSON.stringify(normalized));
 }
 
+function sealHistoryAtBoot(state) {
+  const cutoff = sessionNotifyBootedAt || Date.now();
+  state.globalBaseline = Math.max(state.globalBaseline || 0, cutoff);
+  const user = getCurrentUser();
+  if (user && typeof getUserConversations === 'function') {
+    getUserConversations(user.id).forEach(conv => {
+      if (!conv?.id) return;
+      state.convWatermarks[conv.id] = Math.max(state.convWatermarks[conv.id] || 0, cutoff);
+    });
+  }
+  Object.keys(state.convWatermarks || {}).forEach(cid => {
+    state.convWatermarks[cid] = Math.max(state.convWatermarks[cid] || 0, cutoff);
+  });
+  return state;
+}
+
 function absorbLocalMessagesIntoNotifyState(state) {
   const data = getData();
-  let globalBaseline = Math.max(state.globalBaseline || 0, Date.now());
+  const cutoff = sessionNotifyBootedAt || Date.now();
+  let globalBaseline = Math.max(state.globalBaseline || 0, cutoff);
   Object.entries(data.messages || {}).forEach(([convId, msgs]) => {
-    let wm = state.convWatermarks[convId] || 0;
+    let wm = Math.max(state.convWatermarks[convId] || 0, cutoff);
     (msgs || []).forEach(m => {
       if (!m?.id) return;
       state.notifiedIds[String(m.id)] = 1;
-      if (m.timestamp > wm) wm = m.timestamp;
-      if (m.timestamp > globalBaseline) globalBaseline = m.timestamp;
+      const ts = messageTimestamp(m);
+      if (ts > wm) wm = ts;
+      if (ts > globalBaseline) globalBaseline = ts;
     });
     state.convWatermarks[convId] = wm;
   });
   state.globalBaseline = globalBaseline;
-  return state;
+  return sealHistoryAtBoot(state);
 }
 
 function absorbConvIntoNotifyState(convId) {
   if (!convId) return;
   const user = getCurrentUser();
-  const state = readNotifyState();
+  const state = getNotifyMemState();
   const msgs = getMessages(convId);
   const myRead = user ? (getData().readReceipts?.[convId]?.[user.id] || 0) : 0;
-  let wm = state.convWatermarks[convId] || 0;
+  const cutoff = sessionNotifyBootedAt || state.bootedAt || Date.now();
+  let wm = Math.max(state.convWatermarks[convId] || 0, cutoff, myRead);
   msgs.forEach(m => {
     if (!m?.id) return;
     state.notifiedIds[String(m.id)] = 1;
-    if (m.timestamp > wm) wm = m.timestamp;
+    const ts = messageTimestamp(m);
+    if (ts > wm) wm = ts;
   });
-  state.convWatermarks[convId] = Math.max(wm, myRead, Date.now());
-  writeNotifyState(state);
+  state.convWatermarks[convId] = Math.max(wm, myRead, cutoff, Date.now());
+  notifyMemDirty = true;
+  flushNotifyMemState();
 }
 
 function beginSyncNotifyMute(ms = 15000) {
@@ -113,34 +159,48 @@ function dismissStaleNotifications() {
 
 function initNotifyBaseline() {
   sessionNotifyBootedAt = Date.now();
+  resetNotifyMemState();
   let state = readNotifyState();
   state.bootedAt = sessionNotifyBootedAt;
   state = absorbLocalMessagesIntoNotifyState(state);
   writeNotifyState(state);
+  notifyMemState = readNotifyState();
+  notifyMemDirty = false;
   dismissStaleNotifications();
 }
 
 function refreshNotifyBaselineFromLocal() {
-  let state = readNotifyState();
-  state = absorbLocalMessagesIntoNotifyState(state);
-  writeNotifyState(state);
+  let state = getNotifyMemState();
+  const data = getData();
+  const cutoff = sessionNotifyBootedAt || state.bootedAt || Date.now();
+  Object.entries(data.messages || {}).forEach(([convId, msgs]) => {
+    let wm = Math.max(state.convWatermarks[convId] || 0, cutoff);
+    (msgs || []).forEach(m => {
+      if (!m?.id) return;
+      state.notifiedIds[String(m.id)] = 1;
+      const ts = messageTimestamp(m);
+      if (ts > wm) wm = ts;
+    });
+    state.convWatermarks[convId] = wm;
+  });
+  sealHistoryAtBoot(state);
+  notifyMemDirty = true;
+  flushNotifyMemState();
 }
 
 function markMessageNotified(msg, convId) {
   if (!msg?.id) return;
-  const state = readNotifyState();
+  const state = getNotifyMemState();
   state.notifiedIds[String(msg.id)] = 1;
+  const ts = messageTimestamp(msg);
   const cid = convId ? String(convId) : '';
-  if (cid) {
-    const prev = state.convWatermarks[cid] || 0;
-    if (msg.timestamp > prev) state.convWatermarks[cid] = msg.timestamp;
-  }
-  if (msg.timestamp > (state.globalBaseline || 0)) state.globalBaseline = msg.timestamp;
-  writeNotifyState(state);
+  if (cid && ts > (state.convWatermarks[cid] || 0)) state.convWatermarks[cid] = ts;
+  if (ts > (state.globalBaseline || 0)) state.globalBaseline = ts;
+  notifyMemDirty = true;
 }
 
 function isMessageNotified(msg) {
-  return !!(msg?.id && readNotifyState().notifiedIds?.[String(msg.id)]);
+  return !!(msg?.id && getNotifyMemState().notifiedIds?.[String(msg.id)]);
 }
 
 function suppressNotificationsFor(ms = 5000) {
@@ -295,14 +355,14 @@ function shouldNotifyForConv(convId) {
 }
 
 function canDeliverLiveNotification(msg, convId) {
-  if (!msg?.id || !msg?.timestamp || !convId) return false;
+  const ts = messageTimestamp(msg);
+  if (!msg?.id || !ts || !convId) return false;
+  if (!sessionNotifyBootedAt || ts <= sessionNotifyBootedAt) return false;
   if (Date.now() < notifySuppressedUntil) return false;
   if (Date.now() < syncNotifyMutedUntil) return false;
-  const state = readNotifyState();
+  const state = getNotifyMemState();
   if (state.notifiedIds?.[String(msg.id)]) return false;
-  if (msg.timestamp <= (state.convWatermarks?.[convId] || 0)) return false;
-  const bootedAt = sessionNotifyBootedAt || state.bootedAt || 0;
-  if (bootedAt && msg.timestamp < bootedAt - 3000) return false;
+  if (ts <= (state.convWatermarks?.[convId] || 0)) return false;
   return true;
 }
 
@@ -310,17 +370,37 @@ function shouldNotifyForNewMessage(convId, msg) {
   if (!canDeliverLiveNotification(msg, convId)) return false;
   const user = getCurrentUser();
   if (!user || String(msg.senderId) === String(user.id)) return false;
+  const ts = messageTimestamp(msg);
   const reads = getData().readReceipts?.[convId] || {};
   const myRead = reads[user.id] || 0;
-  if (msg.timestamp <= myRead) return false;
+  if (ts <= myRead) return false;
   if (!shouldNotifyForConv(convId)) return false;
   if (!getData().conversations[convId]) return false;
   return true;
 }
 
+function pollRealtimeNotifications() {
+  const user = getCurrentUser();
+  if (!user || !sessionNotifyBootedAt) return;
+  if (Date.now() < notifySuppressedUntil || Date.now() < syncNotifyMutedUntil) return;
+  getUserConversations(user.id).forEach(conv => {
+    const convId = conv.id;
+    const msgs = getMessages(convId);
+    if (!msgs.length) return;
+    const latest = msgs[msgs.length - 1];
+    const ts = messageTimestamp(latest);
+    if (!ts || ts <= sessionNotifyBootedAt) return;
+    if (String(latest.senderId) === String(user.id)) return;
+    if (getNotifyMemState().notifiedIds?.[String(latest.id)]) return;
+    if (shouldNotifyForNewMessage(convId, latest)) onNewMessageReceived(convId, latest);
+  });
+  flushNotifyMemState();
+}
+
 function onNewMessageReceived(convId, msg) {
   if (!shouldNotifyForNewMessage(convId, msg)) return false;
   markMessageNotified(msg, convId);
+  flushNotifyMemState();
   if (document.hidden) {
     const user = getCurrentUser();
     const conv = getData().conversations[convId];
@@ -813,11 +893,7 @@ const _mergeRemoteMessageOrig = mergeRemoteMessage;
 mergeRemoteMessage = function (convId, remoteMsg) {
   const added = _mergeRemoteMessageOrig(convId, remoteMsg);
   if (added) {
-    if (shouldNotifyForNewMessage(convId, remoteMsg)) {
-      onNewMessageReceived(convId, remoteMsg);
-    } else {
-      markMessageNotified(remoteMsg, convId);
-    }
+    markMessageNotified(remoteMsg, convId);
     if (currentScreen === 'chat' && currentConvId === convId) {
       appendMessageToChat(remoteMsg, convId);
     }
@@ -2224,8 +2300,8 @@ const _initNotifyEarly = init;
 let firstGlobalSync = true;
 init = function () {
   initNotifyBaseline();
-  beginSyncNotifyMute(12000);
-  suppressNotificationsFor(12000);
+  beginSyncNotifyMute(30000);
+  suppressNotificationsFor(30000);
   _initNotifyEarly();
 };
 
@@ -2233,8 +2309,8 @@ const _startGlobalSyncNotifySafe = startGlobalSync;
 startGlobalSync = function () {
   if (firstGlobalSync) {
     firstGlobalSync = false;
-    beginSyncNotifyMute(10000);
-    suppressNotificationsFor(8000);
+    beginSyncNotifyMute(30000);
+    suppressNotificationsFor(30000);
   }
   _startGlobalSyncNotifySafe();
 };
