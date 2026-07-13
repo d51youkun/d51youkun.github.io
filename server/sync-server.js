@@ -9,7 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8766;
-const SERVER_VERSION = '2026-07-13';
+const SERVER_VERSION = '2026-07-13-v27';
 
 function resolveWritableDataFile() {
   const legacy = path.join(__dirname, 'data.json');
@@ -37,6 +37,80 @@ function resolveWritableDataFile() {
 }
 
 const DATA_FILE = resolveWritableDataFile();
+
+function resolveMediaDir() {
+  const candidates = [
+    process.env.MEDIA_DIR,
+    process.env.DATA_DIR && path.join(process.env.DATA_DIR, 'post-media'),
+    path.join(__dirname, 'post-media'),
+    path.join('/tmp', 'bluechat-post-media')
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const probe = path.join(dir, '.write-test');
+      fs.writeFileSync(probe, 'ok');
+      fs.unlinkSync(probe);
+      return dir;
+    } catch (e) { /* try next */ }
+  }
+  return path.join(__dirname, 'post-media');
+}
+
+const MEDIA_DIR = resolveMediaDir();
+const MEDIA_KEY_PREFIX = 'bluechat:media:';
+const POST_MEDIA_MAX_B64 = 96 * 1024 * 1024;
+
+function normalizePostMedia(media) {
+  if (!media) return null;
+  if (media.mediaId) {
+    return {
+      type: media.type || 'video',
+      mediaId: String(media.mediaId),
+      mimeType: media.mimeType || 'video/mp4',
+      fileName: media.fileName || 'video.mp4'
+    };
+  }
+  return media;
+}
+
+function sanitizePostMediaForSave(media, kind) {
+  const normalized = normalizePostMedia(media);
+  if (kind === 'video') {
+    if (!normalized || !normalized.mediaId) return null;
+    return normalized;
+  }
+  if (normalized?.type === 'video' && normalized.data && String(normalized.data).length > 400000) {
+    return normalized.mediaId ? normalizePostMedia(normalized) : null;
+  }
+  return normalized;
+}
+
+async function loadPostMediaEntry(mediaId) {
+  if (USE_UPSTASH) {
+    const raw = await upstashCommand(['GET', MEDIA_KEY_PREFIX + mediaId]);
+    return raw ? JSON.parse(raw) : null;
+  }
+  const file = path.join(MEDIA_DIR, mediaId + '.json');
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+async function savePostMediaEntry(mediaId, entry) {
+  const payload = JSON.stringify(entry);
+  if (USE_UPSTASH) {
+    await upstashCommand(['SET', MEDIA_KEY_PREFIX + mediaId, payload]);
+    return;
+  }
+  fs.writeFileSync(path.join(MEDIA_DIR, mediaId + '.json'), payload);
+}
+
+function decodeMediaDataUrl(dataStr) {
+  const raw = String(dataStr || '');
+  const m = /^data:([^;]+);base64,(.+)$/s.exec(raw);
+  if (m) return { mime: m[1], buffer: Buffer.from(m[2], 'base64') };
+  return { mime: 'application/octet-stream', buffer: Buffer.from(raw, 'base64') };
+}
 
 function loadDotEnv() {
   const envPath = path.join(__dirname, '.env');
@@ -1161,8 +1235,59 @@ const server = http.createServer(async (req, res) => {
       if (!p.likes || typeof p.likes !== 'object') p.likes = {};
       if (!p.dislikes || typeof p.dislikes !== 'object') p.dislikes = {};
       if (!Array.isArray(p.comments)) p.comments = [];
+      if (p.media) p.media = normalizePostMedia(p.media);
       return p;
     };
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] === 'media' && parts[3]) {
+      const mediaId = String(parts[3] || '').slice(0, 120);
+      const body = await readBody(req);
+      if (!body.authorId) {
+        sendJson(res, 400, { error: 'author_required' });
+        return;
+      }
+      const dataStr = String(body.data || '');
+      if (!dataStr) {
+        sendJson(res, 400, { error: 'data_required' });
+        return;
+      }
+      if (dataStr.length > POST_MEDIA_MAX_B64) {
+        sendJson(res, 413, { error: 'too_large' });
+        return;
+      }
+      await savePostMediaEntry(mediaId, {
+        mimeType: body.mimeType || 'video/mp4',
+        fileName: body.fileName || 'video.mp4',
+        kind: body.kind || 'video',
+        authorId: String(body.authorId),
+        createdAt: Date.now(),
+        data: dataStr
+      });
+      sendJson(res, 200, { ok: true, mediaId });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts' && parts[2] === 'media' && parts[3]) {
+      const mediaId = String(parts[3] || '').slice(0, 120);
+      try {
+        const entry = await loadPostMediaEntry(mediaId);
+        if (!entry || !entry.data) {
+          sendJson(res, 404, { error: 'not_found' });
+          return;
+        }
+        const decoded = decodeMediaDataUrl(entry.data);
+        res.writeHead(200, {
+          'Content-Type': entry.mimeType || decoded.mime || 'video/mp4',
+          'Content-Length': decoded.buffer.length,
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token',
+          'Cache-Control': 'public, max-age=31536000, immutable'
+        });
+        res.end(decoded.buffer);
+      } catch (e) {
+        sendJson(res, 500, { error: 'media_read_failed' });
+      }
+      return;
+    }
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts' && parts.length === 2) {
       const list = data.posts.map(normalizePostEntry)
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -1247,13 +1372,17 @@ const server = http.createServer(async (req, res) => {
         authorId: String(body.authorId),
         authorName: body.authorName || 'ユーザー',
         authorAvatar: body.authorAvatar || null,
-        media: body.media || null,
+        media: sanitizePostMediaForSave(body.media, body.kind || 'photo'),
         attachment: body.attachment || null,
         createdAt: body.createdAt || Date.now(),
         likes: {},
         dislikes: {},
         comments: []
       });
+      if (entry.kind === 'video' && (!entry.media || !entry.media.mediaId)) {
+        sendJson(res, 400, { error: 'video_media_required' });
+        return;
+      }
       const exists = data.posts.find(p => p.id === entry.id);
       if (!exists) data.posts.unshift(entry);
       else Object.assign(exists, entry);

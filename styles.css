@@ -1522,6 +1522,13 @@ input:focus {
 .notice-comment-input { flex: 1; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--gray-300); }
 
 /* v11: public feed */
+.feed-media-missing {
+  font-size: 13px;
+  color: var(--gray-500);
+  padding: 12px;
+  background: var(--gray-100);
+  border-radius: var(--radius-sm);
+}
 .feed-action-bar {
   flex-wrap: wrap;
   gap: 8px;
