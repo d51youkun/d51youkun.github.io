@@ -2284,12 +2284,22 @@ function setupGlobalClickDelegation() {
     }
   };
 
-  document.body.addEventListener('click', (e) => {
+  let lastDelegatedId = '';
+  let lastDelegatedAt = 0;
+
+  function runDelegatedAction(e) {
     const el = e.target.closest('button[id], a[id]');
     if (!el || !actions[el.id]) return;
+    const now = Date.now();
+    if (el.id === lastDelegatedId && now - lastDelegatedAt < 450) return;
+    lastDelegatedId = el.id;
+    lastDelegatedAt = now;
     if (el.tagName === 'A') e.preventDefault();
     actions[el.id](e);
-  });
+  }
+
+  document.body.addEventListener('click', runDelegatedAction);
+  document.body.addEventListener('touchend', runDelegatedAction, { passive: true });
 }
 
 onAppInit(() => {

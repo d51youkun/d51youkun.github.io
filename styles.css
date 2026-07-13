@@ -1522,7 +1522,28 @@ input:focus {
 .notice-comment-input { flex: 1; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--gray-300); }
 
 /* v11: public feed */
-.feed-action-bar { flex-wrap: wrap; gap: 8px; }
+.feed-action-bar {
+  flex-wrap: wrap;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+.feed-action-bar .btn-sm {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(26, 111, 212, 0.15);
+  min-height: 36px;
+}
+#btn-refresh-feed.is-refreshing {
+  opacity: 0.7;
+}
+.ios-webapp .feed-action-bar button {
+  cursor: pointer;
+}
 .feed-list { padding: 12px; }
 .feed-item {
   padding: 16px;
