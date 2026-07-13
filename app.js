@@ -461,8 +461,9 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
     return { error: '友だち情報の保存に失敗しました' };
   }
 
+  let cloudSynced = false;
   if (getSyncUrl()) {
-    const cloudSynced = await queueFriendInviteCloudSync(meId, friendId, targetUser, convId);
+    cloudSynced = await queueFriendInviteCloudSync(meId, friendId, targetUser, convId);
     if (me) cloudPushUser(me);
     cloudFetchUser(friendId).then(remote => {
       if (remote && remote.id) {
@@ -470,10 +471,9 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
         refreshMainUI();
       }
     });
-    return { success: true, user: targetUser, cloudSynced };
   }
 
-  return { success: true, user: targetUser, cloudSynced: false };
+  return { success: true, user: targetUser, cloudSynced };
 }
 
 async function handleFriendInviteSuccess(result) {
@@ -485,7 +485,7 @@ async function handleFriendInviteSuccess(result) {
   if (result.alreadyFriends) {
     showToast(`${result.user.name}さんとはすでに友だちです`);
   } else if (result.cloudSynced === false && getSyncUrl()) {
-    showToast(`${result.user.name}さんを追加しましたが、同期サーバーへの反映に失敗しました。マイページの同期設定を確認してください`);
+    showToast(`${result.user.name}さんを追加しました（同期サーバーへの送信に失敗。マイページで接続を確認してください）`);
   } else {
     showToast(`${result.user.name}さんと友だちになりました！`);
   }
@@ -507,6 +507,7 @@ async function tryRedeemInviteCode(code) {
 function renderMyQR() {
   const user = getCurrentUser();
   if (!user) return;
+  if (getSyncUrl()) cloudPushUser(user);
   if (typeof QRCode === 'undefined') {
     showToast('QRコードライブラリを読み込めませんでした');
     return;
@@ -519,7 +520,6 @@ function renderMyQR() {
   document.getElementById('qr-expiry-note').textContent = '有効期限: 24時間（更新ボタンで再発行）';
   const codeEl = document.getElementById('invite-code-text');
   if (codeEl) codeEl.textContent = invite;
-  if (getSyncUrl()) cloudPushUser(user);
   try {
     new QRCode(container, {
       text: invite,
@@ -1202,7 +1202,7 @@ async function syncFriendships() {
   const user = getCurrentUser();
   if (!user || !getSyncUrl()) return 0;
 
-  cloudPushUser(user);
+  await cloudPushUser(user);
   const friendIds = await cloudFetchFriendIds(user.id);
   let added = 0;
   let avatarsUpdated = false;
@@ -1234,7 +1234,7 @@ async function syncFriendships() {
       added++;
     }
   }
-  if (avatarsUpdated || added > 0) refreshMainUI();
+  if (added > 0 || avatarsUpdated) refreshMainUI();
   return added;
 }
 
@@ -1297,7 +1297,8 @@ async function cloudSyncAfterSend(convId, msg) {
   const data = getData();
   const conv = data.conversations[convId];
   if (conv) await cloudPushConversation(conv);
-  await cloudPushMessage(convId, msg);
+  const pushed = await cloudPushMessage(convId, msg);
+  if (!pushed) trackPendingMessage(convId, msg.id);
 }
 
 function startGlobalSync() {

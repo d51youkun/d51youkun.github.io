@@ -9,7 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8766;
-const SERVER_VERSION = '2026-07-03';
+const SERVER_VERSION = '2026-07-13';
 
 function resolveWritableDataFile() {
   const legacy = path.join(__dirname, 'data.json');
@@ -189,7 +189,35 @@ function createTransferEntry(data, backup, hours) {
 }
 
 function emptyData() {
-  return { conversations: {}, messages: {}, userConversations: {}, users: {}, friendships: {}, userFriendships: {}, readReceipts: {}, transfers: {}, shortTransfers: {}, adminSessions: {}, callSignals: {}, feedback: [], cloudBackups: {}, presence: {}, announcements: [], announcementReads: {}, activityVersion: 0, titlePresets: [] };
+  return {
+    conversations: {},
+    messages: {},
+    userConversations: {},
+    users: {},
+    friendships: {},
+    userFriendships: {},
+    readReceipts: {},
+    transfers: {},
+    shortTransfers: {},
+    adminSessions: {},
+    callSignals: {},
+    feedback: [],
+    cloudBackups: {},
+    presence: {},
+    announcements: [],
+    announcementReads: {},
+    activityVersion: 0,
+    titlePresets: []
+  };
+}
+
+function normalizeData(data) {
+  const base = emptyData();
+  if (!data || typeof data !== 'object') return { ...base };
+  for (const key of Object.keys(base)) {
+    if (data[key] === undefined) data[key] = base[key];
+  }
+  return data;
 }
 
 // Upstash REST の pipeline エンドポイントに1コマンド投げるヘルパー
@@ -212,25 +240,26 @@ async function loadData() {
   if (USE_UPSTASH) {
     try {
       const raw = await upstashCommand(['GET', UPSTASH_KEY]);
-      return raw ? JSON.parse(raw) : emptyData();
+      return normalizeData(raw ? JSON.parse(raw) : emptyData());
     } catch (e) {
       console.error('Upstash loadData failed, falling back to empty data:', e.message);
       return emptyData();
     }
   }
   try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    return normalizeData(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')));
   } catch (e) {
     return emptyData();
   }
 }
 
 async function saveData(data) {
+  const normalized = normalizeData(data);
   if (USE_UPSTASH) {
-    await upstashCommand(['SET', UPSTASH_KEY, JSON.stringify(data)]);
+    await upstashCommand(['SET', UPSTASH_KEY, JSON.stringify(normalized)]);
     return;
   }
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data));
+  fs.writeFileSync(DATA_FILE, JSON.stringify(normalized));
 }
 
 async function saveDataWithActivity(data) {
@@ -412,8 +441,9 @@ const server = http.createServer(async (req, res) => {
       data.conversations[convId] = { ...conv, id: convId };
       if (!data.userConversations) data.userConversations = {};
       (conv.members || []).forEach(memberId => {
-        if (!data.userConversations[memberId]) data.userConversations[memberId] = {};
-        data.userConversations[memberId][convId] = true;
+        const mid = String(memberId);
+        if (!data.userConversations[mid]) data.userConversations[mid] = {};
+        data.userConversations[mid][convId] = true;
       });
       if (isNewConv) await saveDataWithActivity(data);
       else await saveData(data);
@@ -441,6 +471,7 @@ const server = http.createServer(async (req, res) => {
       const convId = parts[2];
       const msgId = parts[3];
       const msg = await readBody(req);
+      if (!data.messages) data.messages = {};
       if (!data.messages[convId]) data.messages[convId] = {};
       const isNew = !data.messages[convId][msgId];
       data.messages[convId][msgId] = { ...msg, id: msgId };
@@ -475,7 +506,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'user' && parts[2] && parts[3] === 'conversations') {
-      const userId = parts[2];
+      const userId = String(parts[2]);
       const userConvs = (data.userConversations && data.userConversations[userId]) || {};
       sendJson(res, 200, Object.keys(userConvs));
       return;
@@ -966,8 +997,7 @@ server.listen(PORT, '0.0.0.0', () => {
   if (USE_UPSTASH) {
     console.log('Storage: Upstash Redis (persistent across restarts) —', UPSTASH_URL);
   } else {
-    console.log('Storage: local file (LOST on every Render free-tier restart/spin-down):', DATA_FILE);
-    console.log('  → Set UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN to fix this.');
+    console.log('Storage: local file:', DATA_FILE);
   }
   console.log('Health check: GET /api/health');
 });
