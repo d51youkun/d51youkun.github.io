@@ -1960,7 +1960,11 @@ function setupGlobalClickDelegation() {
       else {
         const code = document.getElementById('input-pair-short-code')?.value?.trim() || '';
         if (!code) { showToast('6桁コードを入力してください'); return; }
-        redeemTransferCodeExt(code).then(handleTransferRedeemResult);
+        if (typeof runDevicePairRedeem === 'function') {
+          runDevicePairRedeem(code).then(handleTransferRedeemResult).catch(e => showToast(e?.message || 'ペアリングに失敗しました'));
+        } else {
+          redeemTransferCodeExt(code).then(handleTransferRedeemResult);
+        }
       }
     },
     'btn-download-backup': () => downloadLocalBackupFile(),
