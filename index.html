@@ -5732,7 +5732,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13b');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13-v26');
   } catch (e) { /* ignore */ }
 }
 
@@ -10353,7 +10353,7 @@ onAppInit(() => {
  * BlueChatX — branding & super-admin extensions
  */
 var APP_VERSION = 'BlueChatX';
-const BUILD_STAMP = 'BlueChatX-2026-07-02';
+const BUILD_STAMP = 'BlueChatX-2026-07-13-v26';
 
 function applyAppBranding() {
   const title = 'BlueChatX';
