@@ -24,21 +24,30 @@ async function fetchPublicPosts() {
 
 async function compressPostImage(file) {
   if (file.type === 'image/gif' || file.type === 'image/webp') {
-    if (file.size > 5 * 1024 * 1024) throw new Error('GIF/WebPは5MB以下にしてください');
+    if (file.size > FILE_LIMITS.postAnimated) {
+      throw new Error('GIF/WebPは' + formatFileLimit(FILE_LIMITS.postAnimated) + '以下にしてください');
+    }
     return readFileAsDataURL(file);
   }
-  return compressImageFile(file, 1200, 0.82);
+  if (file.size > FILE_LIMITS.postImageInput) {
+    throw new Error('画像は' + formatFileLimit(FILE_LIMITS.postImageInput) + '以下にしてください');
+  }
+  return compressImageFile(file, 2048, 0.88);
 }
 
 async function readPostMediaFile(file) {
   if (!file) return null;
   if (file.type.startsWith('image/')) {
     const data = await compressPostImage(file);
-    if (data.length > 2 * 1024 * 1024) throw new Error('画像が大きすぎます（2MB以下）');
+    if (data.length > FILE_LIMITS.postImageData) {
+      throw new Error('画像が大きすぎます（' + formatFileLimit(FILE_LIMITS.postImageData) + '以下）');
+    }
     return { type: 'image', data, mimeType: file.type, fileName: file.name };
   }
   if (file.type.startsWith('video/')) {
-    if (file.size > 10 * 1024 * 1024) throw new Error('動画は10MB以下にしてください');
+    if (file.size > FILE_LIMITS.postVideo) {
+      throw new Error('動画は' + formatFileLimit(FILE_LIMITS.postVideo) + '以下にしてください');
+    }
     const data = await readFileAsDataURL(file);
     return { type: 'video', data, mimeType: file.type, fileName: file.name };
   }
@@ -47,7 +56,9 @@ async function readPostMediaFile(file) {
 
 async function readPostAttachmentFile(file) {
   if (!file) return null;
-  if (file.size > 5 * 1024 * 1024) throw new Error('添付ファイルは5MB以下にしてください');
+  if (file.size > FILE_LIMITS.postAttachment) {
+    throw new Error('添付ファイルは' + formatFileLimit(FILE_LIMITS.postAttachment) + '以下にしてください');
+  }
   const data = await readFileAsDataURL(file);
   return { fileName: file.name, data, mimeType: file.type || 'application/octet-stream', size: file.size };
 }
@@ -73,7 +84,7 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
       showToast('説明・写真・動画・ファイルのいずれかを入力してください');
       return false;
     }
-    await cloudRequest('/api/posts', {
+    await cloudRequestExt('/api/posts', {
       method: 'POST',
       body: JSON.stringify({
         kind,
@@ -84,7 +95,7 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
         media,
         attachment
       })
-    });
+    }, 300000);
     showToast('投稿しました');
     await renderFeed();
     updateTabBadges();
@@ -441,7 +452,7 @@ async function shareStickerPack(packId) {
     isAnimated: st.isGif || st.isAnimated || isAnimatedStickerSource(st.src)
   }));
   showToast('共有コードを作成中…');
-  const res = await cloudRequest('/api/shared-sticker-packs', {
+  const res = await cloudRequestExt('/api/shared-sticker-packs', {
     method: 'POST',
     body: JSON.stringify({
       packName: pack.name,
@@ -449,7 +460,7 @@ async function shareStickerPack(packId) {
       authorName: user.name,
       stickers
     })
-  });
+  }, 300000);
   if (!res || !res.shareId) {
     showToast('共有に失敗しました');
     return;

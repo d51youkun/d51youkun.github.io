@@ -273,7 +273,7 @@ async function createCustomPhotoStickerPack(name, files) {
   const stickers = [];
   for (const file of files) {
     if (!file.type.startsWith('image/')) continue;
-    if (file.size > 2 * 1024 * 1024) continue;
+    if (file.size > FILE_LIMITS.stickerStatic) continue;
     const src = await readFileAsDataURL(file);
     stickers.push({ type: 'image', src, emoji: '🖼️' });
   }

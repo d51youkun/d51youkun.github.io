@@ -1654,8 +1654,8 @@ function initExtendedFeatures() {
       const file = fileInput.files[0];
       fileInput.value = '';
       if (!file || !currentConvId) return;
-      if (file.size > 5 * 1024 * 1024) {
-        showToast('5MB以下のファイルを選択してください');
+      if (file.size > FILE_LIMITS.chatFile) {
+        showToast(formatFileLimit(FILE_LIMITS.chatFile) + '以下のファイルを選択してください');
         return;
       }
       try {
@@ -1683,8 +1683,8 @@ function initExtendedFeatures() {
         showToast('動画ファイルを選択してください');
         return;
       }
-      if (file.size > 1024 * 1024 * 1024) {
-        showToast('1GB以下の動画を選択してください');
+      if (file.size > FILE_LIMITS.chatVideo) {
+        showToast(formatFileLimit(FILE_LIMITS.chatVideo) + '以下の動画を選択してください');
         return;
       }
       try {

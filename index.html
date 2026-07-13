@@ -2280,7 +2280,7 @@ html[data-theme="dark"] body textarea::placeholder {
         <p class="form-label">添付ファイル（ダウンロード用）</p>
         <input type="file" id="input-post-attachment">
       </div>
-      <p class="qr-hint">誰でも閲覧できます。写真2MB・動画10MB・添付5MBまで</p>
+      <p class="qr-hint" id="hint-post-limits">誰でも閲覧できます。写真50MB・動画200MB・添付100MBまで</p>
       <button type="button" id="btn-submit-post" class="btn-primary">投稿する</button>
       <button class="btn-close-modal">閉じる</button>
     </div>
@@ -2405,6 +2405,30 @@ const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
 const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
+// アップロード可能なファイルサイズ上限（バイト）
+const FILE_LIMITS = {
+  chatImage: 50 * 1024 * 1024,
+  chatVideo: 2 * 1024 * 1024 * 1024,
+  chatFile: 100 * 1024 * 1024,
+  avatar: 30 * 1024 * 1024,
+  stickerStatic: 20 * 1024 * 1024,
+  stickerAnimated: 50 * 1024 * 1024,
+  postImageInput: 50 * 1024 * 1024,
+  postImageData: 25 * 1024 * 1024,
+  postVideo: 200 * 1024 * 1024,
+  postAttachment: 100 * 1024 * 1024,
+  postAnimated: 50 * 1024 * 1024
+};
+
+function formatFileLimit(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) {
+    const gb = bytes / (1024 * 1024 * 1024);
+    return (gb % 1 === 0 ? gb : gb.toFixed(1)) + 'GB';
+  }
+  const mb = bytes / (1024 * 1024);
+  return (mb % 1 === 0 ? mb : Math.round(mb)) + 'MB';
+}
+
 // ─── State ───────────────────────────────────────────────
 let currentScreen = 'onboarding';
 let currentTab = 'chats';
@@ -2500,7 +2524,7 @@ function compressImage(file, maxSize = 256, quality = 0.82) {
 }
 
 function compressChatImage(file) {
-  return compressImageFile(file, 1024, 0.85);
+  return compressImageFile(file, 1920, 0.88);
 }
 
 function compressImageFile(file, maxSize, quality) {
@@ -3507,12 +3531,21 @@ async function syncMessageDeletions(convId) {
   }
 }
 
+function messageUploadTimeout(msg) {
+  const payload = msg.video || msg.fileData || msg.image || msg.stickerImage || '';
+  const len = typeof payload === 'string' ? payload.length : 0;
+  if (len > 50 * 1024 * 1024) return 600000;
+  if (len > 10 * 1024 * 1024) return 300000;
+  if (len > 1024 * 1024) return 120000;
+  return 45000;
+}
+
 async function cloudPushMessage(convId, msg) {
   if (!getSyncUrl()) return false;
   const res = await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
     method: 'PUT',
     body: JSON.stringify(msg)
-  });
+  }, messageUploadTimeout(msg));
   if (res && res.ok !== false) {
     markMessagePushed(convId, msg);
     return true;
@@ -4884,8 +4917,8 @@ function init() {
       showToast('画像ファイルを選択してください');
       return;
     }
-    if (file.size > 15 * 1024 * 1024) {
-      showToast('15MB以下の画像を選択してください');
+    if (file.size > FILE_LIMITS.chatImage) {
+      showToast(formatFileLimit(FILE_LIMITS.chatImage) + '以下の画像を選択してください');
       return;
     }
     try {
@@ -4961,8 +4994,8 @@ function init() {
       showToast('画像ファイルを選択してください');
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      showToast('10MB以下の画像を選択してください');
+    if (file.size > FILE_LIMITS.avatar) {
+      showToast(formatFileLimit(FILE_LIMITS.avatar) + '以下の画像を選択してください');
       return;
     }
     try {
@@ -6659,8 +6692,8 @@ function initExtendedFeatures() {
       const file = fileInput.files[0];
       fileInput.value = '';
       if (!file || !currentConvId) return;
-      if (file.size > 5 * 1024 * 1024) {
-        showToast('5MB以下のファイルを選択してください');
+      if (file.size > FILE_LIMITS.chatFile) {
+        showToast(formatFileLimit(FILE_LIMITS.chatFile) + '以下のファイルを選択してください');
         return;
       }
       try {
@@ -6688,8 +6721,8 @@ function initExtendedFeatures() {
         showToast('動画ファイルを選択してください');
         return;
       }
-      if (file.size > 1024 * 1024 * 1024) {
-        showToast('1GB以下の動画を選択してください');
+      if (file.size > FILE_LIMITS.chatVideo) {
+        showToast(formatFileLimit(FILE_LIMITS.chatVideo) + '以下の動画を選択してください');
         return;
       }
       try {
@@ -7258,7 +7291,7 @@ async function createCustomPhotoStickerPack(name, files) {
   const stickers = [];
   for (const file of files) {
     if (!file.type.startsWith('image/')) continue;
-    if (file.size > 2 * 1024 * 1024) continue;
+    if (file.size > FILE_LIMITS.stickerStatic) continue;
     const src = await readFileAsDataURL(file);
     stickers.push({ type: 'image', src, emoji: '🖼️' });
   }
@@ -8831,7 +8864,9 @@ async function createCustomPhotoStickerPackV7(name, files) {
   const stickers = [];
   for (const file of files) {
     if (!file.type.startsWith('image/')) continue;
-    const maxSize = file.type === 'image/gif' ? 5 * 1024 * 1024 : 3 * 1024 * 1024;
+    const maxSize = file.type === 'image/gif' || file.type === 'image/webp'
+      ? FILE_LIMITS.stickerAnimated
+      : FILE_LIMITS.stickerStatic;
     if (file.size > maxSize) continue;
     const src = await readFileAsDataURL(file);
     const isAnimated = file.type === 'image/gif' || file.type === 'image/webp';
@@ -9884,21 +9919,30 @@ async function fetchPublicPosts() {
 
 async function compressPostImage(file) {
   if (file.type === 'image/gif' || file.type === 'image/webp') {
-    if (file.size > 5 * 1024 * 1024) throw new Error('GIF/WebPは5MB以下にしてください');
+    if (file.size > FILE_LIMITS.postAnimated) {
+      throw new Error('GIF/WebPは' + formatFileLimit(FILE_LIMITS.postAnimated) + '以下にしてください');
+    }
     return readFileAsDataURL(file);
   }
-  return compressImageFile(file, 1200, 0.82);
+  if (file.size > FILE_LIMITS.postImageInput) {
+    throw new Error('画像は' + formatFileLimit(FILE_LIMITS.postImageInput) + '以下にしてください');
+  }
+  return compressImageFile(file, 2048, 0.88);
 }
 
 async function readPostMediaFile(file) {
   if (!file) return null;
   if (file.type.startsWith('image/')) {
     const data = await compressPostImage(file);
-    if (data.length > 2 * 1024 * 1024) throw new Error('画像が大きすぎます（2MB以下）');
+    if (data.length > FILE_LIMITS.postImageData) {
+      throw new Error('画像が大きすぎます（' + formatFileLimit(FILE_LIMITS.postImageData) + '以下）');
+    }
     return { type: 'image', data, mimeType: file.type, fileName: file.name };
   }
   if (file.type.startsWith('video/')) {
-    if (file.size > 10 * 1024 * 1024) throw new Error('動画は10MB以下にしてください');
+    if (file.size > FILE_LIMITS.postVideo) {
+      throw new Error('動画は' + formatFileLimit(FILE_LIMITS.postVideo) + '以下にしてください');
+    }
     const data = await readFileAsDataURL(file);
     return { type: 'video', data, mimeType: file.type, fileName: file.name };
   }
@@ -9907,7 +9951,9 @@ async function readPostMediaFile(file) {
 
 async function readPostAttachmentFile(file) {
   if (!file) return null;
-  if (file.size > 5 * 1024 * 1024) throw new Error('添付ファイルは5MB以下にしてください');
+  if (file.size > FILE_LIMITS.postAttachment) {
+    throw new Error('添付ファイルは' + formatFileLimit(FILE_LIMITS.postAttachment) + '以下にしてください');
+  }
   const data = await readFileAsDataURL(file);
   return { fileName: file.name, data, mimeType: file.type || 'application/octet-stream', size: file.size };
 }
@@ -9933,7 +9979,7 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
       showToast('説明・写真・動画・ファイルのいずれかを入力してください');
       return false;
     }
-    await cloudRequest('/api/posts', {
+    await cloudRequestExt('/api/posts', {
       method: 'POST',
       body: JSON.stringify({
         kind,
@@ -9944,7 +9990,7 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
         media,
         attachment
       })
-    });
+    }, 300000);
     showToast('投稿しました');
     await renderFeed();
     updateTabBadges();
@@ -10301,7 +10347,7 @@ async function shareStickerPack(packId) {
     isAnimated: st.isGif || st.isAnimated || isAnimatedStickerSource(st.src)
   }));
   showToast('共有コードを作成中…');
-  const res = await cloudRequest('/api/shared-sticker-packs', {
+  const res = await cloudRequestExt('/api/shared-sticker-packs', {
     method: 'POST',
     body: JSON.stringify({
       packName: pack.name,
@@ -10309,7 +10355,7 @@ async function shareStickerPack(packId) {
       authorName: user.name,
       stickers
     })
-  });
+  }, 300000);
   if (!res || !res.shareId) {
     showToast('共有に失敗しました');
     return;

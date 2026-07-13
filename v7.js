@@ -512,7 +512,9 @@ async function createCustomPhotoStickerPackV7(name, files) {
   const stickers = [];
   for (const file of files) {
     if (!file.type.startsWith('image/')) continue;
-    const maxSize = file.type === 'image/gif' ? 5 * 1024 * 1024 : 3 * 1024 * 1024;
+    const maxSize = file.type === 'image/gif' || file.type === 'image/webp'
+      ? FILE_LIMITS.stickerAnimated
+      : FILE_LIMITS.stickerStatic;
     if (file.size > maxSize) continue;
     const src = await readFileAsDataURL(file);
     const isAnimated = file.type === 'image/gif' || file.type === 'image/webp';

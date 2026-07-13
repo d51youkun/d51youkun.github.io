@@ -18,6 +18,30 @@ const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
 const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
+// アップロード可能なファイルサイズ上限（バイト）
+const FILE_LIMITS = {
+  chatImage: 50 * 1024 * 1024,
+  chatVideo: 2 * 1024 * 1024 * 1024,
+  chatFile: 100 * 1024 * 1024,
+  avatar: 30 * 1024 * 1024,
+  stickerStatic: 20 * 1024 * 1024,
+  stickerAnimated: 50 * 1024 * 1024,
+  postImageInput: 50 * 1024 * 1024,
+  postImageData: 25 * 1024 * 1024,
+  postVideo: 200 * 1024 * 1024,
+  postAttachment: 100 * 1024 * 1024,
+  postAnimated: 50 * 1024 * 1024
+};
+
+function formatFileLimit(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) {
+    const gb = bytes / (1024 * 1024 * 1024);
+    return (gb % 1 === 0 ? gb : gb.toFixed(1)) + 'GB';
+  }
+  const mb = bytes / (1024 * 1024);
+  return (mb % 1 === 0 ? mb : Math.round(mb)) + 'MB';
+}
+
 // ─── State ───────────────────────────────────────────────
 let currentScreen = 'onboarding';
 let currentTab = 'chats';
@@ -113,7 +137,7 @@ function compressImage(file, maxSize = 256, quality = 0.82) {
 }
 
 function compressChatImage(file) {
-  return compressImageFile(file, 1024, 0.85);
+  return compressImageFile(file, 1920, 0.88);
 }
 
 function compressImageFile(file, maxSize, quality) {
@@ -1120,12 +1144,21 @@ async function syncMessageDeletions(convId) {
   }
 }
 
+function messageUploadTimeout(msg) {
+  const payload = msg.video || msg.fileData || msg.image || msg.stickerImage || '';
+  const len = typeof payload === 'string' ? payload.length : 0;
+  if (len > 50 * 1024 * 1024) return 600000;
+  if (len > 10 * 1024 * 1024) return 300000;
+  if (len > 1024 * 1024) return 120000;
+  return 45000;
+}
+
 async function cloudPushMessage(convId, msg) {
   if (!getSyncUrl()) return false;
   const res = await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
     method: 'PUT',
     body: JSON.stringify(msg)
-  });
+  }, messageUploadTimeout(msg));
   if (res && res.ok !== false) {
     markMessagePushed(convId, msg);
     return true;
@@ -2497,8 +2530,8 @@ function init() {
       showToast('画像ファイルを選択してください');
       return;
     }
-    if (file.size > 15 * 1024 * 1024) {
-      showToast('15MB以下の画像を選択してください');
+    if (file.size > FILE_LIMITS.chatImage) {
+      showToast(formatFileLimit(FILE_LIMITS.chatImage) + '以下の画像を選択してください');
       return;
     }
     try {
@@ -2574,8 +2607,8 @@ function init() {
       showToast('画像ファイルを選択してください');
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      showToast('10MB以下の画像を選択してください');
+    if (file.size > FILE_LIMITS.avatar) {
+      showToast(formatFileLimit(FILE_LIMITS.avatar) + '以下の画像を選択してください');
       return;
     }
     try {
