@@ -192,6 +192,7 @@ function getDevicePairShortRef(data, shortCode) {
   return ref;
 }
 
+function createTransferEntry(data, backup, hours) {
   if (!data.transfers) data.transfers = {};
   if (!data.shortTransfers) data.shortTransfers = {};
   const token = Date.now().toString(36) + crypto.randomBytes(8).toString('hex');
