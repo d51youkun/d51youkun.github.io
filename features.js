@@ -25,8 +25,12 @@ const LEGACY_NOTIFY_KEYS = [
 ];
 let notifySuppressedUntil = 0;
 
+let syncNotifyMutedUntil = 0;
+
 function getNotifyStateKey() {
-  return NOTIFY_STATE_PREFIX + (getCurrentUser()?.id || '_anon');
+  const data = getData();
+  const uid = data.currentUserId ? String(data.currentUserId) : (getCurrentUser()?.id || '_anon');
+  return NOTIFY_STATE_PREFIX + uid;
 }
 
 function readNotifyState() {
@@ -63,11 +67,28 @@ function purgeLegacyNotifyKeys() {
   } catch (e) { /* ignore */ }
 }
 
+function beginSyncNotifyMute(ms = 15000) {
+  syncNotifyMutedUntil = Math.max(syncNotifyMutedUntil, Date.now() + ms);
+}
+
+function dismissStaleNotifications() {
+  if (!notificationsSupported() || Notification.permission !== 'granted') return;
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.getRegistration()
+    .then(reg => reg?.getNotifications?.())
+    .then(list => {
+      if (Array.isArray(list)) list.forEach(n => n.close());
+    })
+    .catch(() => {});
+}
+
 function initNotifyBaseline() {
   purgeLegacyNotifyKeys();
+  const prev = readNotifyState();
   const data = getData();
-  const ids = new Set();
-  let baseline = Date.now();
+  const ids = new Set(Array.isArray(prev.ids) ? prev.ids : []);
+  const bootedAt = Date.now();
+  let baseline = Math.max(prev.baseline || 0, bootedAt);
   Object.values(data.messages || {}).forEach(msgs => {
     (msgs || []).forEach(m => {
       if (!m?.id) return;
@@ -75,11 +96,8 @@ function initNotifyBaseline() {
       if (m.timestamp > baseline) baseline = m.timestamp;
     });
   });
-  writeNotifyState({
-    baseline,
-    ids: Array.from(ids),
-    bootedAt: Date.now()
-  });
+  writeNotifyState({ baseline, ids: Array.from(ids), bootedAt });
+  dismissStaleNotifications();
 }
 
 function refreshNotifyBaselineFromLocal() {
@@ -262,12 +280,21 @@ function shouldNotifyForConv(convId) {
   return document.hidden || !onChat;
 }
 
+function canDeliverLiveNotification(msg) {
+  if (!msg?.id || !msg?.timestamp) return false;
+  if (Date.now() < notifySuppressedUntil) return false;
+  if (Date.now() < syncNotifyMutedUntil) return false;
+  if (isMessageNotified(msg)) return false;
+  const bootedAt = readNotifyState().bootedAt || 0;
+  if (bootedAt && msg.timestamp < bootedAt - 2000) return false;
+  return true;
+}
+
 function shouldNotifyForNewMessage(convId, msg) {
+  if (!canDeliverLiveNotification(msg)) return false;
   const user = getCurrentUser();
   if (!user || String(msg.senderId) === String(user.id)) return false;
-  if (!msg?.id || isMessageNotified(msg)) return false;
   if (!msg.timestamp || msg.timestamp <= getNotifyBaseline()) return false;
-  if (Date.now() < notifySuppressedUntil) return false;
   const reads = getData().readReceipts?.[convId] || {};
   const myRead = reads[user.id] || 0;
   if (msg.timestamp <= myRead) return false;
@@ -295,7 +322,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-13b');
   } catch (e) { /* ignore */ }
 }
 
@@ -766,11 +793,13 @@ getMessageContentHtml = getMessageContentHtmlExt;
 const _mergeRemoteMessageOrig = mergeRemoteMessage;
 mergeRemoteMessage = function (convId, remoteMsg) {
   const added = _mergeRemoteMessageOrig(convId, remoteMsg);
-  if (added) {
+  if (added && canDeliverLiveNotification(remoteMsg)) {
     onNewMessageReceived(convId, remoteMsg);
     if (currentScreen === 'chat' && currentConvId === convId) {
       appendMessageToChat(remoteMsg, convId);
     }
+  } else if (added && currentScreen === 'chat' && currentConvId === convId) {
+    appendMessageToChat(remoteMsg, convId);
   }
   return added;
 };
@@ -2169,9 +2198,22 @@ onAppInit(() => {
 });
 
 const _initNotifyEarly = init;
+let firstGlobalSync = true;
 init = function () {
   initNotifyBaseline();
+  beginSyncNotifyMute(12000);
+  suppressNotificationsFor(12000);
   _initNotifyEarly();
+};
+
+const _startGlobalSyncNotifySafe = startGlobalSync;
+startGlobalSync = function () {
+  if (firstGlobalSync) {
+    firstGlobalSync = false;
+    beginSyncNotifyMute(10000);
+    suppressNotificationsFor(8000);
+  }
+  _startGlobalSyncNotifySafe();
 };
 
 function bootBlueChat() {
