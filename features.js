@@ -1495,8 +1495,8 @@ async function startCall(type) {
   if (!remoteId) return;
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: type === 'video'
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: type === 'video' ? { facingMode: 'user' } : false
     });
   } catch (e) {
     showToast('マイク/カメラの許可が必要です');
