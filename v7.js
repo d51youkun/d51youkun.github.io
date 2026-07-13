@@ -25,7 +25,6 @@ const RTC_CONFIG_V7 = {
   iceCandidatePoolSize: 10
 };
 
-let iceCandidateQueue = [];
 let syncVersionTimer = null;
 let unreadBadgeTimer = null;
 
@@ -621,39 +620,6 @@ getMessageContentHtml = function (msg) {
 if (typeof RTC_CONFIG !== 'undefined') {
   Object.assign(RTC_CONFIG, RTC_CONFIG_V7);
 }
-
-function queueIceCandidate(candidate) {
-  iceCandidateQueue.push(candidate);
-}
-
-async function flushIceCandidates(pc) {
-  while (iceCandidateQueue.length) {
-    const c = iceCandidateQueue.shift();
-    try { await pc.addIceCandidate(c); } catch (e) { /* ignore */ }
-  }
-}
-
-const _handleCallSignalV7 = handleCallSignal;
-handleCallSignal = async function (sig) {
-  if (sig.type === 'ice' && peerConnection && sig.payload?.candidate) {
-    if (!peerConnection.remoteDescription) {
-      queueIceCandidate(sig.payload.candidate);
-      return;
-    }
-    try { await peerConnection.addIceCandidate(sig.payload.candidate); } catch (e) { /* */ }
-    return;
-  }
-  await _handleCallSignalV7(sig);
-  if (peerConnection && sig.type === 'answer' && peerConnection.remoteDescription) {
-    await flushIceCandidates(peerConnection);
-  }
-};
-
-const _endCallV7 = endCall;
-endCall = async function () {
-  iceCandidateQueue.length = 0;
-  return _endCallV7();
-};
 
 // ─── Notification guide for unsupported devices ────────────
 function showNotificationGuide() {

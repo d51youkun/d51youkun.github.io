@@ -12,7 +12,6 @@ let callPollTimer = null;
 let callConnectTimeout = null;
 let peerConnection = null;
 let localStream = null;
-let callState = { active: false, type: null, remoteUserId: null, convId: null };
 let transferScanner = null;
 let transferScanHandled = false;
 let pendingIncomingCall = null;
@@ -1064,7 +1063,27 @@ function onTransferScanSuccess(decodedText) {
 }
 
 // ─── WebRTC calls ────────────────────────────────────────
-const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ],
+  iceCandidatePoolSize: 10
+};
+
+let iceCandidateQueue = [];
+let callDisconnectTimer = null;
+let callState = { active: false, type: null, remoteUserId: null, convId: null, startedAt: 0 };
 
 function updateCallButtons(convId) {
   const bar = document.getElementById('chat-call-bar');
@@ -1109,8 +1128,40 @@ function normalizeSdp(sdp) {
   return sdp;
 }
 
-function rewindCallSignalSince() {
-  lastSignalTs = Math.min(lastSignalTs, Date.now() - 30000);
+function queueIceCandidate(candidate) {
+  iceCandidateQueue.push(candidate);
+}
+
+async function flushIceCandidates(pc) {
+  while (iceCandidateQueue.length) {
+    const c = iceCandidateQueue.shift();
+    try { await pc.addIceCandidate(c); } catch (e) { /* ignore */ }
+  }
+}
+
+function clearCallDisconnectTimer() {
+  if (callDisconnectTimer) {
+    clearTimeout(callDisconnectTimer);
+    callDisconnectTimer = null;
+  }
+}
+
+function bumpCallSignalSince() {
+  lastSignalTs = Date.now();
+  callState.startedAt = Date.now();
+}
+
+function shouldAcceptCallHangup(sig) {
+  if (!sig || sig.type !== 'hangup') return false;
+  const from = String(sig.from || '');
+  const ts = sig.timestamp || 0;
+  if (pendingIncomingCall && String(pendingIncomingCall.from) === from) {
+    return ts >= (pendingIncomingCall.timestamp || 0) - 3000;
+  }
+  if (callState.active && String(callState.remoteUserId) === from) {
+    return ts >= (callState.startedAt || 0) - 3000;
+  }
+  return false;
 }
 
 function clearCallConnectTimeout() {
@@ -1126,10 +1177,15 @@ function startCallConnectTimeout(callType) {
     if (!peerConnection || !callState.active) return;
     const ice = peerConnection.iceConnectionState;
     if (ice === 'connected' || ice === 'completed') return;
-    updateCallOverlaySub('接続に失敗しました');
-    showToast('通話の接続がタイムアウトしました');
+    if (!peerConnection.remoteDescription) {
+      updateCallOverlaySub('応答がありません');
+      showToast('相手が応答しませんでした');
+    } else {
+      updateCallOverlaySub('接続に失敗しました');
+      showToast('通話の接続がタイムアウトしました');
+    }
     setTimeout(() => endCall(), 2000);
-  }, 35000);
+  }, 60000);
 }
 
 function setupCallConnectionHandlers(pc, callType) {
@@ -1137,21 +1193,37 @@ function setupCallConnectionHandlers(pc, callType) {
   const onConnected = () => {
     updateCallOverlaySub(connectedLabel);
     clearCallConnectTimeout();
+    clearCallDisconnectTimer();
   };
   pc.oniceconnectionstatechange = () => {
     const s = pc.iceConnectionState;
-    if (s === 'connected' || s === 'completed') onConnected();
-    else if (s === 'failed') {
+    if (s === 'connected' || s === 'completed') {
+      onConnected();
+    } else if (s === 'disconnected') {
+      updateCallOverlaySub('接続が不安定です…');
+      clearCallDisconnectTimer();
+      callDisconnectTimer = setTimeout(() => {
+        if (peerConnection === pc && pc.iceConnectionState === 'disconnected') {
+          showToast('通話が切断されました');
+          endCall();
+        }
+      }, 8000);
+    } else if (s === 'failed') {
+      clearCallDisconnectTimer();
+      if (!pc.remoteDescription) {
+        updateCallOverlaySub('呼び出し中…');
+        return;
+      }
       updateCallOverlaySub('接続に失敗しました');
       showToast('通話の接続に失敗しました');
       setTimeout(() => endCall(), 2000);
     } else if (s === 'checking' || s === 'new') {
-      updateCallOverlaySub('接続中…');
+      updateCallOverlaySub(pc.remoteDescription ? '接続中…' : '呼び出し中…');
     }
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'connected') onConnected();
-    else if (pc.connectionState === 'failed') {
+    else if (pc.connectionState === 'failed' && pc.remoteDescription) {
       showToast('通話を確立できませんでした');
       setTimeout(() => endCall(), 2000);
     }
@@ -1182,6 +1254,8 @@ function hideCallOverlay() {
 
 async function endCall() {
   clearCallConnectTimeout();
+  clearCallDisconnectTimer();
+  iceCandidateQueue.length = 0;
   if (callState.remoteUserId) {
     await sendCallSignal(callState.remoteUserId, 'hangup', {});
   }
@@ -1196,7 +1270,7 @@ async function endCall() {
     peerConnection.close();
     peerConnection = null;
   }
-  callState = { active: false, type: null, remoteUserId: null, convId: null };
+  callState = { active: false, type: null, remoteUserId: null, convId: null, startedAt: 0 };
   hideCallOverlay();
   stopCallPolling();
 }
@@ -1246,7 +1320,8 @@ async function acceptIncomingOffer(sig) {
     active: true,
     type: callType,
     remoteUserId: sig.from,
-    convId: convId || currentConvId
+    convId: convId || currentConvId,
+    startedAt: Date.now()
   };
   peerConnection = new RTCPeerConnection(RTC_CONFIG);
   localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
@@ -1267,8 +1342,8 @@ async function acceptIncomingOffer(sig) {
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
   await sendCallSignal(sig.from, 'answer', { sdp: answer });
-  if (typeof flushIceCandidates === 'function') await flushIceCandidates(peerConnection);
-  rewindCallSignalSince();
+  await flushIceCandidates(peerConnection);
+  bumpCallSignalSince();
   showCallOverlay(callType === 'video' ? 'ビデオ通話中' : '音声通話中', '接続中…');
   startCallConnectTimeout(callType);
   startCallPolling();
@@ -1308,7 +1383,7 @@ async function startCall(type) {
     showToast('マイク/カメラの許可が必要です');
     return;
   }
-  callState = { active: true, type, remoteUserId: remoteId, convId: currentConvId };
+  callState = { active: true, type, remoteUserId: remoteId, convId: currentConvId, startedAt: Date.now() };
   peerConnection = new RTCPeerConnection(RTC_CONFIG);
   localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
   const localV = document.getElementById('call-local-video');
@@ -1322,8 +1397,8 @@ async function startCall(type) {
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
   await sendCallSignal(remoteId, 'offer', { sdp: offer, callType: type });
-  rewindCallSignalSince();
-  showCallOverlay(type === 'video' ? 'ビデオ通話中' : '音声通話中', '接続中…');
+  bumpCallSignalSince();
+  showCallOverlay(type === 'video' ? 'ビデオ通話中' : '音声通話中', '呼び出し中…');
   startCallConnectTimeout(type);
   startCallPolling();
   showToast('発信中…');
@@ -1334,6 +1409,7 @@ async function handleCallSignal(sig) {
   if (!user || !sig || String(sig.to) !== String(user.id)) return;
 
   if (sig.type === 'hangup') {
+    if (!shouldAcceptCallHangup(sig)) return;
     if (pendingIncomingCall && String(pendingIncomingCall.from) === String(sig.from)) {
       pendingIncomingCall = null;
       stopRingtone();
@@ -1351,9 +1427,13 @@ async function handleCallSignal(sig) {
 
   if (sig.type === 'answer' && peerConnection && !peerConnection.remoteDescription) {
     await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
-    if (typeof flushIceCandidates === 'function') await flushIceCandidates(peerConnection);
+    await flushIceCandidates(peerConnection);
+    updateCallOverlaySub('接続中…');
   } else if (sig.type === 'ice' && peerConnection && sig.payload?.candidate) {
-    if (!peerConnection.remoteDescription) return;
+    if (!peerConnection.remoteDescription) {
+      queueIceCandidate(sig.payload.candidate);
+      return;
+    }
     try {
       await peerConnection.addIceCandidate(sig.payload.candidate);
     } catch (e) { /* ignore */ }

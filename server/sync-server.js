@@ -706,8 +706,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'call' && parts[2] === 'signals' && parts[3]) {
+      const userId = String(parts[3]);
       const since = parseInt(url.searchParams.get('since') || '0', 10);
-      const list = (data.callSignals[parts[3]] || []).filter(s => (s.timestamp || 0) > since);
+      const all = data.callSignals[userId] || [];
+      const list = all.filter(s => (s.timestamp || 0) > since);
+      if (list.length) {
+        const delivered = new Set(list.map(s => s.id));
+        data.callSignals[userId] = all.filter(s => !delivered.has(s.id));
+        await saveData(data);
+      }
       sendJson(res, 200, list);
       return;
     }
