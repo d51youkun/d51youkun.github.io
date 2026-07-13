@@ -37,7 +37,7 @@
     <!-- タブナビ -->
     <nav class="tab-nav">
       <button class="tab active" data-tab="chats">トーク</button>
-      <button class="tab" data-tab="notices">お知らせ</button>
+      <button class="tab" data-tab="notices">投稿</button>
       <button class="tab" data-tab="friends">友だち</button>
       <button class="tab" data-tab="feature">要望</button>
       <button class="tab" data-tab="bug">バグ報告</button>
@@ -58,19 +58,27 @@
       </div>
     </div>
 
-    <!-- お知らせ -->
+    <!-- 投稿（公開フィード） -->
     <div id="tab-notices" class="tab-content hidden">
-      <div class="action-bar">
-        <button type="button" id="btn-refresh-notices" class="btn-secondary btn-sm">更新</button>
+      <div class="action-bar feed-action-bar">
+        <button type="button" id="btn-create-post" class="btn-primary btn-sm">写真</button>
+        <button type="button" id="btn-create-post-video" class="btn-secondary btn-sm">動画</button>
+        <button type="button" id="btn-create-post-notice" class="btn-secondary btn-sm">告知</button>
+        <button type="button" id="btn-refresh-feed" class="btn-secondary btn-sm">更新</button>
       </div>
-      <div id="notice-list" class="notice-list"></div>
-      <div id="notice-list-empty" class="empty-state hidden">
-        <p>お知らせはありません</p>
+      <div id="feed-list" class="feed-list"></div>
+      <div id="feed-list-empty" class="empty-state hidden">
+        <p>投稿はありません</p>
+        <p class="sub">写真・動画・告知を投稿してみましょう</p>
       </div>
     </div>
 
     <!-- 友だち一覧 -->
     <div id="tab-friends" class="tab-content hidden">
+      <div id="friend-requests-section" class="friend-requests-section hidden">
+        <h3 class="section-title">友だち申請</h3>
+        <div id="friend-request-list" class="friend-request-list"></div>
+      </div>
       <div class="action-bar">
         <button id="btn-add-friend" class="btn-primary btn-sm">友だち追加</button>
       </div>
@@ -401,6 +409,31 @@
   <!-- トースト -->
   <div id="toast" class="toast hidden"></div>
 
+  <!-- 投稿作成 -->
+  <div id="modal-create-post" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3>投稿を作成</h3>
+      <p class="form-label">種類</p>
+      <select id="input-post-kind" class="sync-settings">
+        <option value="photo">写真</option>
+        <option value="video">動画</option>
+        <option value="notice">告知</option>
+      </select>
+      <p class="form-label">説明・キャプション</p>
+      <textarea id="input-post-text" class="invite-code-input" rows="4" placeholder="説明を入力（告知では必須ではありません）"></textarea>
+      <p class="form-label" id="label-post-media">写真</p>
+      <input type="file" id="input-post-media" accept="image/*">
+      <div id="post-attachment-wrap" class="hidden">
+        <p class="form-label">添付ファイル（ダウンロード用）</p>
+        <input type="file" id="input-post-attachment">
+      </div>
+      <p class="qr-hint">誰でも閲覧できます。写真2MB・動画10MB・添付5MBまで</p>
+      <button type="button" id="btn-submit-post" class="btn-primary">投稿する</button>
+      <button class="btn-close-modal">閉じる</button>
+    </div>
+  </div>
+
   <!-- スタンプ -->
   <div id="modal-stickers" class="modal hidden">
     <div class="modal-backdrop"></div>
@@ -416,6 +449,12 @@
         <input type="text" id="input-custom-sticker-name" placeholder="スタンプ帳の名前" maxlength="30">
         <input type="file" id="input-custom-sticker-images" accept="image/*,.gif,image/gif,image/webp" multiple>
         <button type="button" id="btn-create-custom-stickers" class="btn-secondary btn-sm">スタンプを作成</button>
+      </div>
+      <div class="sticker-import">
+        <p class="form-label">共有コードでスタンプを取り込む</p>
+        <input type="text" id="input-sticker-share-code" placeholder="bc-sticker:xxxxxx" class="sync-settings">
+        <button type="button" id="btn-import-sticker-share" class="btn-secondary btn-sm">取り込む</button>
+        <p class="qr-hint" id="sticker-share-code"></p>
       </div>
       <div id="sticker-grid" class="sticker-grid"></div>
       <a href="https://creator.line.me/ja/" target="_blank" rel="noopener" id="btn-line-sticker-shop" class="btn-secondary btn-sm" style="display:block;text-align:center;margin:12px 0;text-decoration:none">LINEスタンプを作る（無料）</a>

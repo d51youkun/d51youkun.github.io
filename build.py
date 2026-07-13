@@ -58,7 +58,7 @@ def get_app_js() -> str:
 def get_merged_js() -> str:
     """app.js + features.js + v4.js + v6.js + v7.js + v8.js を1つのスクリプトに結合"""
     parts_js = [get_app_js(), read("features.js"), read("v4.js")]
-    for extra in ("v6.js", "v7.js", "v8.js", "v9.js", "v10.js"):
+    for extra in ("v6.js", "v7.js", "v8.js", "v9.js", "v10.js", "v11.js"):
         p = ROOT / extra
         if p.exists():
             parts_js.append(read(extra))
@@ -123,7 +123,7 @@ def export_version_folder(pages_html: str, version: str) -> None:
             shutil.rmtree(dest_server)
         shutil.copytree(server_src, dest_server)
 
-    for name in ("app.js", "features.js", "v4.js", "v6.js", "v7.js", "v8.js", "v9.js", "v10.js", "body.html", "styles.css", "build.py"):
+    for name in ("app.js", "features.js", "v4.js", "v6.js", "v7.js", "v8.js", "v9.js", "v10.js", "v11.js", "body.html", "styles.css", "build.py"):
         src = ROOT / name
         if src.exists():
             shutil.copy2(src, out_dir / name)

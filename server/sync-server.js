@@ -206,9 +206,46 @@ function emptyData() {
     presence: {},
     announcements: [],
     announcementReads: {},
+    posts: [],
+    friendRequests: [],
+    sharedStickerPacks: {},
     activityVersion: 0,
     titlePresets: []
   };
+}
+
+function createFriendshipOnServer(data, id1, id2, createdAt) {
+  const a = String(id1);
+  const b = String(id2);
+  if (!a || !b || a === b) return false;
+  if (!data.friendships) data.friendships = {};
+  if (!data.userFriendships) data.userFriendships = {};
+  if (!data.conversations) data.conversations = {};
+  if (!data.userConversations) data.userConversations = {};
+  const key = 'f_' + [a, b].sort().join('_');
+  if (!data.friendships[key]) {
+    data.friendships[key] = { user1: a, user2: b, createdAt: createdAt || Date.now() };
+  }
+  [a, b].forEach(uid => {
+    if (!data.userFriendships[uid]) data.userFriendships[uid] = {};
+    data.userFriendships[uid][uid === a ? b : a] = true;
+  });
+  const convId = 'dm_' + [a, b].sort().join('_');
+  if (!data.conversations[convId]) {
+    data.conversations[convId] = {
+      id: convId,
+      type: 'direct',
+      members: [a, b].sort(),
+      createdAt: createdAt || Date.now(),
+      lastMessageAt: null,
+      lastMessagePreview: null
+    };
+  }
+  [a, b].forEach(uid => {
+    if (!data.userConversations[uid]) data.userConversations[uid] = {};
+    data.userConversations[uid][convId] = true;
+  });
+  return true;
 }
 
 function normalizeData(data) {
@@ -905,6 +942,9 @@ const server = http.createServer(async (req, res) => {
         groupId: body.groupId || null,
         authorId: body.authorId,
         authorName: body.authorName || '管理者',
+        authorAvatar: body.authorAvatar || null,
+        media: body.media || null,
+        attachment: body.attachment || null,
         createdAt: Date.now(),
         comments: []
       };
@@ -961,6 +1001,183 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'announcement-reads' && parts[2]) {
       sendJson(res, 200, data.announcementReads[parts[2]] || {});
+      return;
+    }
+
+    // Public feed posts (photo / video / notice)
+    if (!data.posts) data.posts = [];
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'posts') {
+      const list = [...data.posts].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      sendJson(res, 200, list.slice(0, 300));
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'posts') {
+      const body = await readBody(req);
+      if (!body.authorId) {
+        sendJson(res, 400, { error: 'author_required' });
+        return;
+      }
+      const entry = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        kind: body.kind || 'photo',
+        text: body.text || '',
+        authorId: String(body.authorId),
+        authorName: body.authorName || 'ユーザー',
+        authorAvatar: body.authorAvatar || null,
+        media: body.media || null,
+        attachment: body.attachment || null,
+        createdAt: Date.now()
+      };
+      data.posts.unshift(entry);
+      if (data.posts.length > 300) data.posts = data.posts.slice(0, 300);
+      await saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true, id: entry.id });
+      return;
+    }
+    if (req.method === 'DELETE' && parts[0] === 'api' && parts[1] === 'posts' && parts[2]) {
+      const body = await readBody(req);
+      const post = data.posts.find(p => p.id === parts[2]);
+      if (!post) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      if (String(post.authorId) !== String(body.userId || '')) {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      data.posts = data.posts.filter(p => p.id !== parts[2]);
+      await saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    // Friend requests (apply → accept → friendship without QR)
+    if (!data.friendRequests) data.friendRequests = [];
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'friend-requests') {
+      const userId = String(url.searchParams.get('userId') || '');
+      if (!userId) {
+        sendJson(res, 400, { error: 'user_required' });
+        return;
+      }
+      const list = (data.friendRequests || []).filter(r =>
+        r.status === 'pending' && (String(r.fromId) === userId || String(r.toId) === userId)
+      );
+      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      sendJson(res, 200, list);
+      return;
+    }
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'friend-requests') {
+      const body = await readBody(req);
+      const fromId = String(body.fromId || '');
+      const toId = String(body.toId || '');
+      if (!fromId || !toId || fromId === toId) {
+        sendJson(res, 400, { error: 'invalid' });
+        return;
+      }
+      const uf = (data.userFriendships && data.userFriendships[fromId]) || {};
+      if (uf[toId]) {
+        sendJson(res, 409, { error: 'already_friends' });
+        return;
+      }
+      const existing = (data.friendRequests || []).find(r =>
+        r.status === 'pending' &&
+        ((String(r.fromId) === fromId && String(r.toId) === toId) ||
+         (String(r.fromId) === toId && String(r.toId) === fromId))
+      );
+      if (existing) {
+        sendJson(res, 200, { ok: true, id: existing.id, existing: true });
+        return;
+      }
+      const entry = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        fromId,
+        fromName: body.fromName || 'ユーザー',
+        fromAvatar: body.fromAvatar || null,
+        toId,
+        message: body.message || '',
+        status: 'pending',
+        createdAt: Date.now()
+      };
+      data.friendRequests.unshift(entry);
+      if (data.friendRequests.length > 500) data.friendRequests = data.friendRequests.slice(0, 500);
+      await saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true, id: entry.id });
+      return;
+    }
+    if (req.method === 'PUT' && parts[0] === 'api' && parts[1] === 'friend-requests' && parts[2]) {
+      const body = await readBody(req);
+      const reqId = parts[2];
+      const userId = String(body.userId || '');
+      const action = body.action || '';
+      const fr = (data.friendRequests || []).find(r => r.id === reqId);
+      if (!fr) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      if (String(fr.toId) !== userId) {
+        sendJson(res, 403, { error: 'forbidden' });
+        return;
+      }
+      if (fr.status !== 'pending') {
+        sendJson(res, 409, { error: 'already_handled' });
+        return;
+      }
+      if (action === 'decline') {
+        fr.status = 'declined';
+        fr.handledAt = Date.now();
+        await saveDataWithActivity(data);
+        sendJson(res, 200, { ok: true, status: 'declined' });
+        return;
+      }
+      if (action === 'accept') {
+        fr.status = 'accepted';
+        fr.handledAt = Date.now();
+        createFriendshipOnServer(data, fr.fromId, fr.toId, Date.now());
+        await saveDataWithActivity(data);
+        sendJson(res, 200, { ok: true, status: 'accepted' });
+        return;
+      }
+      sendJson(res, 400, { error: 'invalid_action' });
+      return;
+    }
+
+    // Shared sticker packs (free share via bc-sticker:CODE)
+    if (!data.sharedStickerPacks) data.sharedStickerPacks = {};
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'shared-sticker-packs') {
+      const body = await readBody(req);
+      const shareId = String(body.shareId || '').trim() ||
+        (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).slice(0, 10);
+      if (!body.stickers || !body.stickers.length) {
+        sendJson(res, 400, { error: 'stickers_required' });
+        return;
+      }
+      const entry = {
+        shareId,
+        packName: body.packName || '共有スタンプ',
+        authorId: body.authorId || null,
+        authorName: body.authorName || 'ユーザー',
+        stickers: body.stickers.slice(0, 40),
+        createdAt: Date.now()
+      };
+      data.sharedStickerPacks[shareId] = entry;
+      const keys = Object.keys(data.sharedStickerPacks);
+      if (keys.length > 200) {
+        keys.sort((a, b) =>
+          (data.sharedStickerPacks[a].createdAt || 0) - (data.sharedStickerPacks[b].createdAt || 0)
+        );
+        keys.slice(0, keys.length - 200).forEach(k => delete data.sharedStickerPacks[k]);
+      }
+      await saveDataWithActivity(data);
+      sendJson(res, 200, { ok: true, shareId, code: 'bc-sticker:' + shareId });
+      return;
+    }
+    if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'shared-sticker-packs' && parts[2]) {
+      const pack = data.sharedStickerPacks[parts[2]] || null;
+      if (!pack) {
+        sendJson(res, 404, { error: 'not_found' });
+        return;
+      }
+      sendJson(res, 200, pack);
       return;
     }
 
