@@ -15,6 +15,7 @@ let localStream = null;
 let transferScanner = null;
 let transferScanHandled = false;
 let pendingIncomingCall = null;
+let pendingIncomingIceQueue = [];
 let ringToneTimer = null;
 let audioCtx = null;
 const NOTIFY_STATE_PREFIX = 'bluechat_notify_v3_';
@@ -419,7 +420,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-15-stable-v26');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-15-stable-v27');
   } catch (e) { /* ignore */ }
 }
 
@@ -1390,7 +1391,7 @@ function normalizeIceCandidate(candidate) {
   }
 }
 
-function waitForIceGathering(pc, timeoutMs = 10000) {
+function waitForIceGathering(pc, timeoutMs = 1200) {
   return new Promise(resolve => {
     if (!pc || pc.iceGatheringState === 'complete') {
       resolve();
@@ -1451,7 +1452,7 @@ async function sendCallSignal(toUserId, type, payload) {
   await req('/api/call/signal', {
     method: 'POST',
     body: JSON.stringify({ from: user.id, to: toUserId, type, payload, timestamp: Date.now() })
-  }, 60000);
+  }, 15000);
 }
 
 function getOtherUserIdInConv(convId) {
@@ -1498,20 +1499,20 @@ function scheduleIceRestart(remoteUserId, callType) {
   clearCallIceRestartTimer();
   callIceRestartTimer = setTimeout(async () => {
     if (!peerConnection || !callState.active) return;
+    if (!peerConnection.remoteDescription) return;
     const ice = peerConnection.iceConnectionState;
     if (ice === 'connected' || ice === 'completed') return;
     try {
       updateCallOverlaySub('接続を再試行中…');
       const offer = await peerConnection.createOffer({ iceRestart: true });
       await peerConnection.setLocalDescription(offer);
-      await waitForIceGathering(peerConnection);
       await sendCallSignal(remoteUserId, 'offer', {
         sdp: peerConnection.localDescription,
         callType,
         iceRestart: true
       });
     } catch (e) { /* ignore */ }
-  }, isAppleDevice() ? 10000 : 15000);
+  }, isAppleDevice() ? 18000 : 25000);
 }
 
 function clearCallDisconnectTimer() {
@@ -1578,7 +1579,7 @@ function setupCallConnectionHandlers(pc, callType) {
           showToast('通話が切断されました');
           endCall();
         }
-      }, 8000);
+      }, 15000);
     } else if (s === 'closed') {
       clearCallDisconnectTimer();
       if (callState.active && peerConnection === pc) {
@@ -1646,6 +1647,7 @@ async function endCall(options = {}) {
       await sendCallSignal(remoteUserId, 'hangup', { endedAt: Date.now() });
     }
     pendingIncomingCall = null;
+    pendingIncomingIceQueue = [];
     stopRingtone();
     hideIncomingCallUI();
     if (localStream) {
@@ -1735,8 +1737,9 @@ async function acceptIncomingOffer(sig) {
   await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
-  await waitForIceGathering(peerConnection);
   await sendCallSignal(sig.from, 'answer', { sdp: peerConnection.localDescription });
+  (pendingIncomingIceQueue || []).forEach(c => queueIceCandidate(c));
+  pendingIncomingIceQueue = [];
   await flushIceCandidates(peerConnection);
   bumpCallSignalSince();
   showCallOverlay(callType === 'video' ? 'ビデオ通話中' : '音声通話中', '接続中…');
@@ -1751,6 +1754,7 @@ async function declineIncomingCall() {
   if (pendingIncomingCall) {
     await sendCallSignal(pendingIncomingCall.from, 'hangup', {});
     pendingIncomingCall = null;
+    pendingIncomingIceQueue = [];
   }
 }
 
@@ -1770,12 +1774,16 @@ async function startCall(type) {
   }
   const remoteId = getOtherUserIdInConv(currentConvId);
   if (!remoteId) return;
+
+  showCallOverlay(type === 'video' ? 'ビデオ通話' : '音声通話', '準備中…');
+
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true },
       video: type === 'video' ? { facingMode: 'user' } : false
     });
   } catch (e) {
+    hideCallOverlay();
     showToast('マイク/カメラの許可が必要です');
     return;
   }
@@ -1790,16 +1798,14 @@ async function startCall(type) {
 
   attachCallPeerHandlers(peerConnection, remoteId, type);
 
+  updateCallOverlaySub('呼び出し中…');
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
-  await waitForIceGathering(peerConnection);
   await sendCallSignal(remoteId, 'offer', { sdp: peerConnection.localDescription, callType: type });
   bumpCallSignalSince();
-  showCallOverlay(type === 'video' ? 'ビデオ通話中' : '音声通話中', '呼び出し中…');
   startCallConnectTimeout(type);
   scheduleIceRestart(remoteId, type);
   startCallPolling();
-  showToast('発信中…');
 }
 
 async function handleCallSignal(sig) {
@@ -1810,6 +1816,7 @@ async function handleCallSignal(sig) {
     if (!shouldAcceptCallHangup(sig)) return;
     if (pendingIncomingCall && String(pendingIncomingCall.from) === String(sig.from)) {
       pendingIncomingCall = null;
+      pendingIncomingIceQueue = [];
       stopRingtone();
       hideIncomingCallUI();
       showToast('相手が通話をキャンセルしました');
@@ -1825,16 +1832,27 @@ async function handleCallSignal(sig) {
     await peerConnection.setRemoteDescription(normalizeSdp(sig.payload.sdp));
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
-    await waitForIceGathering(peerConnection);
     await sendCallSignal(sig.from, 'answer', { sdp: peerConnection.localDescription });
     await flushIceCandidates(peerConnection);
     updateCallOverlaySub('接続中…');
     return;
   }
 
+  if (sig.type === 'offer' && pendingIncomingCall && String(sig.from) === String(pendingIncomingCall.from) && sig.payload?.iceRestart) {
+    pendingIncomingCall = sig;
+    return;
+  }
+
   if (sig.type === 'offer' && !callState.active && !pendingIncomingCall) {
     pendingIncomingCall = sig;
+    pendingIncomingIceQueue = [];
     showIncomingCallUI(sig);
+    return;
+  }
+
+  if (sig.type === 'ice' && pendingIncomingCall && String(sig.from) === String(pendingIncomingCall.from)) {
+    if (sig.payload?.endOfCandidates) return;
+    if (sig.payload?.candidate) pendingIncomingIceQueue.push(sig.payload.candidate);
     return;
   }
 
@@ -1864,7 +1882,7 @@ function startCallPolling() {
   const poll = async () => {
     const user = getCurrentUser();
     if (!user || !getEffectiveSyncUrl() || !callState.active) return;
-    const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 60000);
+    const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 15000);
     if (Array.isArray(signals)) {
       for (const sig of signals) {
         lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
@@ -1873,7 +1891,7 @@ function startCallPolling() {
     }
   };
   poll();
-  callPollTimer = setInterval(poll, isAppleDevice() ? 400 : 800);
+  callPollTimer = setInterval(poll, isAppleDevice() ? 300 : 500);
 }
 
 function stopCallPolling() {
@@ -1883,26 +1901,42 @@ function stopCallPolling() {
   }
 }
 
+function processGlobalCallSignals(signals) {
+  if (!Array.isArray(signals)) return;
+  for (const sig of signals) {
+    lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
+    if (sig.type === 'hangup') {
+      handleCallSignal(sig);
+      continue;
+    }
+    if (callState.active) continue;
+    if (pendingIncomingCall && String(sig.from) === String(pendingIncomingCall.from)) {
+      if (sig.type === 'ice') {
+        if (!sig.payload?.endOfCandidates && sig.payload?.candidate) {
+          pendingIncomingIceQueue.push(sig.payload.candidate);
+        }
+      } else if (sig.type === 'offer' && sig.payload?.iceRestart) {
+        pendingIncomingCall = sig;
+      }
+      continue;
+    }
+    if (sig.type === 'offer' && !pendingIncomingCall) {
+      handleCallSignal(sig);
+    }
+  }
+}
+
 // Global signal poll for incoming calls
 function startGlobalCallPolling() {
   const req = typeof cloudRequestExt === 'function' ? cloudRequestExt : cloudRequest;
-  setInterval(async () => {
+  const poll = async () => {
     const user = getCurrentUser();
     if (!user || !getEffectiveSyncUrl()) return;
-    const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 60000);
-    if (!Array.isArray(signals)) return;
-    for (const sig of signals) {
-      lastSignalTs = Math.max(lastSignalTs, sig.timestamp || 0);
-      if (sig.type === 'hangup') {
-        await handleCallSignal(sig);
-        continue;
-      }
-      if (callState.active) continue;
-      if (sig.type === 'offer' && !pendingIncomingCall) {
-        await handleCallSignal(sig);
-      }
-    }
-  }, 1500);
+    const signals = await req(`/api/call/signals/${user.id}?since=${lastSignalTs}`, {}, 15000);
+    processGlobalCallSignals(signals);
+  };
+  poll();
+  setInterval(poll, isAppleDevice() ? 450 : 700);
 }
 
 // ─── Feature init ────────────────────────────────────────

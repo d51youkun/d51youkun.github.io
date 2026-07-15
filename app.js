@@ -1301,6 +1301,12 @@ async function syncPushLocalMessages(convId) {
   }
 }
 
+function getLastLocalMessageTimestamp(convId) {
+  const msgs = getMessages(convId);
+  if (!msgs.length) return 0;
+  return msgs[msgs.length - 1].timestamp || 0;
+}
+
 async function syncConversation(convId) {
   if (!getSyncUrl() || !convId) return 0;
 
@@ -1317,7 +1323,9 @@ async function syncConversation(convId) {
     }
   }
 
-  const remote = await cloudFetchMessages(convId, 0);
+  const lastTs = getLastLocalMessageTimestamp(convId);
+  const since = lastTs > 0 ? Math.max(0, lastTs - 2000) : 0;
+  const remote = await cloudFetchMessages(convId, since);
   let added = 0;
   for (const msg of remote) {
     if (mergeRemoteMessage(convId, msg)) added++;
@@ -1478,8 +1486,13 @@ async function syncAllConversations() {
   const friendsAdded = await syncFriendships();
   await syncUserConversationList();
   const convs = getUserConversations(user.id);
+  const sorted = [...convs].sort((a, b) => {
+    if (a.id === currentConvId) return -1;
+    if (b.id === currentConvId) return 1;
+    return (b.lastMessageAt || 0) - (a.lastMessageAt || 0);
+  });
   let total = 0;
-  for (const conv of convs) {
+  for (const conv of sorted) {
     total += await syncConversation(conv.id);
   }
   if (typeof updateTabBadges === 'function') updateTabBadges();
@@ -1512,7 +1525,7 @@ function startGlobalSync() {
   stopGlobalSync();
   if (!getSyncUrl()) return;
   syncAllConversations();
-  globalSyncTimer = setInterval(syncAllConversations, 4000);
+  globalSyncTimer = setInterval(syncAllConversations, 2500);
 }
 
 function stopGlobalSync() {
@@ -1532,7 +1545,7 @@ function startChatSync(convId) {
     await syncConversation(convId);
     if (currentConvId === convId) renderMessages(convId);
     renderChatList();
-  }, 2000);
+  }, 1000);
 }
 
 function stopChatSync() {

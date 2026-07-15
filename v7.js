@@ -3,7 +3,7 @@
  */
 const THEME_KEY = 'bluechat_theme';
 const ACTIVITY_VERSION_KEY = 'bluechat_activity_version';
-const ACTIVITY_POLL_MS = 4000;
+const ACTIVITY_POLL_MS = 2000;
 const ANNOUNCE_READ_KEY = 'bluechat_ann_read';
 
 const RTC_CONFIG_V7 = {

@@ -2,7 +2,7 @@
  * BlueChatX — branding & super-admin extensions
  */
 var APP_VERSION = 'BlueChatX';
-const BUILD_STAMP = 'BlueChatX-2026-07-15-stable-v26';
+const BUILD_STAMP = 'BlueChatX-2026-07-15-stable-v27';
 
 function applyAppBranding() {
   const title = 'BlueChatX';
