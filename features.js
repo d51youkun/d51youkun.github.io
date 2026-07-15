@@ -419,7 +419,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-15-stable-v25');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-15-stable-v26');
   } catch (e) { /* ignore */ }
 }
 

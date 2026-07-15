@@ -371,6 +371,7 @@ async function renderFeed() {
 
   if (!feedItems.length) {
     empty?.classList.remove('hidden');
+    if (typeof setFeedEmptyMessage === 'function') setFeedEmptyMessage(empty);
     return;
   }
   empty?.classList.add('hidden');
