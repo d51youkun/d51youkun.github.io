@@ -597,7 +597,7 @@ function getQrScannerConfig() {
 let lastInvalidQrToastAt = 0;
 
 async function queueFriendInviteCloudSync(meId, friendId, targetUser, convId) {
-  if (!getSyncUrl()) return false;
+  if (!getUsableSyncUrl()) return false;
   const me = getCurrentUser();
   try {
     if (me) await cloudPushUser(me);
@@ -648,7 +648,7 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
   }
 
   let cloudSynced = false;
-  if (getSyncUrl()) {
+  if (getUsableSyncUrl()) {
     cloudSynced = await queueFriendInviteCloudSync(meId, friendId, targetUser, convId);
     if (me) cloudPushUser(me);
     cloudFetchUser(friendId).then(remote => {
@@ -670,7 +670,7 @@ async function handleFriendInviteSuccess(result) {
   else refreshMainUI();
   if (result.alreadyFriends) {
     showToast(`${result.user.name}さんとはすでに友だちです`);
-  } else if (result.cloudSynced === false && getSyncUrl()) {
+  } else if (result.cloudSynced === false && getUsableSyncUrl()) {
     showToast(`${result.user.name}さんを追加しました（同期サーバーへの送信に失敗。マイページで接続を確認してください）`);
   } else {
     showToast(`${result.user.name}さんと友だちになりました！`);
@@ -1000,7 +1000,9 @@ function getSyncUrlCandidates() {
       localStorage.setItem(SYNC_URL_KEY, migrated.join(SYNC_URL_DELIMITER));
       localStorage.setItem(SYNC_CONFIGURED_KEY, '1');
     }
-  } else if (typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+  }
+
+  if (typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
     add(DEFAULT_SYNC_URL);
   }
 
@@ -1011,9 +1013,14 @@ function getSyncUrlCandidates() {
   return urls;
 }
 
-function getSyncUrl() {
+function getUsableSyncUrl() {
   const candidates = getSyncUrlCandidates();
-  return candidates[0] || '';
+  const usable = candidates.filter(u => !isMixedContentBlocked(u));
+  return usable[0] || '';
+}
+
+function getSyncUrl() {
+  return getUsableSyncUrl() || getSyncUrlCandidates()[0] || '';
 }
 
 function setSyncUrl(url) {
@@ -1044,18 +1051,43 @@ function getSyncUrlFormatHint() {
   return 'ドメイン・IPどちらでもOK（例: https://bluechat-sync-846f.onbelmo.uk または 192.168.1.5:8766）。複数はカンマ区切り。';
 }
 
+function repairSyncUrlForCurrentPage() {
+  const candidates = getSyncUrlCandidates();
+  const usable = candidates.filter(u => !isMixedContentBlocked(u));
+  if (!usable.length) {
+    if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+      const normalized = normalizeSyncUrl(DEFAULT_SYNC_URL);
+      if (normalized && !isMixedContentBlocked(normalized)) {
+        localStorage.setItem(SYNC_URL_KEY, normalized);
+        localStorage.setItem(SYNC_CONFIGURED_KEY, '1');
+      }
+    }
+    return;
+  }
+  const stored = localStorage.getItem(SYNC_URL_KEY) || '';
+  const firstStored = stored.split(SYNC_URL_DELIMITER).map(s => normalizeSyncUrl(s.trim())).filter(Boolean)[0];
+  if (firstStored && isMixedContentBlocked(firstStored)) {
+    const reordered = [usable[0], ...candidates.filter(u => u !== usable[0])];
+    localStorage.setItem(SYNC_URL_KEY, reordered.join(SYNC_URL_DELIMITER));
+    localStorage.setItem(SYNC_CONFIGURED_KEY, '1');
+  }
+}
+
 function initSyncFromQuery() {
   migrateStoredSyncUrlIfNeeded();
   const params = new URLSearchParams(window.location.search);
   const sync = params.get('sync');
   if (sync) {
     setSyncUrl(sync);
+    repairSyncUrlForCurrentPage();
     return;
   }
-  if (localStorage.getItem(SYNC_CONFIGURED_KEY)) return;
-  if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
-    setSyncUrl(DEFAULT_SYNC_URL);
+  if (!localStorage.getItem(SYNC_CONFIGURED_KEY)) {
+    if (DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+      setSyncUrl(DEFAULT_SYNC_URL);
+    }
   }
+  repairSyncUrlForCurrentPage();
 }
 
 async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000) {
@@ -1078,14 +1110,14 @@ async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000) {
 }
 
 async function cloudRequest(path, options = {}, timeoutMs = 45000) {
-  const candidates = typeof getSyncUrlCandidates === 'function'
-    ? getSyncUrlCandidates()
-    : [typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl()].filter(Boolean);
+  if (typeof cloudRequestExt === 'function') {
+    return cloudRequestExt(path, options, timeoutMs);
+  }
+  const candidates = getSyncUrlCandidates().filter(u => !isMixedContentBlocked(u));
   if (!candidates.length) return null;
 
   let lastResult = null;
   for (let i = 0; i < candidates.length; i++) {
-    if (isMixedContentBlocked(candidates[i])) continue;
     const result = await cloudRequestToBase(candidates[i], path, options, timeoutMs);
     if (result !== null) {
       if (i > 0) {
@@ -1109,7 +1141,7 @@ async function testSyncConnection(retries = 5) {
 }
 
 async function cloudPushConversation(conv) {
-  if (!conv || !getSyncUrl()) return;
+  if (!conv || !getUsableSyncUrl()) return;
   await cloudRequest(`/api/conversations/${conv.id}`, {
     method: 'PUT',
     body: JSON.stringify(conv)
@@ -1117,7 +1149,7 @@ async function cloudPushConversation(conv) {
 }
 
 async function cloudDeleteMessage(convId, msgId) {
-  if (!getSyncUrl()) return false;
+  if (!getUsableSyncUrl()) return false;
   const res = await cloudRequest(`/api/messages/${convId}/${msgId}`, { method: 'DELETE' });
   return !!(res && res.ok);
 }
@@ -1195,7 +1227,7 @@ function markMessagePushed(convId, msg) {
 }
 
 async function syncMessageDeletions(convId) {
-  if (!getSyncUrl() || !convId) return;
+  if (!getUsableSyncUrl() || !convId) return;
   const ids = await cloudRequest(`/api/messages/${convId}/ids`);
   if (!Array.isArray(ids)) return;
   // サーバーにまだメッセージが無い場合はローカル履歴を消さない
@@ -1239,7 +1271,7 @@ function messageUploadTimeout(msg) {
 }
 
 async function cloudPushMessage(convId, msg) {
-  if (!getSyncUrl()) return false;
+  if (!getUsableSyncUrl()) return false;
   const res = await cloudRequest(`/api/messages/${convId}/${msg.id}`, {
     method: 'PUT',
     body: JSON.stringify(msg)
@@ -1286,7 +1318,7 @@ function mergeRemoteMessage(convId, remoteMsg) {
 }
 
 async function syncPushLocalMessages(convId) {
-  if (!getSyncUrl() || !convId) return;
+  if (!getUsableSyncUrl() || !convId) return;
   const ids = await cloudRequest(`/api/messages/${convId}/ids`);
   const idSet = Array.isArray(ids) ? new Set(ids) : null;
   const pendingIds = getPendingMessageIds(convId);
@@ -1308,7 +1340,7 @@ function getLastLocalMessageTimestamp(convId) {
 }
 
 async function syncConversation(convId) {
-  if (!getSyncUrl() || !convId) return 0;
+  if (!getUsableSyncUrl() || !convId) return 0;
 
   await syncPushLocalMessages(convId);
   await syncMessageDeletions(convId);
@@ -1324,18 +1356,30 @@ async function syncConversation(convId) {
   }
 
   const lastTs = getLastLocalMessageTimestamp(convId);
-  const since = lastTs > 0 ? Math.max(0, lastTs - 2000) : 0;
-  const remote = await cloudFetchMessages(convId, since);
+  const since = lastTs > 0 ? Math.max(0, lastTs - 5000) : 0;
+  let remote = await cloudFetchMessages(convId, since);
   let added = 0;
   for (const msg of remote) {
     if (mergeRemoteMessage(convId, msg)) added++;
+  }
+
+  if (since > 0) {
+    const serverIds = await cloudRequest(`/api/messages/${convId}/ids`);
+    const localIds = new Set(getMessages(convId).map(m => m.id));
+    const missing = Array.isArray(serverIds) && serverIds.some(id => !localIds.has(id));
+    if (missing) {
+      remote = await cloudFetchMessages(convId, 0);
+      for (const msg of remote) {
+        if (mergeRemoteMessage(convId, msg)) added++;
+      }
+    }
   }
   return added;
 }
 
 async function syncCurrentUserProfile() {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return false;
+  if (!user || !getUsableSyncUrl()) return false;
   const remote = await cloudFetchUser(user.id);
   if (!remote || !remote.id) return false;
   const changed = applyRemoteUserFields(user.id, remote);
@@ -1344,7 +1388,7 @@ async function syncCurrentUserProfile() {
 }
 
 async function cloudPushUser(user) {
-  if (!user || !user.id || !getSyncUrl()) return false;
+  if (!user || !user.id || !getUsableSyncUrl()) return false;
   const remote = await cloudFetchUser(user.id);
   if (remote?.id) {
     const remoteTs = remote.avatarUpdatedAt || 0;
@@ -1384,7 +1428,7 @@ async function cloudFetchUser(userId) {
 }
 
 async function cloudPushFriendship(id1, id2) {
-  if (!getSyncUrl()) return false;
+  if (!getUsableSyncUrl()) return false;
   const key = [String(id1), String(id2)].sort().join('_');
   for (let i = 0; i < 4; i++) {
     const res = await cloudRequest(`/api/friendships/${key}`, {
@@ -1404,7 +1448,7 @@ async function cloudFetchFriendIds(userId) {
 
 async function syncFriendProfiles() {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return false;
+  if (!user || !getUsableSyncUrl()) return false;
   let friendIds = getFriends(user.id).map(f => String(f.id));
   const remoteIds = await cloudFetchFriendIds(user.id);
   if (Array.isArray(remoteIds)) {
@@ -1428,7 +1472,7 @@ async function syncFriendProfiles() {
 
 async function syncFriendships() {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return 0;
+  if (!user || !getUsableSyncUrl()) return 0;
 
   await syncCurrentUserProfile();
   const friendIds = await cloudFetchFriendIds(user.id);
@@ -1455,7 +1499,7 @@ async function syncFriendships() {
 
 async function syncUserConversationList() {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return;
+  if (!user || !getUsableSyncUrl()) return;
   const convIds = await cloudRequest(`/api/user/${user.id}/conversations`);
   if (!Array.isArray(convIds)) return;
   const data = getData();
@@ -1479,7 +1523,7 @@ async function syncUserConversationList() {
 }
 
 async function syncAllConversations() {
-  if (!getSyncUrl()) return;
+  if (!getUsableSyncUrl()) return;
   const user = getCurrentUser();
   if (!user) return;
   if (typeof syncCurrentUserModeration === 'function') await syncCurrentUserModeration();
@@ -1512,18 +1556,23 @@ function refreshUIAfterSync() {
 }
 
 async function cloudSyncAfterSend(convId, msg) {
-  if (!getSyncUrl()) return;
+  if (!getUsableSyncUrl()) return;
   trackPendingMessage(convId, msg.id);
   const data = getData();
   const conv = data.conversations[convId];
   if (conv) await cloudPushConversation(conv);
-  const pushed = await cloudPushMessage(convId, msg);
+  let pushed = await cloudPushMessage(convId, msg);
+  if (!pushed) {
+    await new Promise(r => setTimeout(r, 400));
+    pushed = await cloudPushMessage(convId, msg);
+  }
   if (!pushed) trackPendingMessage(convId, msg.id);
+  else if (typeof syncConversation === 'function') syncConversation(convId).catch(() => {});
 }
 
 function startGlobalSync() {
   stopGlobalSync();
-  if (!getSyncUrl()) return;
+  if (!getUsableSyncUrl()) return;
   syncAllConversations();
   globalSyncTimer = setInterval(syncAllConversations, 2500);
 }
@@ -1537,7 +1586,7 @@ function stopGlobalSync() {
 
 function startChatSync(convId) {
   stopChatSync();
-  if (!getSyncUrl() || !convId) return;
+  if (!getUsableSyncUrl() || !convId) return;
   syncConversation(convId).then(() => {
     if (currentConvId === convId) renderMessages(convId);
   });
@@ -1564,7 +1613,7 @@ function updateSyncStatusUI(forceCheck) {
   if (!status || !input) return;
   input.value = getSyncUrlCandidates().join(SYNC_URL_DELIMITER + ' ');
   if (hint) hint.textContent = getSyncUrlFormatHint();
-  if (!getSyncUrl()) {
+  if (!getUsableSyncUrl()) {
     status.textContent = '未設定 — ドメインまたはIPアドレスを入力してください';
     status.classList.add('warn');
     return;
@@ -1708,7 +1757,7 @@ function pushMessage(convId, senderId, msgData) {
   conv.lastMessageSenderId = senderId;
   try {
     saveData(data);
-    if (getSyncUrl()) trackPendingMessage(convId, msg.id);
+    if (getUsableSyncUrl()) trackPendingMessage(convId, msg.id);
     cloudSyncAfterSend(convId, msg);
     return msg;
   } catch (e) {
@@ -1743,7 +1792,7 @@ async function deleteMessage(convId, msgId) {
   syncConversationMeta(convId);
   saveData(data);
   unmarkMessageSynced(convId, msgId);
-  if (getSyncUrl()) await cloudDeleteMessage(convId, msgId);
+  if (getUsableSyncUrl()) await cloudDeleteMessage(convId, msgId);
   return true;
 }
 

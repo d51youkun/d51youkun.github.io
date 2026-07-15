@@ -300,7 +300,8 @@ function markAnnouncementRead(annId) {
 
 async function fetchAnnouncements() {
   const user = getCurrentUser();
-  const syncBase = typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl();
+  const syncBase = typeof getUsableSyncUrl === 'function' ? getUsableSyncUrl()
+    : (typeof getEffectiveSyncUrl === 'function' ? getEffectiveSyncUrl() : getSyncUrl());
   if (!user || !syncBase) return [];
   const groups = getUserConversations(user.id).filter(c => c.type === 'group').map(c => c.id);
   const url = `/api/announcements?userId=${encodeURIComponent(user.id)}&groupIds=${encodeURIComponent(groups.join(','))}`;

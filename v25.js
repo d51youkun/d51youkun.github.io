@@ -34,7 +34,7 @@ function applySyncSettingsVisibility() {
   if (userStatus && !isAdmin) {
     if (!getSyncUrl()) {
       userStatus.textContent = '同期の準備中です';
-    } else if (getSyncUrlCandidates().every(u => typeof isMixedContentBlocked === 'function' && isMixedContentBlocked(u))) {
+    } else if (!getUsableSyncUrl()) {
       userStatus.textContent = 'この端末からは同期に接続できません';
     } else {
       userStatus.textContent = '他の端末とデータを同期しています';
@@ -49,7 +49,7 @@ updateSyncStatusUI = function (forceCheck) {
   if (!isSuperAdminViewer()) {
     const status = document.getElementById('sync-status');
     if (status) status.textContent = '';
-    if (getSyncUrl() && !(getSyncUrlCandidates().every(isMixedContentBlocked))) {
+    if (getUsableSyncUrl() && !(getSyncUrlCandidates().every(isMixedContentBlocked))) {
       if (!globalSyncTimer) startGlobalSync();
     }
     syncStatusChecked = true;

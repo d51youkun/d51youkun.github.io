@@ -420,7 +420,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-15-stable-v27');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-15-stable-v28');
   } catch (e) { /* ignore */ }
 }
 
@@ -676,12 +676,11 @@ async function verifyAdminCredentialsAsync(email, password) {
 
 async function cloudRequestExt(path, options = {}, timeoutMs = 45000) {
   const candidates = typeof getSyncUrlCandidates === 'function'
-    ? getSyncUrlCandidates()
+    ? getSyncUrlCandidates().filter(u => typeof isMixedContentBlocked !== 'function' || !isMixedContentBlocked(u))
     : [getEffectiveSyncUrl()].filter(Boolean);
   if (!candidates.length) return null;
 
   for (let i = 0; i < candidates.length; i++) {
-    if (typeof isMixedContentBlocked === 'function' && isMixedContentBlocked(candidates[i])) continue;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -758,7 +757,7 @@ async function markConversationRead(convId) {
   data.readReceipts[convId][user.id] = now;
   saveData(data);
   absorbConvIntoNotifyState(convId);
-  if (getSyncUrl()) {
+  if (getUsableSyncUrl()) {
     await cloudRequest(`/api/reads/${convId}/${user.id}`, {
       method: 'PUT',
       body: JSON.stringify({ timestamp: now })
