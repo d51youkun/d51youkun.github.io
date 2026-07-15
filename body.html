@@ -133,9 +133,13 @@
           <button type="button" id="btn-scan-device-pair" class="btn-secondary btn-sm">QRをスキャンしてペアリング</button>
           <button type="button" id="btn-account-sync-now" class="btn-secondary btn-sm">今すぐ全端末に同期</button>
         </div>
-        <div class="sync-settings">
-          <p class="form-label">他の端末と同期</p>
-          <input type="text" id="input-sync-url" placeholder="https://bluechat-sync-846f.onbelmo.uk または 192.168.1.5:8766" autocomplete="off" inputmode="url">
+        <div class="sync-settings" id="user-sync-summary">
+          <p class="form-label">クラウド同期</p>
+          <p class="qr-hint" id="user-sync-status-text">他の端末とデータを同期しています</p>
+        </div>
+        <div class="sync-settings hidden" id="admin-sync-settings">
+          <p class="form-label">同期サーバー（管理者のみ）</p>
+          <input type="text" id="input-sync-url" placeholder="https://bluechat-sync-846f.onbelmo.uk" autocomplete="off" inputmode="url">
           <button type="button" id="btn-save-sync" class="btn-secondary btn-sm">同期サーバーを保存</button>
           <button type="button" id="btn-retry-sync" class="btn-secondary btn-sm">再試行</button>
           <p class="qr-hint" id="sync-url-hint">ドメイン・IPどちらでもOK。複数ある場合はカンマ区切り</p>

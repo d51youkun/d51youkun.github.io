@@ -2053,9 +2053,13 @@ html[data-theme="dark"] body textarea::placeholder {
           <button type="button" id="btn-scan-device-pair" class="btn-secondary btn-sm">QRをスキャンしてペアリング</button>
           <button type="button" id="btn-account-sync-now" class="btn-secondary btn-sm">今すぐ全端末に同期</button>
         </div>
-        <div class="sync-settings">
-          <p class="form-label">他の端末と同期</p>
-          <input type="text" id="input-sync-url" placeholder="https://bluechat-sync-846f.onbelmo.uk または 192.168.1.5:8766" autocomplete="off" inputmode="url">
+        <div class="sync-settings" id="user-sync-summary">
+          <p class="form-label">クラウド同期</p>
+          <p class="qr-hint" id="user-sync-status-text">他の端末とデータを同期しています</p>
+        </div>
+        <div class="sync-settings hidden" id="admin-sync-settings">
+          <p class="form-label">同期サーバー（管理者のみ）</p>
+          <input type="text" id="input-sync-url" placeholder="https://bluechat-sync-846f.onbelmo.uk" autocomplete="off" inputmode="url">
           <button type="button" id="btn-save-sync" class="btn-secondary btn-sm">同期サーバーを保存</button>
           <button type="button" id="btn-retry-sync" class="btn-secondary btn-sm">再試行</button>
           <p class="qr-hint" id="sync-url-hint">ドメイン・IPどちらでもOK。複数ある場合はカンマ区切り</p>
@@ -5687,7 +5691,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-14-stable-v24');
+    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-15-stable-v25');
   } catch (e) { /* ignore */ }
 }
 
@@ -10298,7 +10302,7 @@ onAppInit(() => {
  * BlueChatX — branding & super-admin extensions
  */
 var APP_VERSION = 'BlueChatX';
-const BUILD_STAMP = 'BlueChatX-2026-07-14-stable-v24';
+const BUILD_STAMP = 'BlueChatX-2026-07-15-stable-v25';
 
 function applyAppBranding() {
   const title = 'BlueChatX';
@@ -10807,6 +10811,7 @@ async function renderFeed() {
       attachment: p.attachment,
       createdAt: p.createdAt,
       isPost: true,
+      comments: Array.isArray(p.comments) ? p.comments : [],
       unread: !read['post_' + p.id]
     });
   });
@@ -10858,20 +10863,50 @@ async function renderFeed() {
       ${renderFeedMedia(item.media, item.postId)}
       ${renderFeedAttachment(item.attachment, item.postId)}
       ${feedAuthorCardHtml(item.authorId, item.authorName, item.authorAvatar)}
-      ${!item.isPost ? `<div class="feed-comments" id="feed-comments-${item.annId}"></div>
+      ${item.isPost ? `<div class="feed-comments" id="feed-post-comments-${item.postId}"></div>
+        <div class="feed-comment-form">
+          <input type="text" class="feed-comment-input" placeholder="コメント…" data-post-id="${item.postId}">
+          <button type="button" class="btn-secondary btn-sm btn-feed-post-comment" data-post-id="${item.postId}">送信</button>
+        </div>` : `<div class="feed-comments" id="feed-comments-${item.annId}"></div>
         <div class="feed-comment-form">
           <input type="text" class="feed-comment-input" placeholder="コメント…" data-ann-id="${item.annId}">
           <button type="button" class="btn-secondary btn-sm btn-feed-comment" data-ann-id="${item.annId}">送信</button>
-        </div>` : ''}`;
+        </div>`}`;
 
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.feed-author-card, .feed-comment-form, .btn-delete-post, .feed-attachment-link')) return;
+      if (e.target.closest('.feed-author-card, .feed-comment-form, .btn-delete-post, .feed-attachment-link, .btn-feed-post-comment, .btn-feed-comment')) return;
       if (item.isPost) markFeedItemRead(item.id);
       else if (typeof markAnnouncementRead === 'function') markAnnouncementRead(item.annId);
       el.classList.remove('unread');
     });
 
-    if (!item.isPost) {
+    if (item.isPost) {
+      const commentsEl = el.querySelector(`#feed-post-comments-${item.postId}`);
+      (item.comments || []).forEach(c => {
+        const cEl = document.createElement('div');
+        cEl.className = 'feed-comment';
+        const canDel = user && String(c.userId) === String(user.id);
+        cEl.innerHTML = `<strong>${escapeHtml(c.userName)}</strong>: ${escapeHtml(c.text)}${canDel ? ` <button type="button" class="btn-delete-post btn-sm" data-post-id="${item.postId}" data-comment-id="${c.id}">削除</button>` : ''}`;
+        commentsEl?.appendChild(cEl);
+      });
+      el.querySelector('.btn-feed-post-comment')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const input = el.querySelector('.feed-comment-input');
+        if (typeof postPostComment === 'function') {
+          await postPostComment(item.postId, input?.value || '');
+          input.value = '';
+        }
+      });
+      el.querySelectorAll('.btn-delete-post[data-post-id][data-comment-id]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm('コメントを削除しますか？')) return;
+          if (typeof deletePostComment === 'function') {
+            await deletePostComment(btn.dataset.postId, btn.dataset.commentId);
+          }
+        });
+      });
+    } else {
       const commentsEl = el.querySelector(`#feed-comments-${item.annId}`);
       (item.comments || []).forEach(c => {
         const cEl = document.createElement('div');
@@ -10901,7 +10936,7 @@ async function renderFeed() {
       });
     }
 
-    el.querySelector('.btn-delete-post[data-post-id]')?.addEventListener('click', async (e) => {
+    el.querySelector('.btn-delete-post[data-post-id]:not([data-comment-id])')?.addEventListener('click', async (e) => {
       e.stopPropagation();
       await deletePublicPost(e.target.dataset.postId);
     });
@@ -10924,9 +10959,38 @@ async function fetchFriendRequests() {
   return Array.isArray(list) ? list : [];
 }
 
+async function postPostComment(postId, text) {
+  const user = getCurrentUser();
+  if (!user || !text.trim() || !getUsableSyncUrl()) return;
+  const res = await cloudRequest(`/api/posts/${encodeURIComponent(postId)}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: user.id,
+      userName: user.name,
+      userAvatar: user.avatar || null,
+      text: text.trim()
+    })
+  });
+  if (!res || !res.ok) {
+    showToast('コメントに失敗しました');
+    return;
+  }
+  await renderFeed();
+}
+
+async function deletePostComment(postId, commentId) {
+  const user = getCurrentUser();
+  if (!user || !getUsableSyncUrl()) return;
+  await cloudRequest(`/api/posts/${encodeURIComponent(postId)}/comments/${encodeURIComponent(commentId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ userId: user.id })
+  });
+  await renderFeed();
+}
+
 async function sendFriendRequest(toUserId) {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) {
+  if (!user || !getUsableSyncUrl()) {
     showToast('同期サーバーが必要です');
     return;
   }
@@ -10964,11 +11028,14 @@ async function sendFriendRequest(toUserId) {
   }
   showToast('友だち申請を送りました');
   renderFriendRequests();
+  renderFeed();
 }
 
 async function acceptFriendRequest(requestId) {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return;
+  if (!user || !getUsableSyncUrl()) return;
+  const pending = await fetchFriendRequests();
+  const fr = pending.find(r => r.id === requestId);
   const res = await cloudRequest(`/api/friend-requests/${requestId}`, {
     method: 'PUT',
     body: JSON.stringify({ userId: user.id, action: 'accept' })
@@ -10977,8 +11044,6 @@ async function acceptFriendRequest(requestId) {
     showToast('承認に失敗しました');
     return;
   }
-  const list = await fetchFriendRequests();
-  const fr = list.find(r => r.id === requestId);
   if (fr) {
     ensureLocalUser({ id: fr.fromId, name: fr.fromName, avatar: fr.fromAvatar });
     addFriendship(user.id, fr.fromId, { skipCloud: true });
@@ -10993,7 +11058,7 @@ async function acceptFriendRequest(requestId) {
 
 async function declineFriendRequest(requestId) {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return;
+  if (!user || !getUsableSyncUrl()) return;
   await cloudRequest(`/api/friend-requests/${requestId}`, {
     method: 'PUT',
     body: JSON.stringify({ userId: user.id, action: 'decline' })
@@ -11162,7 +11227,6 @@ renderAnnouncements = function () {
 const _handleRemoteActivityV11 = handleRemoteActivity;
 handleRemoteActivity = async function () {
   await _handleRemoteActivityV11();
-  await renderFeed();
   await renderFriendRequests();
 };
 
@@ -13001,20 +13065,6 @@ async function refreshFeedFromServer() {
 
 const _renderFeedV11 = renderFeed;
 renderFeed = async function () {
-  const list = document.getElementById('feed-list') || document.getElementById('notice-list');
-  const cached = getFeedBaselinePosts();
-  const shouldPrime = list && !list.children.length && cached.length > 0;
-
-  if (shouldPrime) {
-    const _fetch = fetchPublicPosts;
-    fetchPublicPosts = async () => cached;
-    try {
-      await _renderFeedV11();
-    } finally {
-      fetchPublicPosts = _fetch;
-    }
-  }
-
   await _renderFeedV11();
 };
 
@@ -13278,6 +13328,161 @@ refreshFeedFromServer = async function () {
     }
   }
 };
+
+
+/**
+ * BlueChat v25 — 投稿コメント・友達申請修正・同期URL非表示・高速化
+ */
+var APP_VERSION = 'v25';
+
+const FEED_HYDRATE_CONCURRENCY = 2;
+const FEED_RENDER_DEBOUNCE_MS = 1200;
+
+let feedRenderDebounceTimer = null;
+
+function isSuperAdminViewer() {
+  return !!(typeof adminLoggedIn !== 'undefined' && adminLoggedIn &&
+    typeof adminRole !== 'undefined' && adminRole === 'super');
+}
+
+function isSyncDeviceConfigured() {
+  if (!getSyncUrl()) return false;
+  if (localStorage.getItem(SYNC_CONFIGURED_KEY)) return true;
+  if (typeof DEFAULT_SYNC_URL === 'string' && DEFAULT_SYNC_URL && DEFAULT_SYNC_URL !== '__DEFAULT_SYNC_URL__') {
+    return true;
+  }
+  return false;
+}
+
+function applySyncSettingsVisibility() {
+  const adminSection = document.getElementById('admin-sync-settings');
+  const userSummary = document.getElementById('user-sync-summary');
+  const userStatus = document.getElementById('user-sync-status-text');
+  const isAdmin = isSuperAdminViewer();
+
+  if (adminSection) adminSection.classList.toggle('hidden', !isAdmin);
+  if (userSummary) userSummary.classList.toggle('hidden', isAdmin);
+
+  if (userStatus && !isAdmin) {
+    if (!getSyncUrl()) {
+      userStatus.textContent = '同期の準備中です';
+    } else if (getSyncUrlCandidates().every(u => typeof isMixedContentBlocked === 'function' && isMixedContentBlocked(u))) {
+      userStatus.textContent = 'この端末からは同期に接続できません';
+    } else {
+      userStatus.textContent = '他の端末とデータを同期しています';
+    }
+  }
+}
+
+const _updateSyncStatusUIV25 = updateSyncStatusUI;
+updateSyncStatusUI = function (forceCheck) {
+  applySyncSettingsVisibility();
+
+  if (!isSuperAdminViewer()) {
+    const status = document.getElementById('sync-status');
+    if (status) status.textContent = '';
+    if (getSyncUrl() && !(getSyncUrlCandidates().every(isMixedContentBlocked))) {
+      if (!globalSyncTimer) startGlobalSync();
+    }
+    syncStatusChecked = true;
+    return;
+  }
+
+  if (!forceCheck && isSyncDeviceConfigured()) {
+    const status = document.getElementById('sync-status');
+    const input = document.getElementById('input-sync-url');
+    if (input) input.value = getSyncUrlCandidates().join(SYNC_URL_DELIMITER + ' ');
+    if (status) {
+      status.textContent = '✓ 同期サーバー設定済み（接続確認を省略）';
+      status.classList.remove('warn');
+    }
+    syncStatusChecked = true;
+    if (!globalSyncTimer) startGlobalSync();
+    return;
+  }
+
+  return _updateSyncStatusUIV25(forceCheck);
+};
+
+const _renderProfileV25 = renderProfile;
+renderProfile = function () {
+  _renderProfileV25();
+  applySyncSettingsVisibility();
+};
+
+function scheduleDebouncedFeedRender() {
+  if (feedRenderDebounceTimer) clearTimeout(feedRenderDebounceTimer);
+  feedRenderDebounceTimer = setTimeout(() => {
+    feedRenderDebounceTimer = null;
+    const tab = document.getElementById('tab-notices');
+    if (tab && !tab.classList.contains('hidden') && typeof renderFeed === 'function') renderFeed();
+  }, FEED_RENDER_DEBOUNCE_MS);
+}
+
+async function hydrateFeedMediaSlotsParallel() {
+  const slots = document.querySelectorAll('[data-hydrate-post-id],[data-hydrate-attach-id]');
+  const ids = new Set();
+  slots.forEach(el => {
+    const id = el.getAttribute('data-hydrate-post-id') || el.getAttribute('data-hydrate-attach-id');
+    if (id) ids.add(id);
+  });
+  if (!ids.size) return;
+
+  const queue = [...ids];
+  const workers = Array.from({ length: FEED_HYDRATE_CONCURRENCY }, async () => {
+    while (queue.length) {
+      const postId = queue.shift();
+      if (!postId || feedMediaHydrating.has(postId)) continue;
+      feedMediaHydrating.add(postId);
+      try {
+        const full = await fetchFullFeedPost(postId);
+        applyHydratedPostMedia(postId, full);
+      } finally {
+        feedMediaHydrating.delete(postId);
+      }
+    }
+  });
+  await Promise.all(workers);
+}
+
+hydrateFeedMediaSlots = hydrateFeedMediaSlotsParallel;
+
+const _handleRemoteActivityV25 = handleRemoteActivity;
+handleRemoteActivity = async function () {
+  await _handleRemoteActivityV25();
+  scheduleDebouncedFeedRender();
+};
+
+const _updateTabBadgesV25 = updateTabBadges;
+updateTabBadges = async function () {
+  const posts = typeof getFeedBaselinePosts === 'function' ? getFeedBaselinePosts() : [];
+  const announcements = typeof fetchAnnouncements === 'function' ? await fetchAnnouncements() : [];
+  const feedRead = getFeedReadMap();
+  const annRead = typeof getAnnouncementReadMap === 'function' ? getAnnouncementReadMap() : {};
+  let unread = 0;
+  posts.forEach(p => { if (!feedRead['post_' + p.id]) unread++; });
+  (announcements || []).forEach(a => { if (!annRead[a.id]) unread++; });
+  setTabBadge('notices', unread);
+  setTabBadge('chats', countUnreadChats());
+
+  const user = getCurrentUser();
+  if (user && getUsableSyncUrl()) {
+    const reqs = await fetchFriendRequests();
+    const incoming = reqs.filter(r => String(r.toId) === String(user.id)).length;
+    setTabBadge('friends', incoming);
+  }
+};
+
+const _updateAdminTabVisibilityV25 = typeof updateAdminTabVisibility === 'function' ? updateAdminTabVisibility : null;
+if (_updateAdminTabVisibilityV25) {
+  updateAdminTabVisibility = function () {
+    _updateAdminTabVisibilityV25();
+    applySyncSettingsVisibility();
+    updateSyncStatusUI(false);
+  };
+}
+
+applySyncSettingsVisibility();
 
   </script>
 </body>

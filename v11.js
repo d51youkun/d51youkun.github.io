@@ -341,6 +341,7 @@ async function renderFeed() {
       attachment: p.attachment,
       createdAt: p.createdAt,
       isPost: true,
+      comments: Array.isArray(p.comments) ? p.comments : [],
       unread: !read['post_' + p.id]
     });
   });
@@ -392,20 +393,50 @@ async function renderFeed() {
       ${renderFeedMedia(item.media, item.postId)}
       ${renderFeedAttachment(item.attachment, item.postId)}
       ${feedAuthorCardHtml(item.authorId, item.authorName, item.authorAvatar)}
-      ${!item.isPost ? `<div class="feed-comments" id="feed-comments-${item.annId}"></div>
+      ${item.isPost ? `<div class="feed-comments" id="feed-post-comments-${item.postId}"></div>
+        <div class="feed-comment-form">
+          <input type="text" class="feed-comment-input" placeholder="コメント…" data-post-id="${item.postId}">
+          <button type="button" class="btn-secondary btn-sm btn-feed-post-comment" data-post-id="${item.postId}">送信</button>
+        </div>` : `<div class="feed-comments" id="feed-comments-${item.annId}"></div>
         <div class="feed-comment-form">
           <input type="text" class="feed-comment-input" placeholder="コメント…" data-ann-id="${item.annId}">
           <button type="button" class="btn-secondary btn-sm btn-feed-comment" data-ann-id="${item.annId}">送信</button>
-        </div>` : ''}`;
+        </div>`}`;
 
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.feed-author-card, .feed-comment-form, .btn-delete-post, .feed-attachment-link')) return;
+      if (e.target.closest('.feed-author-card, .feed-comment-form, .btn-delete-post, .feed-attachment-link, .btn-feed-post-comment, .btn-feed-comment')) return;
       if (item.isPost) markFeedItemRead(item.id);
       else if (typeof markAnnouncementRead === 'function') markAnnouncementRead(item.annId);
       el.classList.remove('unread');
     });
 
-    if (!item.isPost) {
+    if (item.isPost) {
+      const commentsEl = el.querySelector(`#feed-post-comments-${item.postId}`);
+      (item.comments || []).forEach(c => {
+        const cEl = document.createElement('div');
+        cEl.className = 'feed-comment';
+        const canDel = user && String(c.userId) === String(user.id);
+        cEl.innerHTML = `<strong>${escapeHtml(c.userName)}</strong>: ${escapeHtml(c.text)}${canDel ? ` <button type="button" class="btn-delete-post btn-sm" data-post-id="${item.postId}" data-comment-id="${c.id}">削除</button>` : ''}`;
+        commentsEl?.appendChild(cEl);
+      });
+      el.querySelector('.btn-feed-post-comment')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const input = el.querySelector('.feed-comment-input');
+        if (typeof postPostComment === 'function') {
+          await postPostComment(item.postId, input?.value || '');
+          input.value = '';
+        }
+      });
+      el.querySelectorAll('.btn-delete-post[data-post-id][data-comment-id]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm('コメントを削除しますか？')) return;
+          if (typeof deletePostComment === 'function') {
+            await deletePostComment(btn.dataset.postId, btn.dataset.commentId);
+          }
+        });
+      });
+    } else {
       const commentsEl = el.querySelector(`#feed-comments-${item.annId}`);
       (item.comments || []).forEach(c => {
         const cEl = document.createElement('div');
@@ -435,7 +466,7 @@ async function renderFeed() {
       });
     }
 
-    el.querySelector('.btn-delete-post[data-post-id]')?.addEventListener('click', async (e) => {
+    el.querySelector('.btn-delete-post[data-post-id]:not([data-comment-id])')?.addEventListener('click', async (e) => {
       e.stopPropagation();
       await deletePublicPost(e.target.dataset.postId);
     });
@@ -458,9 +489,38 @@ async function fetchFriendRequests() {
   return Array.isArray(list) ? list : [];
 }
 
+async function postPostComment(postId, text) {
+  const user = getCurrentUser();
+  if (!user || !text.trim() || !getUsableSyncUrl()) return;
+  const res = await cloudRequest(`/api/posts/${encodeURIComponent(postId)}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: user.id,
+      userName: user.name,
+      userAvatar: user.avatar || null,
+      text: text.trim()
+    })
+  });
+  if (!res || !res.ok) {
+    showToast('コメントに失敗しました');
+    return;
+  }
+  await renderFeed();
+}
+
+async function deletePostComment(postId, commentId) {
+  const user = getCurrentUser();
+  if (!user || !getUsableSyncUrl()) return;
+  await cloudRequest(`/api/posts/${encodeURIComponent(postId)}/comments/${encodeURIComponent(commentId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ userId: user.id })
+  });
+  await renderFeed();
+}
+
 async function sendFriendRequest(toUserId) {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) {
+  if (!user || !getUsableSyncUrl()) {
     showToast('同期サーバーが必要です');
     return;
   }
@@ -498,11 +558,14 @@ async function sendFriendRequest(toUserId) {
   }
   showToast('友だち申請を送りました');
   renderFriendRequests();
+  renderFeed();
 }
 
 async function acceptFriendRequest(requestId) {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return;
+  if (!user || !getUsableSyncUrl()) return;
+  const pending = await fetchFriendRequests();
+  const fr = pending.find(r => r.id === requestId);
   const res = await cloudRequest(`/api/friend-requests/${requestId}`, {
     method: 'PUT',
     body: JSON.stringify({ userId: user.id, action: 'accept' })
@@ -511,8 +574,6 @@ async function acceptFriendRequest(requestId) {
     showToast('承認に失敗しました');
     return;
   }
-  const list = await fetchFriendRequests();
-  const fr = list.find(r => r.id === requestId);
   if (fr) {
     ensureLocalUser({ id: fr.fromId, name: fr.fromName, avatar: fr.fromAvatar });
     addFriendship(user.id, fr.fromId, { skipCloud: true });
@@ -527,7 +588,7 @@ async function acceptFriendRequest(requestId) {
 
 async function declineFriendRequest(requestId) {
   const user = getCurrentUser();
-  if (!user || !getSyncUrl()) return;
+  if (!user || !getUsableSyncUrl()) return;
   await cloudRequest(`/api/friend-requests/${requestId}`, {
     method: 'PUT',
     body: JSON.stringify({ userId: user.id, action: 'decline' })
@@ -696,7 +757,6 @@ renderAnnouncements = function () {
 const _handleRemoteActivityV11 = handleRemoteActivity;
 handleRemoteActivity = async function () {
   await _handleRemoteActivityV11();
-  await renderFeed();
   await renderFriendRequests();
 };
 

@@ -190,20 +190,6 @@ async function refreshFeedFromServer() {
 
 const _renderFeedV11 = renderFeed;
 renderFeed = async function () {
-  const list = document.getElementById('feed-list') || document.getElementById('notice-list');
-  const cached = getFeedBaselinePosts();
-  const shouldPrime = list && !list.children.length && cached.length > 0;
-
-  if (shouldPrime) {
-    const _fetch = fetchPublicPosts;
-    fetchPublicPosts = async () => cached;
-    try {
-      await _renderFeedV11();
-    } finally {
-      fetchPublicPosts = _fetch;
-    }
-  }
-
   await _renderFeedV11();
 };
 
