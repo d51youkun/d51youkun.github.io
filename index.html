@@ -6,24 +6,155 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#1a6fd4">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>BlueChatX</title>
   <link rel="icon" type="image/png" href="icon.png?v=20260713">
+  <link rel="apple-touch-icon" href="icon.png?v=20260713">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f0f6fd; overflow: hidden; }
-    .screen { position: fixed; inset: 0; display: flex; flex-direction: column; z-index: 1; background: #f0f6fd; }
-    .screen.active { z-index: 10; }
-    .hidden { display: none !important; }
-    .onboarding-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 24px; }
-    .logo-large { text-align: center; margin-bottom: 48px; }
-    .logo-icon { font-size: 64px; margin-bottom: 16px; }
-    .logo-large h1 { font-size: 32px; font-weight: 700; color: #1a6fd4; }
-    .tagline { color: #8b95a5; margin-top: 8px; font-size: 14px; }
-    .onboarding-form { width: 100%; max-width: 400px; }
-    input { width: 100%; height: 52px; padding: 0 16px; border: 2px solid #e8ecf1; border-radius: 12px; font-size: 16px; margin-bottom: 12px; }
-    input:focus { outline: none; border-color: #1a6fd4; }
-    button { width: 100%; height: 52px; background: linear-gradient(135deg, #1a6fd4, #0d4a8f); color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; }
-    button:hover { transform: translateY(-1px); box-shadow: 0 8px 32px rgba(26, 111, 212, 0.18); }
+/* BlueChat - Blue LINE-like theme */
+:root {
+  --blue-primary: #1a6fd4;
+  --blue-dark: #0d4a8f;
+  --blue-light: #4a9af0;
+  --blue-pale: #e8f2fc;
+  --blue-bg: #f0f6fd;
+  --blue-accent: #1565c0;
+  --white: #ffffff;
+  --gray-100: #f5f7fa;
+  --gray-200: #e8ecf1;
+  --gray-300: #c5cdd8;
+  --gray-500: #8b95a5;
+  --gray-700: #4a5568;
+  --gray-900: #1a202c;
+  --text-primary: #000000;
+  --text-secondary: #000000;
+  --danger: #e53935;
+  --danger-light: #ffebee;
+  --shadow: 0 2px 12px rgba(26, 111, 212, 0.12);
+  --shadow-lg: 0 8px 32px rgba(26, 111, 212, 0.18);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --header-h: 56px;
+  --tab-h: 48px;
+  --input-h: 52px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+  background: var(--blue-bg);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.hidden { display: none !important; }
+
+/* Screens */
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--blue-bg);
+  z-index: 1;
+}
+
+.screen.active { z-index: 10; }
+
+/* Onboarding */
+.onboarding-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  max-width: 400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.logo-large {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.logo-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+}
+
+.logo-large h1 {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--blue-primary);
+  letter-spacing: -0.5px;
+}
+
+.tagline {
+  color: var(--gray-500);
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.onboarding-form {
+  width: 100%;
+}
+
+.form-desc {
+  font-size: 14px;
+  color: var(--gray-700);
+  line-height: 1.6;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  width: 100%;
+  height: var(--input-h);
+  padding: 0 16px;
+  border: 2px solid var(--gray-200);
+  border-radius: var(--radius);
+  font-size: 16px;
+  background: var(--white);
+  transition: border-color 0.2s;
+  margin-bottom: 12px;
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--blue-primary);
+}
+
+/* Buttons */
+.btn-primary {
+  width: 100%;
+  height: var(--input-h);
+  background: linear-gradient(135deg, var(--blue-primary), var(--blue-dark));
+  color: var(--white);
+  border: none;
+  border-radius: var(--radius);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: var(--shadow);
+}
+
+.btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
   </style>
 </head>
 <body>
@@ -35,70 +166,51 @@
         <p class="tagline">シンプルなチャットアプリ</p>
       </div>
       <div class="onboarding-form">
+        <p class="form-desc">名前を入力して、チャットを始めましょう</p>
         <input type="text" id="input-name" placeholder="名前を入力" />
-        <button id="btn-start">はじめる</button>
+        <button id="btn-start" class="btn-primary">はじめる</button>
       </div>
     </div>
   </div>
   <div id="screen-main" class="screen hidden">
-    <div style="padding: 24px; text-align: center;">
-      <h2>準備中...</h2>
-      <p>アプリを読み込んでいます</p>
+    <div style="flex: 1; display: flex; align-items: center; justify-content: center;">
+      <p>読み込み中...</p>
     </div>
   </div>
-  <div id="toast" class="hidden" style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1a6fd4; color: white; padding: 12px 24px; border-radius: 8px; z-index: 1000;"></div>
+  <div id="toast" class="hidden"></div>
 
   <script>
-    function initApp() {
+    // Minimal app initialization
+    function init() {
       const btnStart = document.getElementById('btn-start');
       const inputName = document.getElementById('input-name');
       
-      btnStart?.addEventListener('click', function() {
-        const name = (inputName?.value || '').trim();
-        if (!name) {
-          showToast('名前を入力してください');
-          return;
-        }
-        createUser(name);
-      });
-
-      inputName?.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') btnStart?.click();
-      });
-    }
-
-    function showToast(msg) {
-      const toast = document.getElementById('toast');
-      if (toast) {
-        toast.textContent = msg;
-        toast.classList.remove('hidden');
-        setTimeout(() => toast.classList.add('hidden'), 2500);
+      if (btnStart) {
+        btnStart.addEventListener('click', () => {
+          const name = (inputName.value || '').trim();
+          if (name) {
+            localStorage.setItem('bluechat_current_user', JSON.stringify({
+              id: 'u' + Date.now(),
+              name: name,
+              createdAt: Date.now()
+            }));
+            document.getElementById('screen-onboarding').classList.add('hidden');
+            document.getElementById('screen-main').classList.remove('hidden');
+          }
+        });
+      }
+      
+      if (inputName) {
+        inputName.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') btnStart.click();
+        });
       }
     }
-
-    function createUser(name) {
-      const userId = 'user_' + Date.now().toString(36);
-      const data = {
-        currentUserId: userId,
-        users: {
-          [userId]: { id: userId, name: name, createdAt: Date.now() }
-        },
-        friendships: [],
-        conversations: {},
-        messages: {}
-      };
-      localStorage.setItem('bluechat_data', JSON.stringify(data));
-      showToast('ようこそ、' + name + 'さん！');
-      setTimeout(() => {
-        document.getElementById('screen-onboarding').classList.add('hidden');
-        document.getElementById('screen-main').classList.remove('hidden');
-      }, 1000);
-    }
-
+    
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initApp);
+      document.addEventListener('DOMContentLoaded', init);
     } else {
-      initApp();
+      init();
     }
   </script>
 </body>
