@@ -37,7 +37,30 @@ python3 -m http.server 8765 --bind 0.0.0.0
 2. `BlueChat` フォルダ（または `BlueChat.zip`）をドラッグ＆ドロップ
 3. 表示されたURLが公開アドレスになります
 
-**GitHub Pages**
+**Cloudflare Pages（推奨）**
+
+1. [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**
+2. リポジトリ `d51youkun.github.io` を選択
+3. ビルド設定:
+
+   | 項目 | 値 |
+   |------|-----|
+   | Production branch | `main` |
+   | Build command | `python3 build.py` |
+   | Build output directory | `/`（空欄でも可） |
+
+4. **Save and Deploy** で公開。初回URLは `https://bluechat.pages.dev` のような `*.pages.dev` になります
+5. **Custom domains** から独自ドメインを追加できます（Cloudflare で DNS 管理している場合）
+
+**GitHub Actions で自動デプロイする場合**（上記 Git 連携の代わり）:
+
+1. Cloudflare で Pages プロジェクト名 `bluechat` を作成
+2. GitHub リポジトリの Secrets に追加:
+   - `CLOUDFLARE_API_TOKEN` — API トークン（Account / Cloudflare Pages: Edit）
+   - `CLOUDFLARE_ACCOUNT_ID` — アカウント ID
+3. `main` へ push すると `.github/workflows/cloudflare-pages.yml` がデプロイします
+
+**GitHub Pages（従来）**
 
 1. GitHubで新しいリポジトリを作成
 2. このフォルダを push

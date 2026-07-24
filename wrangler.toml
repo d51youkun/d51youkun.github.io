@@ -1,0 +1,7 @@
+# Cloudflare Pages — Git 連携または wrangler pages deploy 用
+name = "bluechat"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "."
+
+[build]
+command = "python3 build.py"

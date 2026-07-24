@@ -1,0 +1,11 @@
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/BlueChat.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/sync-config.json
+  Cache-Control: no-cache

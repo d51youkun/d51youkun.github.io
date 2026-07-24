@@ -104,7 +104,7 @@ def export_version_folder(pages_html: str, version: str) -> None:
     (out_dir / "index.html").write_text(pages_html, encoding="utf-8")
     (out_dir / "BlueChat.html").write_text(pages_html, encoding="utf-8")
 
-    for name in ("icon.png", "favicon.svg", "sw.js", "sync-config.json", ".nojekyll"):
+    for name in ("icon.png", "favicon.svg", "sw.js", "sync-config.json", ".nojekyll", "_headers", "wrangler.toml"):
         src = ROOT / name
         if src.exists():
             shutil.copy2(src, out_dir / name)
