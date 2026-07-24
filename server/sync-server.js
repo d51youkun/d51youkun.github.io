@@ -11,8 +11,12 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 8766;
 const SERVER_VERSION = '2026-07-13';
 
+// Cloudflare Workers バンドルは ESM のため __dirname が無い。Node 単体起動時のみファイル I/O を初期化。
+const IS_WORKER_BUNDLE = typeof __dirname === 'undefined';
+const MODULE_DIR = IS_WORKER_BUNDLE ? '' : __dirname;
+
 function resolveWritableDataFile() {
-  const legacy = path.join(__dirname, 'data.json');
+  const legacy = path.join(MODULE_DIR, 'data.json');
   const candidates = [
     process.env.DATA_DIR,
     process.env.TMPDIR,
@@ -36,10 +40,16 @@ function resolveWritableDataFile() {
   return legacy;
 }
 
-const DATA_FILE = resolveWritableDataFile();
+let DATA_FILE = null;
+function getDataFile() {
+  if (IS_WORKER_BUNDLE) return '/tmp/bluechat-data.json';
+  if (!DATA_FILE) DATA_FILE = resolveWritableDataFile();
+  return DATA_FILE;
+}
 
 function loadDotEnv() {
-  const envPath = path.join(__dirname, '.env');
+  if (IS_WORKER_BUNDLE) return;
+  const envPath = path.join(MODULE_DIR, '.env');
   try {
     if (!fs.existsSync(envPath)) return;
     fs.readFileSync(envPath, 'utf8').split('\n').forEach(line => {
@@ -58,7 +68,7 @@ function loadDotEnv() {
   } catch (e) { /* ignore */ }
 }
 
-loadDotEnv();
+if (!IS_WORKER_BUNDLE) loadDotEnv();
 
 // Upstash Redis (REST API) 経由の永続化。Cloudflare Workers では必須。
 let runtimeEnv = null;
@@ -403,7 +413,7 @@ async function loadDataFromStorage() {
     }
   }
   try {
-    return normalizeData(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')));
+    return normalizeData(JSON.parse(fs.readFileSync(getDataFile(), 'utf8')));
   } catch (e) {
     return emptyData();
   }
@@ -434,7 +444,7 @@ async function saveDataToStorage(data) {
     await upstashCommand(['SET', UPSTASH_KEY, JSON.stringify(normalized)]);
     return;
   }
-  fs.writeFileSync(DATA_FILE, JSON.stringify(normalized));
+  fs.writeFileSync(getDataFile(), JSON.stringify(normalized));
 }
 
 async function saveData(data) {
@@ -482,7 +492,7 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-const server = http.createServer(processSyncRequest);
+const server = IS_WORKER_BUNDLE ? null : http.createServer(processSyncRequest);
 
 async function processSyncRequest(req, res) {
   if (req.method === 'OPTIONS') {
@@ -519,7 +529,7 @@ async function processSyncRequest(req, res) {
         }
       } else if (!isWorkerRuntime()) {
         try {
-          const probe = path.join(path.dirname(DATA_FILE), '.bluechat-health-probe');
+          const probe = path.join(path.dirname(getDataFile()), '.bluechat-health-probe');
           fs.writeFileSync(probe, String(Date.now()));
           fs.unlinkSync(probe);
         } catch (e) {
@@ -534,7 +544,7 @@ async function processSyncRequest(req, res) {
         version: SERVER_VERSION,
         writable,
         storage: isUpstashEnabled() ? 'upstash' : (isWorkerRuntime() ? 'worker-required-upstash' : 'file'),
-        dataFile: isUpstashEnabled() ? null : (isWorkerRuntime() ? null : DATA_FILE)
+        dataFile: isUpstashEnabled() ? null : (isWorkerRuntime() ? null : getDataFile())
       });
       return;
     }
@@ -1603,13 +1613,13 @@ async function processSyncRequest(req, res) {
   }
 }
 
-if (require.main === module) {
+if (!IS_WORKER_BUNDLE && require.main === module) {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`BlueChat sync server: http://0.0.0.0:${PORT}`);
     if (isUpstashEnabled()) {
       console.log('Storage: Upstash Redis (persistent across restarts) —', getUpstashUrl());
     } else {
-      console.log('Storage: local file:', DATA_FILE);
+      console.log('Storage: local file:', getDataFile());
     }
     console.log('Health check: GET /api/health');
   });
