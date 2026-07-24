@@ -58,7 +58,7 @@ def get_app_js() -> str:
 def get_merged_js() -> str:
     """app.js + features.js + v4.js + v6.js + v7.js + v8.js を1つのスクリプトに結合"""
     parts_js = [get_app_js(), read("features.js"), read("v4.js")]
-    for extra in ("v6.js", "v7.js", "v8.js", "v9.js", "v10.js", "v11.js", "v12.js", "v13.js", "v14.js", "v15.js", "v16.js", "v17.js", "v18.js", "v19.js", "v20.js", "v21.js", "v22.js", "v23.js", "v24.js", "v25.js", "v26.js", "v27.js", "v28.js", "v29.js", "v31.js", "v32.js", "v33.js", "v34.js"):
+    for extra in ("v6.js", "v7.js", "v8.js", "v9.js", "v10.js", "v11.js", "v12.js", "v13.js", "v14.js", "v15.js", "v16.js", "v17.js", "v18.js", "v19.js", "v20.js", "v21.js", "v22.js", "v23.js", "v24.js", "v25.js", "v26.js", "v27.js", "v28.js", "v29.js", "v31.js", "v32.js", "v33.js", "v34.js", "v35.js"):
         p = ROOT / extra
         if p.exists():
             parts_js.append(read(extra))

@@ -123,12 +123,80 @@ function friendshipListForUser(data, userId) {
   return out;
 }
 
+function stubUserRecord(uid, name) {
+  return {
+    id: uid,
+    name: name || 'ユーザー',
+    createdAt: Date.now(),
+    avatar: null,
+    avatarUpdatedAt: 0,
+    title: null,
+    suspendedUntil: null,
+    banned: false,
+    bannedUntil: null,
+    premium: false,
+    superPremium: false
+  };
+}
+
+function inferUserName(data, uid) {
+  for (const post of data.posts || []) {
+    if (String(post.authorId) === uid && post.authorName) return String(post.authorName);
+  }
+  for (const fr of data.friendRequests || []) {
+    if (String(fr.fromId) === uid && fr.fromName) return String(fr.fromName);
+    if (String(fr.toId) === uid && fr.toName) return String(fr.toName);
+  }
+  const presence = data.presence && data.presence[uid];
+  if (presence && presence.userName) return String(presence.userName);
+  return 'ユーザー';
+}
+
+function ensureUserRecord(data, uid) {
+  if (!data.users) data.users = {};
+  if (data.users[uid]) return data.users[uid];
+  data.users[uid] = stubUserRecord(uid, inferUserName(data, uid));
+  return data.users[uid];
+}
+
+function rebuildUserConversationIndex(data) {
+  if (!data.userConversations) data.userConversations = {};
+  Object.values(data.conversations || {}).forEach(conv => {
+    const convId = conv && conv.id;
+    if (!convId) return;
+    (conv.members || []).forEach(memberId => {
+      const mid = String(memberId);
+      if (!mid) return;
+      if (!data.userConversations[mid]) data.userConversations[mid] = {};
+      data.userConversations[mid][convId] = true;
+    });
+  });
+}
+
+function repairMissingUsers(data) {
+  rebuildUserConversationIndex(data);
+  const ids = new Set();
+  Object.keys(data.userConversations || {}).forEach(uid => ids.add(uid));
+  Object.values(data.conversations || {}).forEach(conv => {
+    (conv.members || []).forEach(mid => ids.add(String(mid)));
+  });
+  let repaired = 0;
+  ids.forEach(uid => {
+    if (!uid) return;
+    if (!data.users || !data.users[uid]) {
+      ensureUserRecord(data, uid);
+      repaired += 1;
+    }
+  });
+  return repaired;
+}
+
 function buildUserSyncBundle(data, userId) {
   const uid = String(userId);
-  const user = data.users && data.users[uid];
-  if (!user) return null;
-
+  rebuildUserConversationIndex(data);
   const convIds = Object.keys((data.userConversations && data.userConversations[uid]) || {});
+  if (convIds.length === 0) return null;
+  const user = ensureUserRecord(data, uid);
   const conversations = {};
   const messages = {};
   const users = { [uid]: user };
@@ -139,6 +207,7 @@ function buildUserSyncBundle(data, userId) {
     if (!conv) return;
     conversations[convId] = conv;
     (conv.members || []).forEach(mid => {
+      ensureUserRecord(data, String(mid));
       if (data.users[mid]) users[String(mid)] = data.users[mid];
     });
     const convMsgs = (data.messages && data.messages[convId]) || {};
@@ -460,6 +529,25 @@ const server = http.createServer(async (req, res) => {
       }
       await saveDataWithActivity(data);
       sendJson(res, 200, { ok: true, version: data.activityVersion || 0 });
+      return;
+    }
+
+    if (req.method === 'POST' && parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'repair-users') {
+      let role = adminRoleFromToken;
+      const body = await readBody(req);
+      if (!role) role = verifyAdminLogin(body.email, body.password);
+      if (role !== 'super') {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+      const repaired = repairMissingUsers(data);
+      if (repaired > 0) await saveDataWithActivity(data);
+      else await saveData(data);
+      sendJson(res, 200, {
+        ok: true,
+        repaired,
+        users: Object.keys(data.users || {}).length
+      });
       return;
     }
 
