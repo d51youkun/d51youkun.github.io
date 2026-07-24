@@ -47,13 +47,15 @@ python3 -m http.server 8765 --bind 0.0.0.0
    |------|-----|
    | Production branch | `main` |
    | Build command | `python3 build.py` |
-   | Build output directory | `/`（空欄でも可） |
-   | **Deploy command** | `npx wrangler pages deploy . --project-name=bluechat` |
+   | Build output directory | 空欄 |
+   | **Deploy command** | `npx wrangler deploy --assets=./dist` |
 
-   ※ プロジェクト名を変えた場合は `--project-name=` も同じ名前にしてください。  
-   `npx wrangler deploy`（Workers用）だと失敗します。必ず **`pages deploy`** です。
+   または Deploy command を `npm run deploy` にしてもOK。
 
-4. **Save and Deploy** で公開。初回URLは `https://bluechat.pages.dev` のような `*.pages.dev` になります
+   `build.py` が `dist/` に公開ファイルだけを出力します。  
+   `npx wrangler deploy` だけ（`--assets` なし）だと失敗します。
+
+4. **Save and Deploy** → **Retry deployment**
 5. **Custom domains** から独自ドメインを追加できます（Cloudflare で DNS 管理している場合）
 
 **GitHub Actions で自動デプロイする場合**（上記 Git 連携の代わり）:

@@ -1,0 +1,8 @@
+{
+  "name": "bluechat",
+  "private": true,
+  "scripts": {
+    "build": "python3 build.py",
+    "deploy": "wrangler deploy --assets=./dist"
+  }
+}

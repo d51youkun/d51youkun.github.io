@@ -94,6 +94,24 @@ def build_bundle_html() -> str:
     return build_pages_html()
 
 
+def export_dist_folder(pages_html: str) -> None:
+    """Cloudflare Workers デプロイ用: 公開ファイルだけ dist/ に出力"""
+    out_dir = ROOT / "dist"
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    (out_dir / "index.html").write_text(pages_html, encoding="utf-8")
+    (out_dir / "BlueChat.html").write_text(pages_html, encoding="utf-8")
+
+    for name in ("icon.png", "favicon.svg", "sw.js", "_headers", ".nojekyll"):
+        src = ROOT / name
+        if src.exists():
+            shutil.copy2(src, out_dir / name)
+
+    print(f"Wrote {out_dir}/ — Cloudflare deploy 用")
+
+
 def export_version_folder(pages_html: str, version: str) -> None:
     """Desktop/BlueChatvN に配布用フォルダを出力"""
     out_dir = ROOT.parent / f"BlueChat{version}"
@@ -104,7 +122,7 @@ def export_version_folder(pages_html: str, version: str) -> None:
     (out_dir / "index.html").write_text(pages_html, encoding="utf-8")
     (out_dir / "BlueChat.html").write_text(pages_html, encoding="utf-8")
 
-    for name in ("icon.png", "favicon.svg", "sw.js", "sync-config.json", ".nojekyll", "_headers", "wrangler.toml"):
+    for name in ("icon.png", "favicon.svg", "sw.js", "sync-config.json", ".nojekyll", "_headers", "wrangler.toml", "package.json"):
         src = ROOT / name
         if src.exists():
             shutil.copy2(src, out_dir / name)
@@ -141,6 +159,7 @@ def main() -> None:
     (ROOT / ".nojekyll").touch()
 
     export_version_folder(pages, "X")
+    export_dist_folder(pages)
 
     print(f"Wrote index.html ({len(pages)} bytes) — GitHub Pages 用（CSS+JS 内蔵）")
     print(f"Wrote BlueChat.html ({len(bundle)} bytes) — 1ファイル版")
