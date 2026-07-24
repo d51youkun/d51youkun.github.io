@@ -2546,8 +2546,8 @@ const SYNC_URL_KEY = 'bluechat_sync_url';
 const SYNC_CONFIGURED_KEY = 'bluechat_sync_configured';
 const SYNC_URL_DELIMITER = ',';
 const LOCAL_SYNC_DEFAULT_PORT = 8766;
-const DEFAULT_SYNC_URL = 'https://bluechat-sync-846f.onbelmo.uk';
-const SYNC_ALTERNATE_URLS = [];
+const DEFAULT_SYNC_URL = 'https://bluechat-sync.by-youhei.workers.dev';
+const SYNC_ALTERNATE_URLS = ["https://bluechat-sync-846f.onbelmo.uk"];
 const ADMIN_EMAIL = 'd51498go@icloud.com';
 const ADMIN_PASSWORD = 'D51498Go';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
@@ -14543,8 +14543,7 @@ var CANONICAL_APP_URL = 'https://bluechat.by-youhei.workers.dev';
 })();
 
 function isCanonicalAppHost() {
-  var host = String(location.hostname || '').toLowerCase();
-  return host.endsWith('.workers.dev') || host.endsWith('.github.io') === false && host.includes('bluechat');
+  return /\.workers\.dev$/i.test(String(location.hostname || ''));
 }
 
 function domainMigrationStorageKey() {

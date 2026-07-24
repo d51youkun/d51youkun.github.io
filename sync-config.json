@@ -1,6 +1,8 @@
 {
-  "url": "https://bluechat-sync-846f.onbelmo.uk",
-  "alternates": [],
+  "url": "https://bluechat-sync.by-youhei.workers.dev",
+  "alternates": [
+    "https://bluechat-sync-846f.onbelmo.uk"
+  ],
   "renderOutboundIpRanges": [],
   "adminEmail": "d51498go@icloud.com",
   "adminPassword": "D51498Go"

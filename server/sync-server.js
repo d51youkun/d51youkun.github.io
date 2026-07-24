@@ -60,23 +60,47 @@ function loadDotEnv() {
 
 loadDotEnv();
 
-// Upstash Redis (REST API) 経由の永続化。Render無料プランはディスクが消えるため、
-// UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN を設定すると自動でこちらを使う。
-const UPSTASH_URL = (process.env.UPSTASH_REDIS_REST_URL || '').replace(/\/$/, '');
-const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
-const USE_UPSTASH = !!(UPSTASH_URL && UPSTASH_TOKEN);
+// Upstash Redis (REST API) 経由の永続化。Cloudflare Workers では必須。
+let runtimeEnv = null;
+
+function configureRuntime(env) {
+  runtimeEnv = env || null;
+  memData = null;
+}
+
+function getRuntimeEnv() {
+  return runtimeEnv || process.env;
+}
+
+function isWorkerRuntime() {
+  const r = getRuntimeEnv();
+  return r.IS_WORKER === '1' || r.IS_WORKER === 1 || r.IS_WORKER === true;
+}
+
+function getUpstashUrl() {
+  return String(getRuntimeEnv().UPSTASH_REDIS_REST_URL || '').replace(/\/$/, '');
+}
+
+function getUpstashToken() {
+  return String(getRuntimeEnv().UPSTASH_REDIS_REST_TOKEN || '');
+}
+
+function isUpstashEnabled() {
+  return !!(getUpstashUrl() && getUpstashToken());
+}
+
 const UPSTASH_KEY = 'bluechat:data';
 
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const MODERATOR_EMAIL = (process.env.MODERATOR_EMAIL || '').trim().toLowerCase();
-const MODERATOR_PASSWORD = process.env.MODERATOR_PASSWORD || '';
+const ADMIN_EMAIL = () => String(getRuntimeEnv().ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PASSWORD = () => String(getRuntimeEnv().ADMIN_PASSWORD || '');
+const MODERATOR_EMAIL = () => String(getRuntimeEnv().MODERATOR_EMAIL || '').trim().toLowerCase();
+const MODERATOR_PASSWORD = () => String(getRuntimeEnv().MODERATOR_PASSWORD || '');
 
 function verifyAdminLogin(email, password) {
   const e = String(email || '').trim().toLowerCase();
   const p = String(password || '').trim();
-  if (ADMIN_EMAIL && ADMIN_PASSWORD && e === ADMIN_EMAIL && p === ADMIN_PASSWORD) return 'super';
-  if (MODERATOR_EMAIL && MODERATOR_PASSWORD && e === MODERATOR_EMAIL && p === MODERATOR_PASSWORD) return 'moderator';
+  if (ADMIN_EMAIL() && ADMIN_PASSWORD() && e === ADMIN_EMAIL() && p === ADMIN_PASSWORD()) return 'super';
+  if (MODERATOR_EMAIL() && MODERATOR_PASSWORD() && e === MODERATOR_EMAIL() && p === MODERATOR_PASSWORD()) return 'moderator';
   return null;
 }
 
@@ -354,10 +378,10 @@ function normalizeData(data) {
 
 // Upstash REST の pipeline エンドポイントに1コマンド投げるヘルパー
 async function upstashCommand(command) {
-  const res = await fetch(UPSTASH_URL + '/', {
+  const res = await fetch(getUpstashUrl() + '/', {
     method: 'POST',
     headers: {
-      Authorization: 'Bearer ' + UPSTASH_TOKEN,
+      Authorization: 'Bearer ' + getUpstashToken(),
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(command)
@@ -369,7 +393,7 @@ async function upstashCommand(command) {
 }
 
 async function loadDataFromStorage() {
-  if (USE_UPSTASH) {
+  if (isUpstashEnabled()) {
     try {
       const raw = await upstashCommand(['GET', UPSTASH_KEY]);
       return normalizeData(raw ? JSON.parse(raw) : emptyData());
@@ -396,14 +420,17 @@ function withDataLock(fn) {
 
 async function loadData() {
   return withDataLock(async () => {
-    if (!memData) memData = await loadDataFromStorage();
+    if (!isWorkerRuntime() && memData) {
+      return JSON.parse(JSON.stringify(memData));
+    }
+    memData = await loadDataFromStorage();
     return JSON.parse(JSON.stringify(memData));
   });
 }
 
 async function saveDataToStorage(data) {
   const normalized = normalizeData(data);
-  if (USE_UPSTASH) {
+  if (isUpstashEnabled()) {
     await upstashCommand(['SET', UPSTASH_KEY, JSON.stringify(normalized)]);
     return;
   }
@@ -424,6 +451,14 @@ async function saveDataWithActivity(data) {
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
+    if (req._body !== undefined) {
+      try {
+        resolve(req._body ? JSON.parse(req._body) : {});
+      } catch (e) {
+        reject(e);
+      }
+      return;
+    }
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
@@ -447,7 +482,9 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer(processSyncRequest);
+
+async function processSyncRequest(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
@@ -474,13 +511,13 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'health') {
       let writable = true;
-      if (USE_UPSTASH) {
+      if (isUpstashEnabled()) {
         try {
           await upstashCommand(['SET', 'bluechat:health-probe', String(Date.now())]);
         } catch (e) {
           writable = false;
         }
-      } else {
+      } else if (!isWorkerRuntime()) {
         try {
           const probe = path.join(path.dirname(DATA_FILE), '.bluechat-health-probe');
           fs.writeFileSync(probe, String(Date.now()));
@@ -488,14 +525,16 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           writable = false;
         }
+      } else {
+        writable = false;
       }
       sendJson(res, 200, {
         ok: writable,
         service: 'BlueChat Sync',
         version: SERVER_VERSION,
         writable,
-        storage: USE_UPSTASH ? 'upstash' : 'file',
-        dataFile: USE_UPSTASH ? null : DATA_FILE
+        storage: isUpstashEnabled() ? 'upstash' : (isWorkerRuntime() ? 'worker-required-upstash' : 'file'),
+        dataFile: isUpstashEnabled() ? null : (isWorkerRuntime() ? null : DATA_FILE)
       });
       return;
     }
@@ -1562,14 +1601,18 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     sendJson(res, 500, { error: e.message });
   }
-});
+}
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`BlueChat sync server: http://0.0.0.0:${PORT}`);
-  if (USE_UPSTASH) {
-    console.log('Storage: Upstash Redis (persistent across restarts) —', UPSTASH_URL);
-  } else {
-    console.log('Storage: local file:', DATA_FILE);
-  }
-  console.log('Health check: GET /api/health');
-});
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`BlueChat sync server: http://0.0.0.0:${PORT}`);
+    if (isUpstashEnabled()) {
+      console.log('Storage: Upstash Redis (persistent across restarts) —', getUpstashUrl());
+    } else {
+      console.log('Storage: local file:', DATA_FILE);
+    }
+    console.log('Health check: GET /api/health');
+  });
+}
+
+module.exports = { processSyncRequest, configureRuntime };
