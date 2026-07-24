@@ -2349,12 +2349,4 @@ startGlobalSync = function () {
   _startGlobalSyncNotifySafe();
 };
 
-function bootBlueChat() {
-  init();
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootBlueChat);
-} else {
-  bootBlueChat();
-}
+// bootBlueChat は v33.js の末尾で実行（全レイヤー読込後）
