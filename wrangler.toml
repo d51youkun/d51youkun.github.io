@@ -1,6 +1,7 @@
 # Cloudflare Workers（静的サイト）— wrangler deploy --assets=./dist 用
 name = "bluechat"
 compatibility_date = "2024-09-23"
+workers_dev = true
 
 [assets]
 directory = "./dist"
