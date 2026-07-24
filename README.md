@@ -48,6 +48,9 @@ python3 -m http.server 8765 --bind 0.0.0.0
    | Production branch | `main` |
    | Build command | `python3 build.py` |
    | Build output directory | `/`（空欄でも可） |
+   | **Deploy command** | **空欄（何も入れない）** ← 重要 |
+
+   `Deploy command` に `npx wrangler deploy` などが入っていると失敗します（静的HTMLサイトのため不要）。
 
 4. **Save and Deploy** で公開。初回URLは `https://bluechat.pages.dev` のような `*.pages.dev` になります
 5. **Custom domains** から独自ドメインを追加できます（Cloudflare で DNS 管理している場合）
