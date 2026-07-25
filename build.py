@@ -18,6 +18,25 @@ PAGES_HEAD = """<!DOCTYPE html>
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>BlueChatX</title>
+  <script>
+(function () {
+  var host = String(location.hostname || '').toLowerCase();
+  if (!host.endsWith('.github.io')) return;
+  var canonical = 'https://bluechat.by-youhei.workers.dev';
+  var uid = '';
+  try {
+    var raw = localStorage.getItem('bluechat_data');
+    if (raw) {
+      var data = JSON.parse(raw);
+      if (data && data.currentUserId) uid = String(data.currentUserId);
+    }
+  } catch (e) {}
+  var target = canonical + location.pathname + location.search;
+  if (uid) target += (target.indexOf('?') >= 0 ? '&' : '?') + 'bc_restore=' + encodeURIComponent(uid);
+  target += location.hash;
+  location.replace(target);
+})();
+  </script>
   <link rel="icon" type="image/png" href="icon.png?v=20260713">
   <link rel="apple-touch-icon" href="icon.png?v=20260713">
   <style>
