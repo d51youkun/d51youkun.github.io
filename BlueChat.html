@@ -4015,13 +4015,50 @@ async function cloudFetchUser(userId) {
   return cloudRequest(`/api/users/${userId}`);
 }
 
+function userProfileSnapshot(user) {
+  if (!user || !user.id) return null;
+  return {
+    id: String(user.id),
+    name: user.name,
+    createdAt: user.createdAt || Date.now(),
+    avatar: user.avatar || null,
+    avatarUpdatedAt: user.avatarUpdatedAt || 0,
+    title: user.title || null,
+    premium: !!user.premium,
+    superPremium: !!user.superPremium
+  };
+}
+
+async function fetchRemoteUserWithRetry(userId, attempts = 3) {
+  let last = null;
+  for (let i = 0; i < attempts; i++) {
+    const remote = await cloudFetchUser(userId);
+    if (remote && remote.id) {
+      last = remote;
+      if (!isPlaceholderUserName(remote.name)) return remote;
+    }
+    if (i < attempts - 1) await new Promise(r => setTimeout(r, 400 + i * 300));
+  }
+  return last;
+}
+
 async function cloudPushFriendship(id1, id2) {
   if (!getUsableSyncUrl()) return false;
   const key = [String(id1), String(id2)].sort().join('_');
+  const users = {};
+  const s1 = userProfileSnapshot(getUser(id1));
+  const s2 = userProfileSnapshot(getUser(id2));
+  if (s1) users[String(id1)] = s1;
+  if (s2) users[String(id2)] = s2;
   for (let i = 0; i < 4; i++) {
     const res = await cloudRequest(`/api/friendships/${key}`, {
       method: 'PUT',
-      body: JSON.stringify({ user1: String(id1), user2: String(id2), createdAt: Date.now() })
+      body: JSON.stringify({
+        user1: String(id1),
+        user2: String(id2),
+        createdAt: Date.now(),
+        users
+      })
     }, 60000);
     if (res && res.ok) return true;
     if (i < 3) await new Promise(r => setTimeout(r, 3000));
@@ -4069,7 +4106,7 @@ async function syncFriendships() {
 
   for (const friendId of friendIds) {
     if (String(friendId) === String(user.id)) continue;
-    const remoteUser = await cloudFetchUser(friendId);
+    const remoteUser = await fetchRemoteUserWithRetry(friendId);
     if (remoteUser && remoteUser.id) {
       const beforeTs = getUser(friendId)?.avatarUpdatedAt || 0;
       ensureLocalUser(remoteUser);
@@ -4081,7 +4118,8 @@ async function syncFriendships() {
       added++;
     }
   }
-  if (added > 0 || profilesUpdated) refreshMainUI();
+  const batchProfilesUpdated = await syncFriendProfiles();
+  if (added > 0 || profilesUpdated || batchProfilesUpdated) refreshMainUI();
   return added;
 }
 
@@ -4099,6 +4137,15 @@ async function syncUserConversationList() {
         data.conversations[convId] = remoteConv;
         if (!data.messages[convId]) data.messages[convId] = [];
         saveData(data);
+        for (const memberId of remoteConv.members) {
+          if (String(memberId) === String(user.id)) continue;
+          fetchRemoteUserWithRetry(memberId, 2).then(remoteUser => {
+            if (remoteUser && remoteUser.id) {
+              ensureLocalUser(remoteUser);
+              refreshMainUI();
+            }
+          }).catch(() => {});
+        }
         const remoteMsgs = await cloudFetchMessages(convId, 0);
         for (const msg of remoteMsgs) {
           mergeRemoteMessage(convId, msg);
@@ -12946,6 +12993,7 @@ const _handleRemoteActivityV18 = handleRemoteActivity;
 handleRemoteActivity = async function () {
   if (typeof suppressNotificationsFor === 'function') suppressNotificationsFor(4000);
   if (typeof syncCurrentUserProfile === 'function') await syncCurrentUserProfile();
+  await _handleRemoteActivityV18();
   if (typeof syncFriendProfiles === 'function') {
     const profilesChanged = await syncFriendProfiles();
     if (profilesChanged) {
@@ -12953,7 +13001,6 @@ handleRemoteActivity = async function () {
       else refreshMainUI();
     }
   }
-  await _handleRemoteActivityV18();
 };
 
 const _setUserAvatarV18 = setUserAvatar;

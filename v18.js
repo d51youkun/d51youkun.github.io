@@ -49,6 +49,7 @@ const _handleRemoteActivityV18 = handleRemoteActivity;
 handleRemoteActivity = async function () {
   if (typeof suppressNotificationsFor === 'function') suppressNotificationsFor(4000);
   if (typeof syncCurrentUserProfile === 'function') await syncCurrentUserProfile();
+  await _handleRemoteActivityV18();
   if (typeof syncFriendProfiles === 'function') {
     const profilesChanged = await syncFriendProfiles();
     if (profilesChanged) {
@@ -56,7 +57,6 @@ handleRemoteActivity = async function () {
       else refreshMainUI();
     }
   }
-  await _handleRemoteActivityV18();
 };
 
 const _setUserAvatarV18 = setUserAvatar;
