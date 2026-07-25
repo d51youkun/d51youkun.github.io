@@ -333,9 +333,12 @@ function applyRemoteUserFields(uid, remoteUser) {
   const isSelf = String(uid) === String(data.currentUserId);
   let changed = false;
 
-  if (remoteUser.name && remoteUser.name !== local.name) {
-    local.name = remoteUser.name;
-    changed = true;
+  if (remoteUser.name) {
+    const better = pickBetterUserName(local.name, remoteUser.name);
+    if (better !== local.name) {
+      local.name = better;
+      changed = true;
+    }
   }
   if (remoteUser.avatar !== undefined && shouldUpdateRemoteAvatar(local, remoteUser, isSelf)) {
     if (remoteUser.avatar) local.avatar = remoteUser.avatar;
@@ -378,6 +381,23 @@ function applyRemoteUserFields(uid, remoteUser) {
   return changed;
 }
 
+function isPlaceholderUserName(name) {
+  const n = String(name || '').trim();
+  return !n || ['友だち', '友達', '友達さん', 'ユーザー', '不明'].includes(n);
+}
+
+function pickBetterUserName(localName, incomingName) {
+  const local = String(localName || '').trim();
+  const incoming = String(incomingName || '').trim();
+  if (!incoming) return local || '不明';
+  if (!local) return incoming;
+  const localPh = isPlaceholderUserName(local);
+  const incomingPh = isPlaceholderUserName(incoming);
+  if (localPh && !incomingPh) return incoming;
+  if (!localPh && incomingPh) return local;
+  return incoming.length >= local.length ? incoming : local;
+}
+
 function ensureLocalUser(userInfo) {
   if (!userInfo || !userInfo.id) return null;
   const uid = String(userInfo.id);
@@ -390,9 +410,12 @@ function ensureLocalUser(userInfo) {
       isRemote: String(uid) !== String(data.currentUserId)
     };
     saveData(data);
-  } else if (userInfo.name && data.users[uid].name !== userInfo.name) {
-    data.users[uid].name = userInfo.name;
-    saveData(data);
+  } else if (userInfo.name) {
+    const better = pickBetterUserName(data.users[uid].name, userInfo.name);
+    if (better !== data.users[uid].name) {
+      data.users[uid].name = better;
+      saveData(data);
+    }
   }
   applyRemoteUserFields(uid, userInfo);
   return data.users[uid];
@@ -402,6 +425,7 @@ function ensureLocalUser(userInfo) {
 function encodeInvite(user) {
   const payload = {
     i: user.id,
+    n: String(user.name || '').trim().slice(0, 40),
     e: Math.floor((Date.now() + CODE_EXPIRY_MS) / 1000)
   };
   const json = JSON.stringify(payload);
@@ -639,6 +663,14 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
 
   const me = getCurrentUser();
   let friendName = payload.n || null;
+  if (getUsableSyncUrl()) {
+    try {
+      const remote = await cloudFetchUser(friendId);
+      if (remote && remote.id) {
+        friendName = pickBetterUserName(friendName, remote.name);
+      }
+    } catch (e) { /* ignore */ }
+  }
   ensureLocalUser({ id: friendId, name: friendName || '友だち' });
 
   const convId = addFriendship(meId, friendId, { skipCloud: true });
@@ -651,12 +683,13 @@ async function redeemFriendInvite(inviteStr, currentUserId) {
   if (getUsableSyncUrl()) {
     cloudSynced = await queueFriendInviteCloudSync(meId, friendId, targetUser, convId);
     if (me) cloudPushUser(me);
-    cloudFetchUser(friendId).then(remote => {
+    try {
+      const remote = await cloudFetchUser(friendId);
       if (remote && remote.id) {
         ensureLocalUser(remote);
         refreshMainUI();
       }
-    });
+    } catch (e) { /* ignore */ }
   }
 
   return { success: true, user: targetUser, cloudSynced };
@@ -1400,7 +1433,7 @@ async function cloudPushUser(user) {
   }
   const payload = {
     id: user.id,
-    name: user.name,
+    name: pickBetterUserName(user.name, remote?.name),
     createdAt: user.createdAt || Date.now(),
     avatar: user.avatar || null,
     avatarUpdatedAt: user.avatarUpdatedAt || 0,
