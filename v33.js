@@ -38,8 +38,4 @@ runFastBootSync = function () {
   Promise.resolve(_runFastBootSyncV33()).catch(() => {});
 };
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootBlueChat);
-} else {
-  bootBlueChat();
-}
+// 起動は v35.js が全パッチ適用後に行う

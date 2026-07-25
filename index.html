@@ -14533,11 +14533,7 @@ runFastBootSync = function () {
   Promise.resolve(_runFastBootSyncV33()).catch(() => {});
 };
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootBlueChat);
-} else {
-  bootBlueChat();
-}
+// 起動は v35.js が全パッチ適用後に行う
 
 
 /**
@@ -14552,6 +14548,7 @@ var APP_VERSION = 'v34';
 var APP_VERSION = 'v36';
 
 var CANONICAL_APP_URL = 'https://bluechat.by-youhei.workers.dev';
+var migrationRestoreRunning = false;
 
 (function redirectLegacyAppHost() {
   var host = String(location.hostname || '').toLowerCase();
@@ -14601,37 +14598,49 @@ function clearMigrationRestoreParam() {
 }
 
 async function maybeRestoreFromMigrationParam() {
+  if (migrationRestoreRunning) return false;
   if (!isCanonicalAppHost()) return false;
   if (getCurrentUser()) return false;
 
   const uid = peekMigrationRestoreUserId();
   if (!uid) return false;
 
-  clearMigrationRestoreParam();
+  migrationRestoreRunning = true;
   if (typeof forceEnsureDefaultSyncUrl === 'function') forceEnsureDefaultSyncUrl();
-  if (!getUsableSyncUrl()) return false;
-
-  showBootSyncLine('以前のURLからデータを復元中…', 'loading');
-
-  const ok = await wakeSyncServer(SYNC_WAKE_TIMEOUT_MS);
-  if (!ok) {
-    showBootSyncLine('サーバー接続中…', 'loading');
-    hideBootSyncLine(3000);
+  if (!getUsableSyncUrl()) {
+    migrationRestoreRunning = false;
     return false;
   }
 
-  const result = await restoreAccountByUserId(uid, '');
-  if (result && !result.error) {
-    finishAccountRestore(result);
-    if (typeof afterServerRestore === 'function') await afterServerRestore();
-    localStorage.setItem(domainMigrationStorageKey(), '1');
-    showToast('以前のURLからデータを引き継ぎました');
-    hideBootSyncLine(1500);
-    return true;
-  }
+  showBootSyncLine('以前のURLからデータを復元中…', 'loading');
 
-  hideBootSyncLine(2500);
-  if (result && result.error) showToast(result.error);
+  try {
+    const ok = await wakeSyncServer(SYNC_WAKE_TIMEOUT_MS);
+    if (!ok) {
+      showToast('サーバー接続中です。しばらく待ってから再度お試しください');
+      hideBootSyncLine(2500);
+      return false;
+    }
+
+    const result = await restoreAccountByUserId(uid, '');
+    if (result && !result.error) {
+      clearMigrationRestoreParam();
+      finishAccountRestore(result);
+      if (typeof afterServerRestore === 'function') await afterServerRestore();
+      localStorage.setItem(domainMigrationStorageKey(), '1');
+      showToast('以前のURLからデータを引き継ぎました');
+      hideBootSyncLine(1500);
+      return true;
+    }
+
+    hideBootSyncLine(2500);
+    if (result && result.error) showToast(result.error);
+  } catch (e) {
+    hideBootSyncLine(2500);
+    showToast(e.message || '復元に失敗しました');
+  } finally {
+    migrationRestoreRunning = false;
+  }
   return false;
 }
 
@@ -14656,26 +14665,49 @@ async function maybeAutoRestoreForDomainMigration() {
   return ok;
 }
 
-const _initV35 = init;
-init = function () {
-  (async () => {
+async function queueDomainMigrationRestore() {
+  try {
     if (!getCurrentUser() && peekMigrationRestoreUserId()) {
       await maybeRestoreFromMigrationParam();
+      return;
     }
-    _initV35();
-  })();
+    if (getCurrentUser() && getUsableSyncUrl()) {
+      await maybeAutoRestoreForDomainMigration();
+    }
+  } catch (e) {
+    console.error('domain migration restore failed:', e);
+    hideBootSyncLine(0);
+  }
+}
+
+const _initV35 = init;
+init = function () {
+  _initV35();
+  queueDomainMigrationRestore();
 };
 
 const _runFastBootSyncV35 = runFastBootSync;
 runFastBootSync = async function () {
-  if (!getCurrentUser() && peekMigrationRestoreUserId()) {
-    await maybeRestoreFromMigrationParam();
-  }
   await _runFastBootSyncV35();
-  if (getCurrentUser() && getUsableSyncUrl()) {
+  if (getCurrentUser() && getUsableSyncUrl() && !peekMigrationRestoreUserId()) {
     await maybeAutoRestoreForDomainMigration();
   }
 };
+
+function bootBlueChatFinal() {
+  try {
+    init();
+  } catch (err) {
+    console.error('BlueChat init error:', err);
+  }
+  if (typeof ensureVisibleScreen === 'function') ensureVisibleScreen();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootBlueChatFinal);
+} else {
+  bootBlueChatFinal();
+}
 
   </script>
 </body>
