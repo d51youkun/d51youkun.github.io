@@ -3,7 +3,5 @@
   "alternates": [
     "https://bluechat-sync-846f.onbelmo.uk"
   ],
-  "renderOutboundIpRanges": [],
-  "adminEmail": "d51498go@icloud.com",
-  "adminPassword": "D51498Go"
+  "renderOutboundIpRanges": []
 }

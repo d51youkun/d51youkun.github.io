@@ -3,8 +3,6 @@
  */
 
 const ADMIN_ROLE_KEY = 'bluechat_admin_role';
-const MODERATOR_EMAIL = 'zaku2.com';
-const MODERATOR_PASSWORD = 'MS-06S';
 const SUSPEND_DURATION_MS = 60 * 60 * 1000;
 
 let adminRole = null;
@@ -72,12 +70,6 @@ function formatSuspendedUntil(ts) {
 
 // ─── Admin roles ─────────────────────────────────────────
 function verifyAdminCredentials(email, password) {
-  const e = String(email || '').trim().toLowerCase();
-  const p = String(password || '').trim();
-  const adminEmail = String(typeof ADMIN_EMAIL !== 'undefined' ? ADMIN_EMAIL : '').trim().toLowerCase();
-  const adminPassword = String(typeof ADMIN_PASSWORD !== 'undefined' ? ADMIN_PASSWORD : '').trim();
-  if (adminEmail && adminPassword && e === adminEmail && p === adminPassword) return 'super';
-  if (e === MODERATOR_EMAIL.toLowerCase() && p === MODERATOR_PASSWORD) return 'moderator';
   return null;
 }
 

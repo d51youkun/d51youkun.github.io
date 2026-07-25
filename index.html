@@ -2567,9 +2567,9 @@ const SYNC_URL_DELIMITER = ',';
 const LOCAL_SYNC_DEFAULT_PORT = 8766;
 const DEFAULT_SYNC_URL = 'https://bluechat-sync.by-youhei.workers.dev';
 const SYNC_ALTERNATE_URLS = ["https://bluechat-sync-846f.onbelmo.uk"];
-const ADMIN_EMAIL = 'd51498go@icloud.com';
-const ADMIN_PASSWORD = 'D51498Go';
+const ADMIN_EMAIL = '';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
+const API_TOKEN_STORE_KEY = 'bluechat_api_tokens';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
 const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
@@ -3678,14 +3678,70 @@ function initSyncFromQuery() {
   repairSyncUrlForCurrentPage();
 }
 
-async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000) {
+function getApiTokenStore() {
+  try {
+    return JSON.parse(localStorage.getItem(API_TOKEN_STORE_KEY) || '{}');
+  } catch (e) {
+    return {};
+  }
+}
+
+function getApiToken(userId) {
+  if (!userId) return '';
+  return String(getApiTokenStore()[String(userId)] || '');
+}
+
+function saveApiToken(userId, token) {
+  if (!userId) return;
+  const all = getApiTokenStore();
+  if (token) all[String(userId)] = String(token);
+  else delete all[String(userId)];
+  localStorage.setItem(API_TOKEN_STORE_KEY, JSON.stringify(all));
+}
+
+function buildCloudAuthHeaders(skipAuth) {
+  const headers = {};
+  if (skipAuth) return headers;
+  const user = getCurrentUser();
+  if (user) {
+    const token = getApiToken(user.id);
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+  }
+  const adminToken = typeof getAdminToken === 'function' ? getAdminToken() : '';
+  if (adminToken) headers['X-Admin-Token'] = adminToken;
+  return headers;
+}
+
+async function ensureApiTokenForCurrentUser() {
+  const user = getCurrentUser();
+  if (!user || !getUsableSyncUrl()) return false;
+  if (getApiToken(user.id)) return true;
+  const res = await cloudRequest('/api/auth/claim-token', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: user.id,
+      passwordHash: user.passwordHash || null
+    })
+  }, 60000, true);
+  if (res && res.apiToken) {
+    saveApiToken(user.id, res.apiToken);
+    return true;
+  }
+  return false;
+}
+
+async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000, skipAuth = false) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(base + path, {
       ...options,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildCloudAuthHeaders(skipAuth),
+        ...(options.headers || {})
+      }
     });
     const text = await res.text();
     if (!res.ok) return null;
@@ -3697,16 +3753,16 @@ async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000) {
   }
 }
 
-async function cloudRequest(path, options = {}, timeoutMs = 45000) {
+async function cloudRequest(path, options = {}, timeoutMs = 45000, skipAuth = false) {
   if (typeof cloudRequestExt === 'function') {
-    return cloudRequestExt(path, options, timeoutMs);
+    return cloudRequestExt(path, options, timeoutMs, skipAuth);
   }
   const candidates = getSyncUrlCandidates().filter(u => !isMixedContentBlocked(u));
   if (!candidates.length) return null;
 
   let lastResult = null;
   for (let i = 0; i < candidates.length; i++) {
-    const result = await cloudRequestToBase(candidates[i], path, options, timeoutMs);
+    const result = await cloudRequestToBase(candidates[i], path, options, timeoutMs, skipAuth);
     if (result !== null) {
       if (i > 0) {
         const promoted = [candidates[i], ...candidates.filter((_, idx) => idx !== i)];
@@ -4004,8 +4060,11 @@ async function cloudPushUser(user) {
     const res = await cloudRequest(`/api/users/${user.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
-    }, 60000);
-    if (res && res.ok) return true;
+    }, 60000, !getApiToken(user.id));
+    if (res && res.ok !== false) {
+      if (res.apiToken) saveApiToken(user.id, res.apiToken);
+      return true;
+    }
     if (i < 3) await new Promise(r => setTimeout(r, 2000));
   }
   return false;
@@ -4208,8 +4267,10 @@ async function cloudSyncAfterSend(convId, msg) {
 function startGlobalSync() {
   stopGlobalSync();
   if (!getUsableSyncUrl()) return;
-  syncAllConversations();
-  globalSyncTimer = setInterval(syncAllConversations, 2500);
+  ensureApiTokenForCurrentUser().finally(() => {
+    syncAllConversations();
+    globalSyncTimer = setInterval(syncAllConversations, 2500);
+  });
 }
 
 function stopGlobalSync() {
@@ -5922,22 +5983,7 @@ function saveAdminToken(token) {
 }
 
 async function adminForceSyncRequest() {
-  if (!getAdminToken() && typeof ADMIN_EMAIL !== 'undefined' && ADMIN_EMAIL
-      && typeof verifyAdminCredentialsAsync === 'function') {
-    await verifyAdminCredentialsAsync(ADMIN_EMAIL, ADMIN_PASSWORD || '');
-  }
-
-  let res = await adminCloudRequest('/api/admin/force-sync', { method: 'POST', body: '{}' });
-  if (res && res.ok) return res;
-
-  const email = typeof ADMIN_EMAIL !== 'undefined' ? String(ADMIN_EMAIL || '').trim() : '';
-  const password = typeof ADMIN_PASSWORD !== 'undefined' ? String(ADMIN_PASSWORD || '') : '';
-  if (!email || !password) return res;
-
-  return adminCloudRequest('/api/admin/force-sync', {
-    method: 'POST',
-    body: JSON.stringify({ email, password })
-  });
+  return adminCloudRequest('/api/admin/force-sync', { method: 'POST', body: '{}' });
 }
 
 async function adminCloudRequest(path, options = {}, timeoutMs = 120000) {
@@ -5956,6 +6002,7 @@ async function adminCloudRequest(path, options = {}, timeoutMs = 120000) {
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
+          ...buildCloudAuthHeaders(false),
           'X-Admin-Token': getAdminToken(),
           ...(options.headers || {})
         }
@@ -5995,7 +6042,10 @@ async function restoreAccountByUserId(userId, password) {
     const backup = cloud.backup;
     if (backup.passwordHash) {
       if (password === null || password === undefined) return { error: 'パスワードが必要です' };
-      if (backup.passwordHash !== simpleHash(password || '')) {
+      const ok = typeof matchesPasswordHash === 'function'
+        ? await matchesPasswordHash(password, backup.passwordHash)
+        : backup.passwordHash === simpleHash(password || '');
+      if (!ok) {
         return { error: 'パスワードが正しくありません' };
       }
     }
@@ -6010,7 +6060,10 @@ async function restoreAccountByUserId(userId, password) {
   const remoteUser = await cloudFetchUser(uid);
   if (remoteUser && remoteUser.passwordHash) {
     if (password === null || password === undefined) return { error: 'パスワードが必要です' };
-    if (remoteUser.passwordHash !== simpleHash(password || '')) {
+    const ok = typeof matchesPasswordHash === 'function'
+      ? await matchesPasswordHash(password, remoteUser.passwordHash)
+      : remoteUser.passwordHash === simpleHash(password || '');
+    if (!ok) {
       return { error: 'パスワードが正しくありません' };
     }
   }
@@ -6086,32 +6139,6 @@ async function redeemTransferCodeExt(code) {
 }
 
 async function verifyAdminCredentialsAsync(email, password) {
-  const localRole = typeof verifyAdminCredentials === 'function'
-    ? verifyAdminCredentials(email, password)
-    : null;
-  if (localRole) {
-    const base = getEffectiveSyncUrl();
-    if (base) {
-      try {
-        const res = await fetch(base + '/api/admin/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: String(email || '').trim(),
-            password: String(password || '')
-          })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.token) saveAdminToken(data.token);
-        }
-      } catch (e) {
-        // ローカル認証は成功、サーバートークンは任意
-      }
-    }
-    return { role: localRole };
-  }
-
   const candidates = typeof getSyncUrlCandidates === 'function'
     ? getSyncUrlCandidates()
     : [getEffectiveSyncUrl()].filter(Boolean);
@@ -6138,7 +6165,7 @@ async function verifyAdminCredentialsAsync(email, password) {
   return null;
 }
 
-async function cloudRequestExt(path, options = {}, timeoutMs = 45000) {
+async function cloudRequestExt(path, options = {}, timeoutMs = 45000, skipAuth = false) {
   const candidates = typeof getSyncUrlCandidates === 'function'
     ? getSyncUrlCandidates().filter(u => typeof isMixedContentBlocked !== 'function' || !isMixedContentBlocked(u))
     : [getEffectiveSyncUrl()].filter(Boolean);
@@ -6151,7 +6178,11 @@ async function cloudRequestExt(path, options = {}, timeoutMs = 45000) {
       const res = await fetch(candidates[i] + path, {
         ...options,
         signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildCloudAuthHeaders(skipAuth),
+          ...(options.headers || {})
+        }
       });
       if (!res.ok) continue;
       const text = await res.text();
@@ -7821,8 +7852,6 @@ startGlobalSync = function () {
  */
 
 const ADMIN_ROLE_KEY = 'bluechat_admin_role';
-const MODERATOR_EMAIL = 'zaku2.com';
-const MODERATOR_PASSWORD = 'MS-06S';
 const SUSPEND_DURATION_MS = 60 * 60 * 1000;
 
 let adminRole = null;
@@ -7890,12 +7919,6 @@ function formatSuspendedUntil(ts) {
 
 // ─── Admin roles ─────────────────────────────────────────
 function verifyAdminCredentials(email, password) {
-  const e = String(email || '').trim().toLowerCase();
-  const p = String(password || '').trim();
-  const adminEmail = String(typeof ADMIN_EMAIL !== 'undefined' ? ADMIN_EMAIL : '').trim().toLowerCase();
-  const adminPassword = String(typeof ADMIN_PASSWORD !== 'undefined' ? ADMIN_PASSWORD : '').trim();
-  if (adminEmail && adminPassword && e === adminEmail && p === adminPassword) return 'super';
-  if (e === MODERATOR_EMAIL.toLowerCase() && p === MODERATOR_PASSWORD) return 'moderator';
   return null;
 }
 
@@ -15107,6 +15130,129 @@ if (_renderMessagesV37) {
     hydrateConversationMedia(convId).finally(() => _renderMessagesV37(convId));
   };
 }
+
+
+/**
+ * BlueChat v38 — セキュリティ強化（APIトークン・PBKDF2・起動時認証）
+ */
+var APP_VERSION = 'v38';
+
+async function matchesPasswordHash(password, stored) {
+  if (!stored) return true;
+  if (typeof verifyPasswordSecure === 'function' && String(stored).startsWith('pbkdf2:')) {
+    return verifyPasswordSecure(password, stored);
+  }
+  return simpleHash(password || '') === stored;
+}
+
+async function hashPasswordSecure(password) {
+  const text = String(password || '');
+  if (!text) return null;
+  if (!crypto || !crypto.subtle) return simpleHash(text);
+  const enc = new TextEncoder();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', enc.encode(text), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: 120000, hash: 'SHA-256' },
+    key,
+    256
+  );
+  const hashBytes = new Uint8Array(bits);
+  let hashBin = '';
+  hashBytes.forEach(b => { hashBin += String.fromCharCode(b); });
+  let saltBin = '';
+  salt.forEach(b => { saltBin += String.fromCharCode(b); });
+  return 'pbkdf2:120000:' + btoa(saltBin) + ':' + btoa(hashBin);
+}
+
+async function verifyPasswordSecure(password, stored) {
+  const text = String(password || '');
+  const hash = String(stored || '');
+  if (!hash) return true;
+  if (!hash.startsWith('pbkdf2:')) return simpleHash(text) === hash;
+  const parts = hash.split(':');
+  if (parts.length !== 4 || !crypto || !crypto.subtle) return false;
+  const iterations = parseInt(parts[1], 10) || 120000;
+  const salt = Uint8Array.from(atob(parts[2]), c => c.charCodeAt(0));
+  const expected = parts[3];
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(text), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    key,
+    256
+  );
+  const hashBytes = new Uint8Array(bits);
+  let hashBin = '';
+  hashBytes.forEach(b => { hashBin += String.fromCharCode(b); });
+  return btoa(hashBin) === expected;
+}
+
+const _setUserAccountPasswordV38 = setUserAccountPassword;
+setUserAccountPassword = function (userId, password) {
+  hashPasswordSecure(password).then((hash) => {
+    const data = getData();
+    const user = data.users[userId];
+    if (!user) return;
+    if (hash) user.passwordHash = hash;
+    else delete user.passwordHash;
+    saveData(data);
+    cloudPushUser(user);
+  });
+};
+
+const _verifyUserPasswordV38 = typeof verifyUserPassword === 'function' ? verifyUserPassword : null;
+if (_verifyUserPasswordV38) {
+  verifyUserPassword = function (user, password) {
+    const hash = user && user.passwordHash;
+    if (!hash) return true;
+    if (String(hash).startsWith('pbkdf2:')) {
+      return verifyPasswordSecure(password, hash);
+    }
+    return _verifyUserPasswordV38(user, password);
+  };
+}
+
+const _startGlobalSyncV38 = startGlobalSync;
+startGlobalSync = function () {
+  ensureApiTokenForCurrentUser().finally(() => _startGlobalSyncV38());
+};
+
+const _createUserV38 = createUser;
+createUser = function (name) {
+  const user = _createUserV38(name);
+  ensureApiTokenForCurrentUser().catch(() => {});
+  return user;
+};
+
+const _initV38 = init;
+init = function () {
+  _initV38();
+  ensureApiTokenForCurrentUser().catch(() => {});
+};
+
+function isSafeMediaUrl(url) {
+  const u = String(url || '').trim();
+  if (!u) return false;
+  if (u.startsWith('blob:')) return true;
+  if (u.startsWith('data:image/')) return true;
+  if (u.startsWith('https://')) return true;
+  return false;
+}
+
+const _getMessageContentHtmlExtV38 = typeof getMessageContentHtmlExt === 'function' ? getMessageContentHtmlExt : null;
+if (_getMessageContentHtmlExtV38) {
+  getMessageContentHtmlExt = function (msg) {
+    if (msg && msg.image && !isSafeMediaUrl(msg.image)) return escapeHtml('（安全でないメディアURL）');
+    if (msg && msg.video && !isSafeMediaUrl(msg.video)) return escapeHtml('（安全でない動画URL）');
+    return _getMessageContentHtmlExtV38(msg);
+  };
+}
+
+loadAdminSession = function () {
+  adminLoggedIn = localStorage.getItem(ADMIN_SESSION_KEY) === '1' && !!getAdminToken();
+  adminRole = adminLoggedIn ? (localStorage.getItem(ADMIN_ROLE_KEY) || null) : null;
+};
 
   </script>
 </body>

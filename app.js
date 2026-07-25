@@ -13,8 +13,8 @@ const LOCAL_SYNC_DEFAULT_PORT = 8766;
 const DEFAULT_SYNC_URL = '__DEFAULT_SYNC_URL__';
 const SYNC_ALTERNATE_URLS = __SYNC_ALTERNATE_URLS__;
 const ADMIN_EMAIL = '__ADMIN_EMAIL__';
-const ADMIN_PASSWORD = '__ADMIN_PASSWORD__';
 const ADMIN_SESSION_KEY = 'bluechat_admin_session';
+const API_TOKEN_STORE_KEY = 'bluechat_api_tokens';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
 const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
@@ -1123,14 +1123,70 @@ function initSyncFromQuery() {
   repairSyncUrlForCurrentPage();
 }
 
-async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000) {
+function getApiTokenStore() {
+  try {
+    return JSON.parse(localStorage.getItem(API_TOKEN_STORE_KEY) || '{}');
+  } catch (e) {
+    return {};
+  }
+}
+
+function getApiToken(userId) {
+  if (!userId) return '';
+  return String(getApiTokenStore()[String(userId)] || '');
+}
+
+function saveApiToken(userId, token) {
+  if (!userId) return;
+  const all = getApiTokenStore();
+  if (token) all[String(userId)] = String(token);
+  else delete all[String(userId)];
+  localStorage.setItem(API_TOKEN_STORE_KEY, JSON.stringify(all));
+}
+
+function buildCloudAuthHeaders(skipAuth) {
+  const headers = {};
+  if (skipAuth) return headers;
+  const user = getCurrentUser();
+  if (user) {
+    const token = getApiToken(user.id);
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+  }
+  const adminToken = typeof getAdminToken === 'function' ? getAdminToken() : '';
+  if (adminToken) headers['X-Admin-Token'] = adminToken;
+  return headers;
+}
+
+async function ensureApiTokenForCurrentUser() {
+  const user = getCurrentUser();
+  if (!user || !getUsableSyncUrl()) return false;
+  if (getApiToken(user.id)) return true;
+  const res = await cloudRequest('/api/auth/claim-token', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: user.id,
+      passwordHash: user.passwordHash || null
+    })
+  }, 60000, true);
+  if (res && res.apiToken) {
+    saveApiToken(user.id, res.apiToken);
+    return true;
+  }
+  return false;
+}
+
+async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000, skipAuth = false) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(base + path, {
       ...options,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildCloudAuthHeaders(skipAuth),
+        ...(options.headers || {})
+      }
     });
     const text = await res.text();
     if (!res.ok) return null;
@@ -1142,16 +1198,16 @@ async function cloudRequestToBase(base, path, options = {}, timeoutMs = 45000) {
   }
 }
 
-async function cloudRequest(path, options = {}, timeoutMs = 45000) {
+async function cloudRequest(path, options = {}, timeoutMs = 45000, skipAuth = false) {
   if (typeof cloudRequestExt === 'function') {
-    return cloudRequestExt(path, options, timeoutMs);
+    return cloudRequestExt(path, options, timeoutMs, skipAuth);
   }
   const candidates = getSyncUrlCandidates().filter(u => !isMixedContentBlocked(u));
   if (!candidates.length) return null;
 
   let lastResult = null;
   for (let i = 0; i < candidates.length; i++) {
-    const result = await cloudRequestToBase(candidates[i], path, options, timeoutMs);
+    const result = await cloudRequestToBase(candidates[i], path, options, timeoutMs, skipAuth);
     if (result !== null) {
       if (i > 0) {
         const promoted = [candidates[i], ...candidates.filter((_, idx) => idx !== i)];
@@ -1449,8 +1505,11 @@ async function cloudPushUser(user) {
     const res = await cloudRequest(`/api/users/${user.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
-    }, 60000);
-    if (res && res.ok) return true;
+    }, 60000, !getApiToken(user.id));
+    if (res && res.ok !== false) {
+      if (res.apiToken) saveApiToken(user.id, res.apiToken);
+      return true;
+    }
     if (i < 3) await new Promise(r => setTimeout(r, 2000));
   }
   return false;
@@ -1653,8 +1712,10 @@ async function cloudSyncAfterSend(convId, msg) {
 function startGlobalSync() {
   stopGlobalSync();
   if (!getUsableSyncUrl()) return;
-  syncAllConversations();
-  globalSyncTimer = setInterval(syncAllConversations, 2500);
+  ensureApiTokenForCurrentUser().finally(() => {
+    syncAllConversations();
+    globalSyncTimer = setInterval(syncAllConversations, 2500);
+  });
 }
 
 function stopGlobalSync() {

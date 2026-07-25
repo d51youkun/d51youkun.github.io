@@ -458,22 +458,7 @@ function saveAdminToken(token) {
 }
 
 async function adminForceSyncRequest() {
-  if (!getAdminToken() && typeof ADMIN_EMAIL !== 'undefined' && ADMIN_EMAIL
-      && typeof verifyAdminCredentialsAsync === 'function') {
-    await verifyAdminCredentialsAsync(ADMIN_EMAIL, ADMIN_PASSWORD || '');
-  }
-
-  let res = await adminCloudRequest('/api/admin/force-sync', { method: 'POST', body: '{}' });
-  if (res && res.ok) return res;
-
-  const email = typeof ADMIN_EMAIL !== 'undefined' ? String(ADMIN_EMAIL || '').trim() : '';
-  const password = typeof ADMIN_PASSWORD !== 'undefined' ? String(ADMIN_PASSWORD || '') : '';
-  if (!email || !password) return res;
-
-  return adminCloudRequest('/api/admin/force-sync', {
-    method: 'POST',
-    body: JSON.stringify({ email, password })
-  });
+  return adminCloudRequest('/api/admin/force-sync', { method: 'POST', body: '{}' });
 }
 
 async function adminCloudRequest(path, options = {}, timeoutMs = 120000) {
@@ -492,6 +477,7 @@ async function adminCloudRequest(path, options = {}, timeoutMs = 120000) {
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
+          ...buildCloudAuthHeaders(false),
           'X-Admin-Token': getAdminToken(),
           ...(options.headers || {})
         }
@@ -531,7 +517,10 @@ async function restoreAccountByUserId(userId, password) {
     const backup = cloud.backup;
     if (backup.passwordHash) {
       if (password === null || password === undefined) return { error: 'パスワードが必要です' };
-      if (backup.passwordHash !== simpleHash(password || '')) {
+      const ok = typeof matchesPasswordHash === 'function'
+        ? await matchesPasswordHash(password, backup.passwordHash)
+        : backup.passwordHash === simpleHash(password || '');
+      if (!ok) {
         return { error: 'パスワードが正しくありません' };
       }
     }
@@ -546,7 +535,10 @@ async function restoreAccountByUserId(userId, password) {
   const remoteUser = await cloudFetchUser(uid);
   if (remoteUser && remoteUser.passwordHash) {
     if (password === null || password === undefined) return { error: 'パスワードが必要です' };
-    if (remoteUser.passwordHash !== simpleHash(password || '')) {
+    const ok = typeof matchesPasswordHash === 'function'
+      ? await matchesPasswordHash(password, remoteUser.passwordHash)
+      : remoteUser.passwordHash === simpleHash(password || '');
+    if (!ok) {
       return { error: 'パスワードが正しくありません' };
     }
   }
@@ -622,32 +614,6 @@ async function redeemTransferCodeExt(code) {
 }
 
 async function verifyAdminCredentialsAsync(email, password) {
-  const localRole = typeof verifyAdminCredentials === 'function'
-    ? verifyAdminCredentials(email, password)
-    : null;
-  if (localRole) {
-    const base = getEffectiveSyncUrl();
-    if (base) {
-      try {
-        const res = await fetch(base + '/api/admin/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: String(email || '').trim(),
-            password: String(password || '')
-          })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.token) saveAdminToken(data.token);
-        }
-      } catch (e) {
-        // ローカル認証は成功、サーバートークンは任意
-      }
-    }
-    return { role: localRole };
-  }
-
   const candidates = typeof getSyncUrlCandidates === 'function'
     ? getSyncUrlCandidates()
     : [getEffectiveSyncUrl()].filter(Boolean);
@@ -674,7 +640,7 @@ async function verifyAdminCredentialsAsync(email, password) {
   return null;
 }
 
-async function cloudRequestExt(path, options = {}, timeoutMs = 45000) {
+async function cloudRequestExt(path, options = {}, timeoutMs = 45000, skipAuth = false) {
   const candidates = typeof getSyncUrlCandidates === 'function'
     ? getSyncUrlCandidates().filter(u => typeof isMixedContentBlocked !== 'function' || !isMixedContentBlocked(u))
     : [getEffectiveSyncUrl()].filter(Boolean);
@@ -687,7 +653,11 @@ async function cloudRequestExt(path, options = {}, timeoutMs = 45000) {
       const res = await fetch(candidates[i] + path, {
         ...options,
         signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildCloudAuthHeaders(skipAuth),
+          ...(options.headers || {})
+        }
       });
       if (!res.ok) continue;
       const text = await res.text();
