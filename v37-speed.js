@@ -7,7 +7,7 @@ const CHUNK_THRESHOLD = 80000;
 const CHUNK_SIZE = 120000;
 const CHUNK_PARALLEL = 4;
 const GLOBAL_SYNC_MS = 1000;
-const ACTIVITY_POLL_MS = 800;
+const V37_ACTIVITY_POLL_MS = 800;
 const CHAT_SYNC_MS = 800;
 const SYNC_CONV_PARALLEL = 4;
 const SYNC_PUSH_PARALLEL = 3;
@@ -272,7 +272,7 @@ startSyncVersionPolling = function () {
     if (last === 0) localStorage.setItem(ACTIVITY_VERSION_KEY, String(res.version));
   };
   poll();
-  syncVersionTimer = setInterval(poll, ACTIVITY_POLL_MS);
+  syncVersionTimer = setInterval(poll, V37_ACTIVITY_POLL_MS);
 };
 
 const _startChatSyncV37 = startChatSync;
