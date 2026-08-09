@@ -66,7 +66,7 @@ def get_app_js() -> str:
         alternates = []
     admin_email = str(cfg.get("adminEmail", "")).strip()
     if not sync_url:
-        sync_url = "https://bluechat-sync-846f.onbelmo.uk"
+        sync_url = "https://bluechat-sync.by-youhei.workers.dev"
     app_js = app_js.replace("__DEFAULT_SYNC_URL__", sync_url, 1)
     app_js = app_js.replace("__SYNC_ALTERNATE_URLS__", json.dumps(alternates), 1)
     if admin_email:

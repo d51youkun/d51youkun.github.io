@@ -1081,7 +1081,7 @@ function getSyncUrlFormatHint() {
   if (blocked) {
     return '※ HTTPSページからローカルIP(http://)には接続できません。同じWi-FiではPCの http://(PCのIP):8765 で開くか、HTTPSの同期サーバーを使ってください';
   }
-  return 'ドメイン・IPどちらでもOK（例: https://bluechat-sync-846f.onbelmo.uk または 192.168.1.5:8766）。複数はカンマ区切り。';
+  return 'ドメイン・IPどちらでもOK（例: https://bluechat-sync.by-youhei.workers.dev または 192.168.1.5:8766）。複数はカンマ区切り。';
 }
 
 function repairSyncUrlForCurrentPage() {
