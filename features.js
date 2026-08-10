@@ -512,6 +512,17 @@ async function restoreAccountByUserId(userId, password) {
     return { error: '同期サーバーに接続できません。マイページでURLを確認してください' };
   }
 
+  // A new device has no bearer token yet. Claim one using the restore
+  // password before calling the protected backup/user endpoints.
+  const claim = await cloudRequestExt('/api/auth/claim-token', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: uid,
+      password: password === null || password === undefined ? '' : String(password)
+    })
+  }, 60000, true);
+  if (claim?.apiToken && typeof saveApiToken === 'function') saveApiToken(uid, claim.apiToken);
+
   const cloud = await fetchCloudBackup(uid);
   if (cloud && cloud.backup && cloud.backup.data) {
     const backup = cloud.backup;
