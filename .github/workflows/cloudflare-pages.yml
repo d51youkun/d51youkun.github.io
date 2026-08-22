@@ -18,12 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Build BlueChat
-        run: python3 build.py
+      - name: Prepare dist
+        run: |
+          mkdir -p dist
+          cp index.html dist/index.html
+          cp index.html dist/BlueChat.html
+          for f in icon.png favicon.svg sw.js _headers .nojekyll; do
+            [ -f "$f" ] && cp "$f" dist/ || true
+          done
 
       - name: Publish to Cloudflare Pages
         uses: cloudflare/pages-action@v1
@@ -31,5 +33,5 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: bluechat
-          directory: .
+          directory: dist
           branch: main

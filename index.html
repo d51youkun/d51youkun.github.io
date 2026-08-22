@@ -8,7 +8,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>BlueChatX</title>
+  <title>BlueChat</title>
   <script>
 (function () {
   var host = String(location.hostname || '').toLowerCase();
@@ -1283,6 +1283,7 @@ input:focus {
   display: inline-block;
   font-size: 10px;
   color: #fff;
+  background: #d4af37;
   padding: 2px 6px;
   border-radius: 4px;
   margin-left: 6px;
@@ -1979,14 +1980,14 @@ html[data-theme="dark"] body textarea::placeholder {
     <div class="onboarding-container">
       <div class="logo-large">
         <div class="logo-icon">💬</div>
-        <h1>BlueChatX</h1>
+        <h1>BlueChat</h1>
         <p class="tagline">シンプルなチャットアプリ</p>
       </div>
       <div class="onboarding-form">
-        <p class="form-desc">お名前を入力して新規作成するか、すでに使っている端末のQRでペアリングしてください。</p>
+        <p class="form-desc">お名前を入力するだけで始められます。メール・パスワードは不要です。</p>
         <input type="text" id="input-name" placeholder="名前を入力" maxlength="20" autocomplete="off">
         <button id="btn-start" class="btn-primary">はじめる</button>
-        <button type="button" id="btn-account-login-onboarding" class="btn-secondary" style="margin-top:12px">他の端末とペアリング（6桁コード）</button>
+        <button type="button" id="btn-account-login-onboarding" class="btn-secondary" style="margin-top:12px">他の端末と同期（6桁コードを入力）</button>
         <button type="button" id="btn-transfer-onboarding" class="btn-secondary" style="margin-top:8px">引き継ぎ（QR / コード）</button>
       </div>
       <a href="#" id="link-admin-onboarding" class="admin-link">管理者の方はこちら</a>
@@ -1996,7 +1997,7 @@ html[data-theme="dark"] body textarea::placeholder {
   <!-- メインアプリ -->
   <div id="screen-main" class="screen hidden">
     <header class="app-header">
-      <h1 id="header-title">BlueChatX</h1>
+      <h1 id="header-title">BlueChat</h1>
       <button id="btn-menu" class="icon-btn" aria-label="メニュー">☰</button>
     </header>
     <div id="boot-sync-status" class="boot-sync-status hidden" role="status" aria-live="polite"></div>
@@ -2004,7 +2005,7 @@ html[data-theme="dark"] body textarea::placeholder {
     <!-- タブナビ -->
     <nav class="tab-nav">
       <button class="tab active" data-tab="chats">トーク</button>
-      <button class="tab" data-tab="notices">投稿</button>
+      <button class="tab" data-tab="notices">BlueVoom</button>
       <button class="tab" data-tab="friends">友だち</button>
       <button class="tab" data-tab="feature">要望</button>
       <button class="tab" data-tab="bug">バグ報告</button>
@@ -2025,7 +2026,7 @@ html[data-theme="dark"] body textarea::placeholder {
       </div>
     </div>
 
-    <!-- 投稿（公開フィード） -->
+    <!-- BlueVoom（公開フィード） -->
     <div id="tab-notices" class="tab-content hidden">
       <div class="action-bar feed-action-bar">
         <button type="button" id="btn-create-post" class="btn-primary btn-sm">写真</button>
@@ -2035,8 +2036,8 @@ html[data-theme="dark"] body textarea::placeholder {
       </div>
       <div id="feed-list" class="feed-list"></div>
       <div id="feed-list-empty" class="empty-state hidden">
-        <p id="feed-empty-title">投稿はありません</p>
-        <p class="sub" id="feed-empty-sub">写真・動画・告知を投稿してみましょう</p>
+        <p id="feed-empty-title">BlueVoomの投稿はありません</p>
+        <p class="sub" id="feed-empty-sub">写真・動画・お知らせをBlueVoomに投稿してみましょう</p>
       </div>
       <div id="feed-refresh-status" class="feed-refresh-status hidden" role="status" aria-live="polite"></div>
     </div>
@@ -2088,16 +2089,17 @@ html[data-theme="dark"] body textarea::placeholder {
         <button type="button" id="btn-remove-avatar" class="btn-text-link hidden">プロフィール画像を削除</button>
         <h2 id="profile-name">名前</h2>
         <p class="profile-id" id="profile-id"></p>
+        <button type="button" id="btn-edit-name" class="btn-secondary btn-sm" style="margin-top:8px">名前を変更する</button>
       </div>
       <div class="profile-menu">
         <div class="sync-settings">
-          <p class="form-label">複数端末で使う（QRペアリング）</p>
-          <p class="qr-hint">「ペアリングコードを表示」で6桁コードが出ます。別の端末でコードを入力すると同期が始まります。</p>
+          <p class="form-label">別の端末と同期する</p>
+          <p class="qr-hint">「別の端末と同期」ボタンを押すと<strong>6桁コード</strong>が表示されます。別の端末の設定でそのコードを入力すると、名前・トークが同期されます。</p>
           <input type="password" id="input-account-password" placeholder="アカウントパスワード" autocomplete="new-password">
           <button type="button" id="btn-save-password" class="btn-secondary btn-sm">パスワードを保存</button>
           <p class="qr-hint" id="account-sync-status"></p>
-          <button type="button" id="btn-show-device-pair-qr" class="btn-primary btn-sm">ペアリングコードを表示</button>
-          <button type="button" id="btn-scan-device-pair" class="btn-secondary btn-sm">QRをスキャンしてペアリング</button>
+          <button type="button" id="btn-show-device-pair-qr" class="btn-primary btn-sm">別の端末と同期（6桁コードを表示）</button>
+          <button type="button" id="btn-scan-device-pair" class="btn-secondary btn-sm">コードを入力して同期</button>
           <button type="button" id="btn-account-sync-now" class="btn-secondary btn-sm">今すぐ全端末に同期</button>
         </div>
         <div class="sync-settings" id="sync-server-settings">
@@ -2146,7 +2148,7 @@ html[data-theme="dark"] body textarea::placeholder {
         <input type="file" id="input-backup-file" accept="*/*" hidden>
         <button type="button" id="btn-cloud-restore" class="menu-item">
           <span class="menu-icon">📷</span>
-          <span>QRをスキャンしてペアリング</span>
+          <span>コードを入力して別の端末と同期</span>
         </button>
         <button id="btn-reset-data" class="menu-item danger">
           <span class="menu-icon">🗑️</span>
@@ -2389,11 +2391,11 @@ html[data-theme="dark"] body textarea::placeholder {
   <!-- トースト -->
   <div id="toast" class="toast hidden"></div>
 
-  <!-- 投稿作成 -->
+  <!-- BlueVoom投稿作成 -->
   <div id="modal-create-post" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
-      <h3>投稿を作成</h3>
+      <h3>BlueVoomに投稿</h3>
       <p class="form-label">種類</p>
       <select id="input-post-kind" class="sync-settings">
         <option value="photo">写真</option>
@@ -2420,9 +2422,9 @@ html[data-theme="dark"] body textarea::placeholder {
     <div class="modal-content">
       <h3>スタンプ</h3>
       <div class="sticker-import">
-        <p class="form-label">LINEスタンプショップURL</p>
+        <p class="form-label">スタンプショップURL（LINEのURLを入力すると無料で使えます）</p>
         <input type="url" id="input-line-sticker-url" placeholder="https://store.line.me/stickershop/product/..." class="sync-settings input-url">
-        <button type="button" id="btn-import-line-stickers" class="btn-secondary btn-sm">LINEスタンプを取り込む</button>
+        <button type="button" id="btn-import-line-stickers" class="btn-secondary btn-sm">スタンプを取り込む</button>
       </div>
       <div class="sticker-import">
         <p class="form-label">写真・GIFからスタンプを作る</p>
@@ -2437,7 +2439,7 @@ html[data-theme="dark"] body textarea::placeholder {
         <p class="qr-hint" id="sticker-share-code"></p>
       </div>
       <div id="sticker-grid" class="sticker-grid"></div>
-      <a href="https://creator.line.me/ja/" target="_blank" rel="noopener" id="btn-line-sticker-shop" class="btn-secondary btn-sm" style="display:block;text-align:center;margin:12px 0;text-decoration:none">LINEスタンプを作る（無料）</a>
+      <a href="https://creator.line.me/ja/" target="_blank" rel="noopener" id="btn-line-sticker-shop" class="btn-secondary btn-sm" style="display:block;text-align:center;margin:12px 0;text-decoration:none">スタンプを作る（無料・外部サイト）</a>
       <button class="btn-close-modal">閉じる</button>
     </div>
   </div>
@@ -2446,9 +2448,9 @@ html[data-theme="dark"] body textarea::placeholder {
   <div id="modal-device-pair-qr" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
-      <h3>端末ペアリング</h3>
-      <p class="qr-hint">別の端末で「QRをスキャンしてペアリング」を開き、下の<strong>6桁コード</strong>を入力するか、QRをスキャンしてください（15分間有効）。</p>
-      <p class="form-label" style="margin-top:8px">6桁ペアリングコード</p>
+      <h3>別の端末と同期</h3>
+      <p class="qr-hint">別の端末の設定で「コードを入力して別の端末と同期」を開き、下の<strong>6桁コード</strong>を入力してください（15分間有効）。QRスキャンでも同期できます。</p>
+      <p class="form-label" style="margin-top:8px">6桁同期コード</p>
       <div id="device-pair-short-code" class="device-pair-short-code">------</div>
       <button type="button" id="btn-copy-pair-short-code" class="btn-secondary btn-sm" style="margin:8px auto 16px;display:block">コードをコピー</button>
       <div id="device-pair-qr-canvas" class="qr-canvas-wrap"></div>
@@ -2490,12 +2492,12 @@ html[data-theme="dark"] body textarea::placeholder {
   <div id="modal-transfer-scan" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
-      <h3>端末ペアリング</h3>
-      <p class="qr-hint">メイン端末のマイページで表示された<strong>6桁コード</strong>を入力するか、QRをスキャンしてください。</p>
+      <h3>別の端末と同期（コード入力）</h3>
+      <p class="qr-hint">同期元の端末で表示された<strong>6桁コード</strong>を入力するか、QRをスキャンしてください。名前・トーク履歴が同期されます。</p>
       <div class="sticker-import" style="margin-bottom:16px">
-        <p class="form-label">6桁ペアリングコード</p>
+        <p class="form-label">6桁同期コード</p>
         <input type="text" id="input-pair-short-code" placeholder="123456" class="sync-settings input-url pair-short-input" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code">
-        <button type="button" id="btn-redeem-pair-short-code" class="btn-primary btn-sm">コードでペアリング</button>
+        <button type="button" id="btn-redeem-pair-short-code" class="btn-primary btn-sm">このコードで同期する</button>
       </div>
       <div class="sticker-import" style="margin-bottom:16px">
         <p class="form-label">パスワード（設定している場合）</p>
@@ -5945,7 +5947,7 @@ function onNewMessageReceived(convId, msg) {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
-    await navigator.serviceWorker.register('sw.js?v=BlueChatX-2026-07-15-stable-v28');
+    await navigator.serviceWorker.register('sw.js?v=BlueChat-2026-07-15-stable-v28');
   } catch (e) { /* ignore */ }
 }
 
@@ -7809,7 +7811,7 @@ function setupGlobalClickDelegation() {
       if (typeof submitPublicPostFromModal === 'function') {
         submitPublicPostFromModal();
       } else {
-        showToast('投稿機能の読み込みに失敗しました。ページを再読み込みしてください');
+        showToast('BlueVoom機能の読み込みに失敗しました。ページを再読み込みしてください');
       }
     },
     'btn-start-camera': () => {
@@ -8103,7 +8105,7 @@ function getAllStickerPacks() {
 async function importLineStickerPack(url) {
   const m = String(url).match(/product\/(\d+)/i) || String(url).match(/sticker\/(\d+)/i);
   if (!m) {
-    showToast('LINEスタンプショップのURLを入力してください');
+    showToast('スタンプショップのURLを入力してください');
     return null;
   }
   const productId = m[1];
@@ -8115,7 +8117,7 @@ async function importLineStickerPack(url) {
   }
   const pack = {
     id: 'line_' + productId,
-    name: result.name || ('LINE ' + productId),
+    name: result.name || ('スタンプ ' + productId),
     stickers: result.stickers.map(s => ({ type: 'image', src: s.url, emoji: s.emoji || '🎨' }))
   };
   saveCustomStickerPack(pack);
@@ -8592,9 +8594,8 @@ function renderSuperAdminTitlePanel(userId) {
   if (!user) return;
   const text = prompt('称号の文字', user.title?.text || '');
   if (text === null) return;
-  const color = prompt('称号の色（#1a6fd4 など）', user.title?.color || '#1a6fd4');
-  if (color === null) return;
-  user.title = text ? { text: text.trim(), color: color.trim() || '#1a6fd4' } : null;
+  const color = '#d4af37'; // 称号は常にゴールド背景・白文字
+  user.title = text ? { text: text.trim(), color: color } : null;
   if (!text.trim()) delete user.title;
   saveData(getData());
   cloudPushUser(user);
@@ -8962,7 +8963,7 @@ redeemTransferCode = redeemTransferCodeV6;
 async function importLineStickerPackV6(url) {
   const productId = parseLineProductId(url);
   if (!productId) {
-    showToast('LINEスタンプショップのURLを入力してください\n例: https://store.line.me/stickershop/product/1234/ja');
+    showToast('スタンプショップのURLを入力してください\n例: https://store.line.me/stickershop/product/1234/ja');
     return null;
   }
   if (!getEffectiveSyncUrl()) {
@@ -8978,7 +8979,7 @@ async function importLineStickerPackV6(url) {
   }
   const pack = {
     id: 'line_' + productId,
-    name: result.name || ('LINE ' + productId),
+    name: result.name || ('スタンプ ' + productId),
     stickers: result.stickers.map(s => ({
       type: 'image',
       src: s.url,
@@ -9502,7 +9503,7 @@ async function postAnnouncement(type, title, body, extras) {
       ...extras
     })
   });
-  showToast('お知らせを投稿しました');
+  showToast('BlueVoomにお知らせを投稿しました');
   renderAnnouncements();
   updateTabBadges();
 }
@@ -9986,7 +9987,7 @@ onAppInit(() => {
 var APP_VERSION = 'v8';
 
 function applyV8Branding() {
-  const title = 'BlueChat v8';
+  const title = 'BlueChat';
   document.title = title;
   const headerTitle = document.getElementById('header-title');
   if (headerTitle) headerTitle.textContent = title;
@@ -10114,12 +10115,7 @@ renderSuperAdminTitlePanel = async function (userId) {
     : '称号なし（新しく付与できます）';
   const text = prompt(`${hint}\n\n称号の文字`, user.title?.text || '');
   if (text === null) return;
-  let color = user.title?.color || '#1a6fd4';
-  if (text.trim()) {
-    const picked = await pickTitleColor(color);
-    if (picked === null) return;
-    color = picked;
-  }
+  const color = '#d4af37'; // 称号は常にゴールド背景・白文字
   const ok = await setUserTitle(userId, text, color);
   renderAdminUsers();
   if (typeof refreshUIAfterSync === 'function') refreshUIAfterSync();
@@ -10269,7 +10265,7 @@ const TITLE_CATALOG_MAX = 10;
 const TITLE_TEXT_MAX = 20;
 
 function applyV9Branding() {
-  const title = 'BlueChat v9';
+  const title = 'BlueChat';
   document.title = title;
   const headerTitle = document.getElementById('header-title');
   if (headerTitle) headerTitle.textContent = title;
@@ -10402,8 +10398,7 @@ async function showTitlePresetManager() {
   if (trimmed.startsWith('+')) {
     const text = normalizeTitleText(trimmed.slice(1));
     if (!text) return;
-    const color = await pickTitleColor('#1a6fd4');
-    if (color === null) return;
+    const color = '#d4af37'; // 称号は常にゴールド背景・白文字
     const created = await addTitlePreset(text, color);
     if (created) showToast(`称号「${created.text}」を登録しました（${getTitlePresets().length}/${TITLE_CATALOG_MAX}）`);
     return;
@@ -10464,10 +10459,7 @@ renderSuperAdminTitlePanel = async function (userId) {
   text = normalizeTitleText(text);
   if (!text) return;
 
-  let color = user.title?.color || '#1a6fd4';
-  const picked = await pickTitleColor(color);
-  if (picked === null) return;
-  color = picked;
+  const color = '#d4af37'; // 称号は常にゴールド背景・白文字
 
   const existing = presets.find(p => p.text === text && p.color === color);
   if (!existing && presets.length < TITLE_CATALOG_MAX) {
@@ -10551,13 +10543,13 @@ onAppInit(() => {
 
 
 /**
- * BlueChatX — branding & super-admin extensions
+ * BlueChat — branding & super-admin extensions
  */
-var APP_VERSION = 'BlueChatX';
-const BUILD_STAMP = 'BlueChatX-2026-07-15-stable-v28';
+var APP_VERSION = 'BlueChat';
+const BUILD_STAMP = 'BlueChat-2026-07-15-stable-v28';
 
 function applyAppBranding() {
-  const title = 'BlueChatX';
+  const title = 'BlueChat';
   document.title = title;
   const headerTitle = document.getElementById('header-title');
   if (headerTitle) headerTitle.textContent = title;
@@ -10854,7 +10846,7 @@ async function submitPublicPostFromModal() {
       if (attachEl) attachEl.value = '';
     }
   } catch (e) {
-    showToast(e?.message || '投稿に失敗しました');
+    showToast(e?.message || 'BlueVoomへの投稿に失敗しました');
   } finally {
     postSubmitInProgress = false;
     if (submitBtn) {
@@ -10943,7 +10935,7 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
       })
     }, 300000);
     if (!res || !res.ok) {
-      showToast('投稿に失敗しました。同期サーバー接続を確認してください');
+      showToast('BlueVoomへの投稿に失敗しました。同期サーバー接続を確認してください');
       return false;
     }
     const savedPost = {
@@ -10958,12 +10950,12 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
       createdAt: Date.now()
     };
     cachePostLocally(savedPost);
-    showToast('投稿しました');
+    showToast('BlueVoomに投稿しました');
     await renderFeed();
     updateTabBadges();
     return true;
   } catch (e) {
-    showToast(e.message || '投稿に失敗しました');
+    showToast(e.message || 'BlueVoomへの投稿に失敗しました');
     return false;
   }
 }
@@ -10971,13 +10963,13 @@ async function createPublicPost(kind, text, mediaFile, attachmentFile) {
 async function deletePublicPost(postId) {
   const user = getCurrentUser();
   if (!user || !getSyncUrl()) return;
-  if (!confirm('この投稿を削除しますか？')) return;
+  if (!confirm('このBlueVoom投稿を削除しますか？')) return;
   await cloudRequest(`/api/posts/${postId}`, {
     method: 'DELETE',
     body: JSON.stringify({ userId: user.id })
   });
   saveLocalPostCache(getLocalPostCache().filter(p => p.id !== postId));
-  showToast('投稿を削除しました');
+  showToast('BlueVoom投稿を削除しました');
   renderFeed();
 }
 
@@ -12288,12 +12280,12 @@ if (typeof createPublicPost === 'function') {
       uploadPostToServerAsync(savedPost).catch(() => {
         if (typeof scheduleResyncOrphanPosts === 'function') scheduleResyncOrphanPosts();
       });
-      showToast('投稿しました');
+      showToast('BlueVoomに投稿しました');
       renderFeed().catch(() => {});
       updateTabBadges();
       return true;
     } catch (e) {
-      showToast(e.message || '投稿に失敗しました');
+      showToast(e.message || 'BlueVoomへの投稿に失敗しました');
       return false;
     }
   };
@@ -12320,7 +12312,7 @@ if (typeof submitPublicPostFromModal === 'function') {
         submitBtn.disabled = false;
         submitBtn.textContent = '投稿する';
       }
-      showToast('投稿がタイムアウトしました。接続を確認して再試行してください');
+      showToast('BlueVoomへの投稿がタイムアウトしました。接続を確認して再試行してください');
     }, POST_SUBMIT_TIMEOUT_MS);
 
     try {
@@ -12335,7 +12327,7 @@ if (typeof submitPublicPostFromModal === 'function') {
         if (attachEl) attachEl.value = '';
       }
     } catch (e) {
-      showToast(e?.message || '投稿に失敗しました');
+      showToast(e?.message || 'BlueVoomへの投稿に失敗しました');
     } finally {
       clearTimeout(safetyTimer);
       postSubmitInProgress = false;
@@ -13291,7 +13283,7 @@ async function refreshFeedFromServer() {
     btn.disabled = true;
     btn.textContent = '更新中…';
   }
-  showFeedRefreshStatus('投稿を更新中…', 'loading');
+  showFeedRefreshStatus('BlueVoomを更新中…', 'loading');
 
   try {
     const posts = await fetchPublicPosts();
@@ -13540,7 +13532,7 @@ refreshFeedFromServer = async function () {
     btn.disabled = true;
     btn.textContent = '更新中…';
   }
-  showFeedRefreshStatus('投稿を更新中…', 'loading');
+  showFeedRefreshStatus('BlueVoomを更新中…', 'loading');
 
   try {
     const result = await fetchPostsFromServerRemote();
@@ -13778,14 +13770,14 @@ function setFeedEmptyMessage(emptyEl) {
   const cached = lastPostsFetchMode === 'cache' || lastAnnFetchMode === 'cache';
 
   if (failed) {
-    if (title) title.textContent = '投稿を読み込めませんでした';
-    if (sub) sub.textContent = '通信状況を確認して「更新」ボタンを押してください。管理者の投稿がある場合も、接続できないと表示されません。';
+    if (title) title.textContent = 'BlueVoomを読み込めませんでした';
+    if (sub) sub.textContent = '通信状況を確認して「更新」ボタンを押してください。管理者のBlueVoom投稿がある場合も、接続できないと表示されません。';
   } else if (cached) {
-    if (title) title.textContent = '最新の投稿を取得できませんでした';
-    if (sub) sub.textContent = '保存済みの投稿を表示しています。「更新」ボタンで再取得できます。';
+    if (title) title.textContent = '最新のBlueVoomを取得できませんでした';
+    if (sub) sub.textContent = '保存済みのBlueVoomを表示しています。「更新」ボタンで再取得できます。';
   } else {
-    if (title) title.textContent = '投稿はありません';
-    if (sub) sub.textContent = '写真・動画・告知を投稿してみましょう';
+    if (title) title.textContent = 'BlueVoomの投稿はありません';
+    if (sub) sub.textContent = '写真・動画・お知らせをBlueVoomに投稿してみましょう';
   }
 }
 
@@ -13868,7 +13860,7 @@ renderFeed = async function () {
   }
   await _renderFeedV26();
   if (lastPostsFetchMode === 'cache' || lastAnnFetchMode === 'cache') {
-    showFeedRefreshStatus('保存済みの投稿を表示中…', 'loading');
+    showFeedRefreshStatus('保存済みのBlueVoomを表示中…', 'loading');
     hideFeedRefreshStatus(2200);
   } else if (lastPostsFetchMode === 'failed' || lastAnnFetchMode === 'failed') {
     showFeedRefreshStatus('投稿の取得に失敗しました', 'error');
@@ -13885,7 +13877,7 @@ refreshFeedFromServer = async function () {
     btn.disabled = true;
     btn.textContent = '更新中…';
   }
-  showFeedRefreshStatus('投稿を更新中…', 'loading');
+  showFeedRefreshStatus('BlueVoomを更新中…', 'loading');
 
   try {
     const result = await fetchPostsFromServerRemote();
@@ -15264,6 +15256,34 @@ loadAdminSession = function () {
   adminLoggedIn = localStorage.getItem(ADMIN_SESSION_KEY) === '1' && !!getAdminToken();
   adminRole = adminLoggedIn ? (localStorage.getItem(ADMIN_ROLE_KEY) || null) : null;
 };
+
+/**
+ * BlueChat 名前変更機能
+ * 設定の「名前を変更する」ボタンから呼び出す
+ */
+onAppInit(() => {
+  bindClick('btn-edit-name', async () => {
+    const user = getCurrentUser();
+    if (!user) return;
+    const newName = prompt('新しい名前を入力してください（20文字まで）', user.name || '');
+    if (newName === null) return;
+    const trimmed = newName.trim();
+    if (!trimmed) { showToast('名前を入力してください'); return; }
+    if (trimmed.length > 20) { showToast('名前は20文字以内にしてください'); return; }
+    user.name = trimmed;
+    const data = getData();
+    const stored = data.users && data.users[user.id];
+    if (stored) stored.name = trimmed;
+    saveData(data);
+    refreshMainUI();
+    if (typeof cloudPushUser === 'function') {
+      const ok = await cloudPushUser(user).catch(() => false);
+      showToast(ok !== false ? '名前を変更しました（全端末に反映）' : '名前を変更しました（オフライン）');
+    } else {
+      showToast('名前を変更しました');
+    }
+  });
+});
 
   </script>
 </body>
