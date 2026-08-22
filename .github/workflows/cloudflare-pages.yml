@@ -30,7 +30,7 @@ jobs:
       - name: Publish to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          apiToken: ${{ cfut_gqA9bTbpY6920WUV8f4XPyMzLrpO2sqlksKWJBad997ce391}}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: bluechat
           directory: dist
