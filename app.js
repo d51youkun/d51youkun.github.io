@@ -17,6 +17,7 @@ const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const API_TOKEN_STORE_KEY = 'bluechat_api_tokens';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
 const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
+const APP_PUBLIC_URL = 'https://bluechat.youheiapp.workers.dev';
 
 // アップロード可能なファイルサイズ上限（バイト）
 const FILE_LIMITS = {
@@ -586,6 +587,14 @@ function normalizeInviteFromScan(raw) {
   let text = extractQrDecodedText(raw) || String(raw || '').trim().replace(/^\uFEFF/, '');
   try { text = decodeURIComponent(text); } catch (e) { /* keep */ }
   if (!text || text.toLowerCase().includes(TRANSFER_PREFIX)) return null;
+  try {
+    const url = new URL(text);
+    const invite = url.searchParams.get('invite');
+    if (invite) {
+      const normalizedInvite = normalizeInviteFromScan(invite);
+      if (normalizedInvite) return normalizedInvite;
+    }
+  } catch (e) { /* not a URL */ }
   if (decodeInvite(text)) return text.split(/[\s\r\n,;]+/)[0];
   const candidates = [];
   const re = /(?:bc|bluechat):[A-Za-z0-9_+\/=-]+/gi;
@@ -735,13 +744,22 @@ function renderMyQR() {
   if (!container) return;
   container.innerHTML = '';
   const invite = encodeInvite(user);
+  const inviteUrl = `${APP_PUBLIC_URL}/?invite=${encodeURIComponent(invite)}`;
   document.getElementById('qr-user-name').textContent = user.name;
   document.getElementById('qr-expiry-note').textContent = '有効期限: 24時間（更新ボタンで再発行）';
   const codeEl = document.getElementById('invite-code-text');
-  if (codeEl) codeEl.textContent = invite;
-  if (!renderScannableQr(container, invite, 300)) {
+  if (codeEl) codeEl.textContent = inviteUrl;
+  if (!renderScannableQr(container, inviteUrl, 300)) {
     showToast('QRコードの生成に失敗しました');
   }
+}
+
+async function redeemInviteFromCurrentUrl() {
+  const rawInvite = new URLSearchParams(window.location.search).get('invite');
+  if (!rawInvite || !getCurrentUser()) return;
+  const code = normalizeInviteFromScan(rawInvite);
+  window.history.replaceState({}, document.title, window.location.pathname);
+  if (code) await processFriendInviteScan(code);
 }
 
 async function startQrScanner() {
@@ -2654,6 +2672,7 @@ function init() {
     showScreen('main');
     refreshMainUI();
     startGlobalSync();
+    redeemInviteFromCurrentUrl();
   } else {
     showScreen('onboarding');
   }
@@ -2666,6 +2685,7 @@ function init() {
     showScreen('main');
     refreshMainUI();
     startGlobalSync();
+    redeemInviteFromCurrentUrl();
     showToast(`ようこそ、${name}さん！`);
   });
 

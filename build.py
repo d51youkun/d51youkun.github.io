@@ -22,7 +22,7 @@ PAGES_HEAD = """<!DOCTYPE html>
 (function () {
   var host = String(location.hostname || '').toLowerCase();
   if (!host.endsWith('.github.io')) return;
-  var canonical = 'https://bluechat.by-youhei.workers.dev';
+  var canonical = 'https://bluechat.youheiapp.workers.dev';
   var uid = '';
   try {
     var raw = localStorage.getItem('bluechat_data');
