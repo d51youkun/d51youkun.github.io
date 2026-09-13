@@ -1,4 +1,4 @@
-name: Deploy to Cloudflare Pages
+name: Deploy BlueChat Worker
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: cloudflare-pages
+  group: cloudflare-worker
   cancel-in-progress: true
 
 jobs:
@@ -18,20 +18,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare dist
-        run: |
-          mkdir -p dist
-          cp index.html dist/index.html
-          cp index.html dist/BlueChat.html
-          for f in icon.png favicon.svg sw.js _headers .nojekyll; do
-            [ -f "$f" ] && cp "$f" dist/ || true
-          done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
 
-      - name: Publish to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+      - name: Build BlueChat
+        run: python3 build.py
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: bluechat
-          directory: dist
-          branch: main
+          workingDirectory: .
+          command: deploy

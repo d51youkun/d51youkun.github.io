@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="BlueChat">
+  <title>BlueChat</title>
+  <link rel="manifest" href="/manifest.json">
+  <style>/* __CSS__ */</style>
+</head>
+<body>
+
+<!-- ── SCREENS ───────────────────────────────────────────────────────────── -->
+
+<!-- Onboarding -->
+<div id="screen-onboarding" class="screen active">
+  <div class="onboard-wrap">
+    <div class="onboard-logo">
+      <div class="app-icon-large">💙</div>
+      <h1 class="app-name">BlueChat</h1>
+      <p class="app-tagline">つながろう、すぐそこに。</p>
+    </div>
+    <div class="onboard-form">
+      <input type="text" id="input-username" placeholder="表示名を入力" maxlength="20" autocomplete="off">
+      <button id="btn-start" class="btn-primary btn-block">はじめる</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main (bottom tab nav) -->
+<div id="screen-main" class="screen hidden">
+
+  <!-- Tab content areas -->
+  <div id="tab-talks" class="tab-page active">
+    <header class="page-header">
+      <h1>トーク</h1>
+      <button id="btn-new-chat" class="header-action-btn" title="新規トーク">✏️</button>
+    </header>
+    <div id="talk-list" class="list-area"></div>
+    <div id="talk-empty" class="empty-state hidden">
+      <p>友だちを追加してトークを始めましょう</p>
+    </div>
+  </div>
+
+  <div id="tab-moment" class="tab-page hidden">
+    <header class="page-header">
+      <h1>BlueMoment</h1>
+      <button id="btn-new-post" class="header-action-btn" title="投稿">✏️</button>
+    </header>
+    <div id="moment-feed" class="feed-area"></div>
+    <div id="moment-empty" class="empty-state hidden"><p>投稿がありません</p></div>
+  </div>
+
+  <div id="tab-friends" class="tab-page hidden">
+    <header class="page-header">
+      <h1>友だち</h1>
+      <button id="btn-add-friend" class="header-action-btn" title="友だち追加">➕</button>
+    </header>
+    <div id="friends-list" class="list-area"></div>
+    <div id="friends-empty" class="empty-state hidden"><p>友だちがいません</p></div>
+  </div>
+
+  <div id="tab-other" class="tab-page hidden">
+    <header class="page-header"><h1>その他</h1></header>
+    <!-- Profile section -->
+    <div class="other-profile-card" id="my-profile-card">
+      <div id="my-avatar-wrap" class="avatar-lg">
+        <span id="my-avatar-initial" class="avatar-text">?</span>
+        <img id="my-avatar-img" class="avatar-img hidden" alt="アバター">
+      </div>
+      <div class="profile-info">
+        <div id="my-display-name" class="profile-name">---</div>
+        <div id="my-user-id-display" class="profile-id"></div>
+      </div>
+      <button id="btn-edit-profile" class="btn-icon-sm">✏️</button>
+    </div>
+
+    <div class="menu-group">
+      <div class="menu-section-title">設定</div>
+      <div class="menu-list">
+        <button class="menu-item" id="btn-theme-toggle">
+          <span class="menu-icon">🌙</span><span>ダークモード</span><span class="menu-arrow">›</span>
+        </button>
+        <button class="menu-item" id="btn-change-avatar">
+          <span class="menu-icon">🖼</span><span>プロフィール写真を変更</span><span class="menu-arrow">›</span>
+        </button>
+        <button class="menu-item" id="btn-sync-server">
+          <span class="menu-icon">🔗</span><span>同期サーバー設定</span><span class="menu-arrow">›</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="menu-group">
+      <div class="menu-section-title">その他</div>
+      <div class="menu-list">
+        <button class="menu-item" id="btn-admin-link">
+          <span class="menu-icon">🔐</span><span>管理者</span><span class="menu-arrow">›</span>
+        </button>
+        <button class="menu-item" id="btn-feedback">
+          <span class="menu-icon">💬</span><span>要望・バグ報告</span><span class="menu-arrow">›</span>
+        </button>
+        <button class="menu-item" id="btn-logout">
+          <span class="menu-icon">🚪</span><span>ログアウト</span><span class="menu-arrow">›</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom tab nav (LINE style) -->
+  <nav class="tab-nav">
+    <button class="tab-item active" data-tab="talks">
+      <span class="tab-icon">💬</span>
+      <span class="tab-label">トーク</span>
+      <span class="tab-badge hidden" id="badge-talks">0</span>
+    </button>
+    <button class="tab-item" data-tab="moment">
+      <span class="tab-icon">📷</span>
+      <span class="tab-label">Moment</span>
+    </button>
+    <button class="tab-item" data-tab="friends">
+      <span class="tab-icon">👥</span>
+      <span class="tab-label">友だち</span>
+      <span class="tab-badge hidden" id="badge-friends">0</span>
+    </button>
+    <button class="tab-item" data-tab="other">
+      <span class="tab-icon">☰</span>
+      <span class="tab-label">その他</span>
+    </button>
+  </nav>
+</div>
+
+<!-- Chat screen -->
+<div id="screen-chat" class="screen hidden">
+  <header class="chat-header">
+    <button id="btn-chat-back" class="btn-back">‹</button>
+    <div id="chat-header-avatar" class="avatar-sm"></div>
+    <div class="chat-header-info">
+      <div id="chat-header-name" class="chat-name">---</div>
+      <div id="chat-header-status" class="chat-status"></div>
+    </div>
+    <div class="chat-header-actions">
+      <button id="btn-call-audio" class="btn-icon" title="音声通話">📞</button>
+      <button id="btn-call-video" class="btn-icon" title="ビデオ通話">📹</button>
+    </div>
+  </header>
+  <div id="messages-container" class="messages-area"></div>
+  <div class="chat-input-area">
+    <button id="btn-attach" class="btn-attach">📎</button>
+    <input type="text" id="input-message" placeholder="メッセージを入力" autocomplete="off">
+    <button id="btn-send" class="btn-send">↑</button>
+  </div>
+  <div id="attach-toolbar" class="attach-toolbar hidden">
+    <button class="attach-btn" id="btn-send-image" data-type="image">📷 写真</button>
+    <button class="attach-btn" id="btn-send-sticker" data-type="sticker">😊 スタンプ</button>
+  </div>
+</div>
+
+<!-- Admin login -->
+<div id="screen-admin-login" class="screen hidden">
+  <header class="page-header">
+    <button id="btn-admin-login-back" class="btn-back">‹</button>
+    <h1>管理者ログイン</h1>
+  </header>
+  <div class="form-wrap">
+    <div class="logo-sm">🔐</div>
+    <input type="email" id="input-admin-email" placeholder="メールアドレス" autocomplete="off">
+    <input type="password" id="input-admin-password" placeholder="パスワード">
+    <p id="admin-login-error" class="error-msg hidden"></p>
+    <button id="btn-admin-login-submit" class="btn-primary btn-block">ログイン</button>
+  </div>
+</div>
+
+<!-- Admin dashboard -->
+<div id="screen-admin" class="screen hidden">
+  <header class="page-header">
+    <button id="btn-admin-back" class="btn-back">‹</button>
+    <h1>管理者メニュー</h1>
+    <button id="btn-admin-logout" class="header-action-btn">ログアウト</button>
+  </header>
+  <nav class="sub-tab-nav">
+    <button class="sub-tab active" data-admin-tab="users">ユーザー</button>
+    <button class="sub-tab" data-admin-tab="convs">会話</button>
+    <button class="sub-tab" data-admin-tab="announce">お知らせ</button>
+  </nav>
+  <div id="admin-tab-users" class="admin-panel active">
+    <div class="admin-toolbar">
+      <input type="text" id="admin-search" placeholder="ユーザー検索" class="admin-search-input">
+      <button id="btn-admin-refresh" class="btn-sm btn-secondary">更新</button>
+    </div>
+    <div id="admin-user-list" class="list-area"></div>
+  </div>
+  <div id="admin-tab-convs" class="admin-panel hidden">
+    <div id="admin-conv-list" class="list-area"></div>
+  </div>
+  <div id="admin-tab-announce" class="admin-panel hidden">
+    <div class="admin-toolbar">
+      <input type="text" id="admin-announce-text" placeholder="お知らせを入力">
+      <button id="btn-admin-post-announce" class="btn-sm btn-primary">投稿</button>
+    </div>
+    <div id="admin-announce-list" class="list-area"></div>
+  </div>
+</div>
+
+<!-- ── MODALS ─────────────────────────────────────────────────────────────── -->
+
+<!-- Add friend modal -->
+<div id="modal-add-friend" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>友だち追加</h2>
+      <button class="modal-close" data-close="modal-add-friend">✕</button>
+    </div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" data-modal-tab="qr-scan">QRスキャン</button>
+      <button class="modal-tab" data-modal-tab="qr-show">マイQR</button>
+      <button class="modal-tab" data-modal-tab="invite-link">リンク</button>
+    </div>
+    <div id="modal-tab-qr-scan" class="modal-tab-pane active">
+      <div id="qr-scanner-area" style="width:100%;max-width:300px;margin:0 auto;"></div>
+      <p class="hint">カメラでQRコードを読み取ってください</p>
+      <div style="margin-top:12px;">
+        <input type="text" id="input-invite-code" placeholder="招待コードを入力">
+        <button id="btn-redeem-code" class="btn-primary" style="width:100%;margin-top:8px;">コードで追加</button>
+      </div>
+    </div>
+    <div id="modal-tab-qr-show" class="modal-tab-pane hidden">
+      <div id="my-qr-container" style="text-align:center;padding:16px;"></div>
+      <p id="my-invite-link-text" class="hint invite-link-text" style="word-break:break-all;font-size:12px;"></p>
+      <button id="btn-copy-invite" class="btn-secondary" style="width:100%;margin-top:8px;">コピー</button>
+    </div>
+    <div id="modal-tab-invite-link" class="modal-tab-pane hidden">
+      <p class="hint">以下のリンクを友だちに送ってください</p>
+      <p id="invite-link-display" class="invite-link-text" style="word-break:break-all;font-size:13px;"></p>
+      <button id="btn-copy-link" class="btn-primary" style="width:100%;margin-top:8px;">コピー</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit profile modal -->
+<div id="modal-edit-profile" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>プロフィール編集</h2>
+      <button class="modal-close" data-close="modal-edit-profile">✕</button>
+    </div>
+    <input type="text" id="input-new-name" placeholder="表示名" maxlength="20">
+    <label class="input-label">称号</label>
+    <input type="text" id="input-new-title" placeholder="称号（任意）" maxlength="20">
+    <button id="btn-save-profile" class="btn-primary btn-block" style="margin-top:16px;">保存</button>
+  </div>
+</div>
+
+<!-- Image viewer -->
+<div id="modal-image-viewer" class="modal hidden">
+  <div class="image-viewer-wrap">
+    <button class="image-viewer-close" data-close="modal-image-viewer">✕</button>
+    <img id="image-viewer-img" alt="画像">
+    <button id="btn-download-image" class="btn-secondary" style="margin-top:12px;">保存</button>
+  </div>
+</div>
+
+<!-- Post creation modal -->
+<div id="modal-new-post" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>新規投稿</h2>
+      <button class="modal-close" data-close="modal-new-post">✕</button>
+    </div>
+    <textarea id="input-post-text" placeholder="いまどうしてる？" rows="4"></textarea>
+    <div id="post-image-preview" class="hidden"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button id="btn-post-add-image" class="btn-secondary" style="flex:1;">📷 写真</button>
+      <button id="btn-submit-post" class="btn-primary" style="flex:1;">投稿</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sticker picker -->
+<div id="modal-sticker-picker" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Blueスタンプ</h2>
+      <button class="modal-close" data-close="modal-sticker-picker">✕</button>
+    </div>
+    <div id="sticker-grid" class="sticker-grid"></div>
+  </div>
+</div>
+
+<!-- Sync server settings modal -->
+<div id="modal-sync-settings" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>同期サーバー設定</h2>
+      <button class="modal-close" data-close="modal-sync-settings">✕</button>
+    </div>
+    <label class="input-label">サーバーURL</label>
+    <input type="url" id="input-sync-url" placeholder="https://...">
+    <p id="sync-url-status" class="hint"></p>
+    <button id="btn-save-sync-url" class="btn-primary btn-block" style="margin-top:12px;">保存・接続確認</button>
+  </div>
+</div>
+
+<!-- Feedback modal -->
+<div id="modal-feedback" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>要望・バグ報告</h2>
+      <button class="modal-close" data-close="modal-feedback">✕</button>
+    </div>
+    <textarea id="input-feedback" placeholder="ご意見・ご要望・バグ報告をどうぞ" rows="5"></textarea>
+    <button id="btn-submit-feedback" class="btn-primary btn-block" style="margin-top:12px;">送信</button>
+  </div>
+</div>
+
+<!-- ── CALL UI ─────────────────────────────────────────────────────────────── -->
+<div id="call-overlay" class="call-overlay hidden">
+  <div class="call-ui">
+    <div id="call-avatar" class="call-avatar"></div>
+    <div id="call-name" class="call-name">---</div>
+    <div id="call-status" class="call-status">発信中...</div>
+    <div class="call-actions">
+      <button id="btn-call-answer" class="call-btn call-answer hidden">📞</button>
+      <button id="btn-call-end" class="call-btn call-end">📵</button>
+      <button id="btn-call-mute" class="call-btn call-mute">🎤</button>
+    </div>
+    <!-- Video elements -->
+    <video id="video-remote" class="video-remote hidden" autoplay playsinline></video>
+    <video id="video-local" class="video-local hidden" autoplay playsinline muted></video>
+  </div>
+</div>
+
+<!-- ── TOAST ──────────────────────────────────────────────────────────────── -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- ── Hidden file inputs ─────────────────────────────────────────────────── -->
+<input type="file" id="file-avatar" accept="image/*" class="hidden">
+<input type="file" id="file-chat-image" accept="image/*" class="hidden">
+<input type="file" id="file-post-image" accept="image/*" class="hidden">
+
+<script>/* __JS__ */</script>
+</body>
+</html>
