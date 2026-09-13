@@ -572,12 +572,25 @@ async function startDirectChat(otherId) {
 }
 
 // ── Friend invite / QR ────────────────────────────────────────────────────────
+function encodeBase64Utf8(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function decodeBase64Utf8(value) {
+  const binary = atob(value);
+  const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
 function buildInvitePayload(user) {
-  return btoa(JSON.stringify({ id: user.id, name: user.name, ts: Date.now() }));
+  return encodeBase64Utf8(JSON.stringify({ id: user.id, name: user.name, ts: Date.now() }));
 }
 
 function parseInvitePayload(str) {
-  try { return JSON.parse(atob(str)); } catch { return null; }
+  try { return JSON.parse(decodeBase64Utf8(str)); } catch { return null; }
 }
 
 function getInviteUrl(user) {
@@ -655,6 +668,7 @@ let _html5QrScanner = null;
 async function startQrScanner() {
   const area = document.getElementById('qr-scanner-area');
   if (!area) return;
+  if (_html5QrScanner) return;
   if (!window.Html5QrcodeScanner && !window.Html5Qrcode) {
     area.innerHTML = '<p style="color:red;font-size:13px;padding:8px;">カメラライブラリが読み込まれていません</p>';
     return;
@@ -1411,12 +1425,16 @@ function bindEvents() {
   const addFriendBtn = document.getElementById('btn-add-friend');
   if (addFriendBtn) {
     addFriendBtn.addEventListener('click', () => {
-      renderMyQR();
       openModal('modal-add-friend');
+      renderMyQR();
       // Start scanner on the QR scan tab (active by default)
       setTimeout(startQrScanner, 300);
     });
   }
+
+  document.getElementById('btn-start-camera')?.addEventListener('click', () => {
+    startQrScanner();
+  });
 
   // Close modal stops scanner
   document.querySelectorAll('[data-close="modal-add-friend"]').forEach(btn => {
