@@ -1,6 +1,6 @@
 const UPSTREAM_ORIGIN = 'https://nfieyeke.gensparkspace.com';
 const MEDIA_ORIGIN = 'https://bluechat-sync.by-youhei.workers.dev';
-const CALL_SERVERS = Array.from({ length: 10 }, (_, i) => `https://bluechat-call-${i + 1}.by-youhei.workers.dev`);
+const CALL_SERVERS = [1, 2, 3].map((i) => `https://bluechat-call-${i}.by-youhei.workers.dev`);
 const VIDEO_SERVERS = ['https://bluechat-video-1.by-youhei.workers.dev'];
 const ADMIN_PASSWORD_SHA256 = '627841443a7a334c0bbafb4ad0d02e0f69f2e040bae6af9e45cc8d5683aa4dd9';
 const TABLE_PREFIX = 'bluetalk:table:';
