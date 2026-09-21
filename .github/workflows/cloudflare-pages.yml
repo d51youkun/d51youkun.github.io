@@ -28,6 +28,8 @@ jobs:
       - name: Ensure Cloudflare Pages project exists
         continue-on-error: true
         uses: cloudflare/wrangler-action@v3
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
