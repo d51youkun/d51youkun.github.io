@@ -232,11 +232,13 @@ const APP_ENHANCEMENTS = `<script>(function(){
   new MutationObserver(()=>{installDirectGateways();patchIceQueue();repairImages();addProfileTools();exactFriendSearch();addQrButton();bindAdminName();applyBadges();wireLegacyStickerTools();wireAdvancedChat()}).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener('keydown',adminTrigger);document.addEventListener('DOMContentLoaded',()=>{terms();installDirectGateways();patchIceQueue();repairImages();addProfileTools();exactFriendSearch();addQrButton();bindAdminName();wireLegacyStickerTools();wireAdvancedChat();if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{})});
 })();</script>`;
 
+const SAFE_APP_ENHANCEMENTS = APP_ENHANCEMENTS.replace('const imageUrl=/^https://(?:[^/]+.)?googleusercontent.com//i.test(text)||/.(?:png|jpe?g|gif|webp|avif)(?:[?#].*)?$/i.test(text);', 'const cleanUrl=text.toLowerCase().split("?")[0].split("#")[0];const imageUrl=text.toLowerCase().startsWith("https://")&&(text.toLowerCase().includes("googleusercontent.com/")||[".png",".jpg",".jpeg",".gif",".webp",".avif"].some(ext=>cleanUrl.endsWith(ext)));');
+
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
   const withManifest = text.includes('</head>') ? text.replace('</head>', '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', APP_ENHANCEMENTS + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', SAFE_APP_ENHANCEMENTS + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
