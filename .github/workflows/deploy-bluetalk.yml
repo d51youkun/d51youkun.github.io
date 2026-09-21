@@ -1,0 +1,47 @@
+name: Deploy BlueTalk
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: bluetalk-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure BlueTalk KV namespace exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/7ece58c3241a1b80e660bff102f3352a/storage/kv/namespaces"
+          namespace_id="$(curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "${api}" | jq -r '.result[] | select(.title == "bluetalk-kv") | .id' | head -n 1)"
+          if [ -z "${namespace_id}" ]; then
+            namespace_id="$(curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --data '{"title":"bluetalk-kv"}' \
+              "${api}" | jq -r '.result.id')"
+          fi
+          test -n "${namespace_id}"
+          sed -i "s/00000000000000000000000000000000/${namespace_id}/" wrangler-bluetalk.toml
+          echo "BlueTalk KV namespace is ready"
+
+      - name: Deploy BlueTalk Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: .
+          command: deploy --config wrangler-bluetalk.toml
