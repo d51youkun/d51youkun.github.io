@@ -17,7 +17,7 @@ const ADMIN_SESSION_KEY = 'bluechat_admin_session';
 const API_TOKEN_STORE_KEY = 'bluechat_api_tokens';
 const TRANSFER_PREFIX = 'bluechat-transfer:';
 const TRANSFER_EXPIRY_MS = 24 * 60 * 60 * 1000;
-const APP_PUBLIC_URL = 'https://bluechat.youheiapp.workers.dev';
+const APP_PUBLIC_URL = 'https://bluechat.by-youhei.workers.dev';
 
 // アップロード可能なファイルサイズ上限（バイト）
 const FILE_LIMITS = {
