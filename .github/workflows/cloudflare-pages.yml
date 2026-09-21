@@ -29,12 +29,15 @@ jobs:
 
       - name: Ensure Cloudflare Pages project exists
         continue-on-error: true
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: .
-          command: pages project create bluechat --production-branch main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{"name":"bluechat","production_branch":"main"}' \
+            "https://api.cloudflare.com/client/v4/accounts/7ece58c3241a1b80e660bff102f3352a/pages/projects"
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
