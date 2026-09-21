@@ -130,6 +130,13 @@ def export_dist_folder(pages_html: str) -> None:
         if src.exists():
             shutil.copy2(src, out_dir / name)
 
+    # Cloudflare Pages Advanced Mode: keep the Genspark proxy in front of
+    # static assets so relative tables/* writes and audio/call requests stay
+    # same-origin after the Pages migration.
+    proxy = ROOT / "worker.js"
+    if proxy.exists():
+        shutil.copy2(proxy, out_dir / "_worker.js")
+
     print(f"Wrote {out_dir}/ — Cloudflare deploy 用")
 
 
