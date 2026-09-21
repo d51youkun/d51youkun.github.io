@@ -1,4 +1,7 @@
 const UPSTREAM_ORIGIN = 'https://nfieyeke.gensparkspace.com';
+const MEDIA_ORIGIN = 'https://bluechat-sync.by-youhei.workers.dev';
+const CALL_SERVERS = Array.from({ length: 10 }, (_, i) => `https://bluechat-call-${i + 1}.by-youhei.workers.dev`);
+const VIDEO_SERVERS = ['https://bluechat-video-1.by-youhei.workers.dev'];
 const ADMIN_PASSWORD_SHA256 = '627841443a7a334c0bbafb4ad0d02e0f69f2e040bae6af9e45cc8d5683aa4dd9';
 const TABLE_PREFIX = 'bluetalk:table:';
 const SESSION_PREFIX = 'bluetalk:admin-session:';
@@ -140,6 +143,63 @@ function serviceWorker() {
   return new Response("self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>cs[0]?.focus()||clients.openWindow('/app.html')))});", { headers: { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' } });
 }
 
+async function handleMedia(request, env, url, origin) {
+  if (url.pathname === '/api/media' && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const data = String(body.data || '');
+    const mimeType = String(body.mimeType || 'application/octet-stream').slice(0, 120);
+    if (!data.startsWith('data:') || data.length > 12 * 1024 * 1024) return json({ ok: false, error: 'file is missing or too large (8MB max)' }, 413, origin);
+    const uploadId = crypto.randomUUID();
+    const chunkSize = 180000;
+    const totalChunks = Math.ceil(data.length / chunkSize);
+    for (let i = 0; i < totalChunks; i++) {
+      const r = await fetch(`${MEDIA_ORIGIN}/api/media/chunk/${uploadId}/${i}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: data.slice(i * chunkSize, (i + 1) * chunkSize) }) });
+      if (!r.ok) return json({ ok: false, error: 'media chunk upload failed' }, 502, origin);
+    }
+    const done = await fetch(`${MEDIA_ORIGIN}/api/media/chunk/${uploadId}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ totalChunks, mimeType }) });
+    if (!done.ok) return json({ ok: false, error: 'media upload could not be completed' }, 502, origin);
+    return json({ ok: true, uploadId, url: `/media/${uploadId}`, name: String(body.name || 'file').slice(0, 160), mimeType }, 201, origin);
+  }
+  const mediaMatch = url.pathname.match(/^\/media\/([A-Za-z0-9-]+)$/);
+  if (mediaMatch && request.method === 'GET') {
+    const upstream = await fetch(`${MEDIA_ORIGIN}/api/media/blob/${mediaMatch[1]}`);
+    if (!upstream.ok) return new Response('Not found', { status: 404, headers: corsHeaders(origin) });
+    const payload = await upstream.json().catch(() => null);
+    const data = String(payload?.data || '');
+    const mimeType = payload?.mimeType || 'application/octet-stream';
+    if (!data.startsWith('data:')) return new Response('Invalid media', { status: 502, headers: corsHeaders(origin) });
+    const comma = data.indexOf(',');
+    const encoded = comma >= 0 ? data.slice(comma + 1) : '';
+    const bytes = data.slice(0, comma).includes(';base64')
+      ? Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(encoded));
+    return new Response(bytes, { headers: { 'Content-Type': mimeType, 'Cache-Control': 'public, max-age=31536000, immutable', ...corsHeaders(origin) } });
+  }
+  return null;
+}
+
+async function handleCallGateway(request, url, origin) {
+  const signalMatch = url.pathname.match(/^\/api\/call-gateway\/signals?\/?([^/]*)$/);
+  if (!signalMatch) return null;
+  const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
+  const mode = String(body.mode || url.searchParams.get('mode') || 'voice') === 'video' ? 'video' : 'voice';
+  const key = String(body.call_id || url.searchParams.get('call_id') || body.to || signalMatch[1] || '0');
+  const servers = mode === 'video' ? VIDEO_SERVERS : CALL_SERVERS;
+  let hash = 0; for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const target = servers[hash % servers.length];
+  if (request.method === 'POST' && url.pathname === '/api/call-gateway/signal') {
+    const upstream = await fetch(`${target}/api/call/signal`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      to: body.to, from: body.from, call_id: body.call_id, type: body.signal_type, sdp: body.payload, timestamp: Date.now()
+    }) });
+    return new Response(upstream.body, { status: upstream.status, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) } });
+  }
+  if (request.method === 'GET' && signalMatch[1]) {
+    const upstream = await fetch(`${target}/api/call/signals/${encodeURIComponent(signalMatch[1])}${url.search}`);
+    return new Response(upstream.body, { status: upstream.status, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) } });
+  }
+  return json({ ok: false, error: 'method not allowed' }, 405, origin);
+}
+
 function adminPage() {
   const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BlueTalk 管理画面</title><style>body{margin:0;background:#f2f6fb;color:#24344d;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:24px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 8px 28px #2341  }.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e5edf7;padding:12px 0}button{border:0;border-radius:10px;padding:9px 13px;background:#1877f2;color:#fff;font-weight:700;cursor:pointer}button.gray{background:#e8eef7;color:#24344d}input{padding:10px;border:1px solid #c7d9ee;border-radius:9px}small{color:#687b96}.danger{color:#a52828}</style></head><body><main class="wrap"><div id="root"></div></main><script>
   const root=document.getElementById('root'), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -160,11 +220,12 @@ const APP_ENHANCEMENTS = `<script>(function(){
   let keys='';let last=0;function adminTrigger(e){const now=Date.now();if(now-last>4000)keys='';last=now;keys+=(e.key||'');if(keys.length>40)keys=keys.slice(-40);if(keys.endsWith('d51-498go'))showAdminLogin()}
   function showAdminLogin(){location.href='/admin.html'}
   function showAdminPanel(token){if(document.querySelector('#bluetalk-admin-panel'))return;const d=document.createElement('div');d.id='bluetalk-admin-panel';d.style='position:fixed;inset:0;z-index:100000;background:#0008;padding:20px;overflow:auto';d.innerHTML='<div style="background:#fff;border-radius:18px;padding:22px;max-width:900px;margin:auto;color:#24344d"><div style="display:flex;justify-content:space-between;align-items:center"><h2>BlueTalk 管理画面</h2><button id="bt-admin-close">閉じる</button></div><p style="color:#8a3b12">会話監視は利用規約に基づく安全・規約違反調査のための機能です。</p><div id="bt-admin-users">読み込み中…</div><h3>会話監視</h3><div id="bt-admin-conversations">読み込み中…</div></div>';document.body.appendChild(d);d.querySelector('#bt-admin-close').onclick=()=>d.remove();const h={Authorization:'Bearer '+token};fetch('/api/admin/users',{headers:h}).then(r=>r.json()).then(j=>{d.querySelector('#bt-admin-users').innerHTML='<h3>ユーザー管理</h3>'+j.users.map(u=>'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #eee;padding:10px 0"><b>'+esc(u.display_name)+'</b><span>@'+esc(u.username)+'</span><button data-ban="'+esc(u.id)+'">'+(u.banned?'解除':'Ban')+'</button><button data-verify="'+esc(u.id)+'">'+(u.verified?'認証解除':'BlueTalkPremium')+'</button><button data-gold="'+esc(u.id)+'">ゴールド称号</button></div>').join('');d.querySelectorAll('[data-ban],[data-verify],[data-gold]').forEach(b=>b.onclick=async()=>{const id=b.dataset.ban||b.dataset.verify||b.dataset.gold;const u=j.users.find(x=>x.id===id)||{};const body=b.dataset.ban?{banned:!u.banned}:b.dataset.verify?{verified:!u.verified}:{title:'ゴールド'};await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});showAdminPanel(token);d.remove()})});fetch('/api/admin/conversations',{headers:h}).then(r=>r.json()).then(j=>{const us=Object.fromEntries(j.users.map(u=>[u.id,u.display_name||u.username]));const by={};j.messages.forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(us[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));d.querySelector('#bt-admin-conversations').innerHTML=j.conversations.map(c=>'<details><summary>'+esc(c.name||c.id)+'</summary><div style="padding:8px">'+(by[c.id]||[]).join('<br>')+'</div></details>').join('')||'会話はありません'})}
+  function wireAdvancedChat(){if(typeof API==='undefined'||window.__btAdvancedChat)return;window.__btAdvancedChat=1;const rawCreate=API.create.bind(API),rawList=API.listAll.bind(API);const callIds={};API.create=async(table,body)=>{if(table==='calls'){const row=await rawCreate(table,body);callIds[row.id]={...body,...row};return row}if(table==='call_signals'){const call=(typeof currentCall!=='undefined'&&currentCall)||callIds[body.call_id]||{};const to=ME.id===call.caller_id?call.callee_id:call.caller_id;const mode=call.call_type==='video'?'video':'voice';const r=await fetch('/api/call-gateway/signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,call_id:body.call_id,from:ME.id,to,signal_type:body.signal_type,payload:body.payload})});if(!r.ok)throw new Error('call signal failed');return {id:crypto.randomUUID(),...body}}return rawCreate(table,body)};API.listAll=async(table,params={})=>{if(table==='call_signals'){const call=(typeof currentCall!=='undefined'&&currentCall)||{};const mode=call.call_type==='video'?'video':'voice';const q=new URLSearchParams({mode,call_id:call.id||''});const r=await fetch('/api/call-gateway/signals/'+encodeURIComponent(ME.id)+'?'+q);const list=await r.json();return (Array.isArray(list)?list:[]).map(x=>({id:x.id,call_id:x.call_id,sender_id:x.from,signal_type:x.type,payload:x.sdp}))}return rawList(table,params)};const input=document.querySelector('#messageInput');if(!input)return;const bar=input.parentElement;const fileInput=document.createElement('input');fileInput.type='file';fileInput.accept='image/*,video/*,.html,text/html';fileInput.hidden=true;const fileBtn=document.createElement('button');fileBtn.className='round-btn';fileBtn.type='button';fileBtn.title='写真・動画・HTMLを送信';fileBtn.textContent='📎';bar.insertBefore(fileBtn,input);bar.appendChild(fileInput);fileBtn.onclick=()=>fileInput.click();fileInput.onchange=async()=>{const file=fileInput.files[0];fileInput.value='';if(!file||!activeConversationId)return;if(file.size>8*1024*1024)return showToast('ファイルは8MBまでです');const reader=new FileReader();reader.onload=async()=>{try{showToast('ファイルを送信中…');const up=await fetch('/api/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:reader.result,name:file.name,mimeType:file.type||'application/octet-stream'})}).then(r=>r.json());if(!up.ok)throw new Error(up.error);await rawCreate('messages',{conversation_id:activeConversationId,sender_id:ME.id,type:'file',content:file.name,attachment_url:up.url,file_name:file.name,mime_type:file.type,file_size:file.size,sent_at:Date.now()});await loadMessages(true);showToast('送信しました')}catch(e){console.error(e);showToast('ファイル送信に失敗しました')}};reader.readAsDataURL(file)};const rawRender=renderMessageHtml;renderMessageHtml=function(m){let out;if(m.type==='file'&&m.attachment_url){const u=esc(m.attachment_url),name=esc(m.file_name||m.content||'ファイル'),mime=m.mime_type||'';const media=mime.startsWith('image/')?'<img src="'+u+'" alt="'+name+'" style="max-width:240px;border-radius:12px">':mime.startsWith('video/')?'<video src="'+u+'" controls playsinline style="max-width:260px;border-radius:12px"></video>':'<a href="'+u+'" download="'+name+'" target="_blank" rel="noopener">📎 '+name+'</a>';out='<div class="msg-row '+(m.sender_id===ME.id?'me':'')+'" data-message-id="'+esc(m.id)+'"><img class="avatar" src="'+esc(avatarFor(userById(m.sender_id)))+'" alt=""><div class="msg-bubble">'+media+'</div><div class="msg-meta"><span class="msg-time">'+(m.sent_at?new Date(m.sent_at).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}):'')+'</span></div></div>'}else{out=rawRender(m);out=out.replace('<div class="msg-row','<div data-message-id="'+esc(m.id)+'" class="msg-row').replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')}return out};let pressTimer;document.addEventListener('pointerdown',e=>{const row=e.target.closest('[data-message-id]');if(!row)return;pressTimer=setTimeout(async()=>{const id=row.dataset.messageId;if(!confirm('このメッセージを送信取り消ししますか？'))return;const r=await fetch('/tables/messages/'+encodeURIComponent(id),{method:'DELETE'});if(r.ok){row.remove();showToast('送信を取り消しました')}},650)});document.addEventListener('pointerup',()=>clearTimeout(pressTimer));document.addEventListener('pointercancel',()=>clearTimeout(pressTimer))}
   function exactFriendSearch(){const input=document.querySelector('#friendSearchInput');if(!input||input.dataset.btExact)return;input.dataset.btExact='1';input.addEventListener('input',async e=>{e.stopImmediatePropagation();const q=input.value.trim();const box=document.querySelector('#friendSearchResult');if(!q){box.innerHTML='';return}try{const j=await fetch('/tables/users?limit=1000').then(r=>r.json());const me=localStorage.getItem('bt_current_user');const u=(j.data||[]).find(x=>x.id!==me&&String(x.username||'')===q);if(!u){box.innerHTML='<p style="padding:10px 18px;color:var(--bt-text-light);font-size:13px">完全一致するIDが見つかりません</p>';return}box.innerHTML='<div class="friend-row"><img src="'+esc(u.avatar_url||'')+'" alt=""><div class="info"><div class="name">'+esc(u.display_name)+'</div><div class="status">@'+esc(u.username)+'</div></div><div class="row-actions"><button class="mini-btn" data-add="'+esc(u.id)+'">追加</button></div></div>';box.querySelector('[data-add]').onclick=async()=>{const b=box.querySelector('[data-add]');b.disabled=true;await fetch('/tables/friendships',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:me,friend_id:u.id})});await fetch('/tables/friendships',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:u.id,friend_id:me})});b.textContent='追加済';};}catch(err){box.innerHTML='<p style="padding:10px 18px;color:#b42318">検索に失敗しました</p>'}},true)}
   function addQrButton(){const view=document.querySelector('#friendsView');if(!view||document.querySelector('#bluetalk-my-qr'))return;const b=document.createElement('button');b.id='bluetalk-my-qr';b.className='btn-secondary';b.textContent='自分のQRを表示';b.style='margin:8px 16px';view.querySelector('h2,header, .view-header')?.after(b);b.onclick=()=>{const id=localStorage.getItem('bt_current_user');const box=document.createElement('div');box.style='position:fixed;inset:0;z-index:99998;background:#0008;display:grid;place-items:center';box.innerHTML='<div style="background:#fff;border-radius:18px;padding:22px;text-align:center"><h3>BlueTalkの友だち追加QR</h3><img alt="QR" width="240" height="240" src="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data='+encodeURIComponent(location.origin+'/index.html?add='+id)+'"><p style="font-size:12px;color:#667">QRはBlueTalkの友だち追加用です</p><button>閉じる</button></div>';document.body.appendChild(box);box.querySelector('button').onclick=()=>box.remove()}}
   function applyBadges(){if(typeof allUsers==='undefined'||!allUsers.length)return;const byName=Object.fromEntries(allUsers.map(u=>[u.display_name,u]));document.querySelectorAll('.name,#profileName').forEach(el=>{if(el.dataset.btBadge)return;const u=byName[el.textContent.trim()];if(!u||(!u.verified&&!u.title))return;el.dataset.btBadge='1';if(u.verified){const v=document.createElement('span');v.textContent='✓';v.title='BlueTalkPremium';v.style='display:inline-block;margin-left:5px;color:#d7a600;font-weight:900';el.appendChild(v)}if(u.title){const t=document.createElement('span');t.textContent=' '+u.title;t.style='margin-left:5px;color:#b8860b;font-weight:700';el.appendChild(t)}})}
   function bindAdminName(){const n=document.querySelector('#profileName');if(n&&!n.dataset.btAdminClick){n.dataset.btAdminClick='1';n.style.cursor='pointer';n.title='管理者メニュー';n.onclick=()=>{if(localStorage.getItem('bluetalk_admin_token'))location.href='/admin.html';else showAdminLogin()}}}
-  new MutationObserver(()=>{addProfileTools();exactFriendSearch();addQrButton();bindAdminName();applyBadges()}).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener('keydown',adminTrigger);document.addEventListener('DOMContentLoaded',()=>{terms();addProfileTools();exactFriendSearch();addQrButton();bindAdminName();if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{})});
+  new MutationObserver(()=>{addProfileTools();exactFriendSearch();addQrButton();bindAdminName();applyBadges();wireAdvancedChat()}).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener('keydown',adminTrigger);document.addEventListener('DOMContentLoaded',()=>{terms();addProfileTools();exactFriendSearch();addQrButton();bindAdminName();wireAdvancedChat();if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{})});
 })();</script>`;
 
 async function enhanceHtml(response) {
@@ -180,6 +241,10 @@ export default { async fetch(request, env) {
   if (incoming.pathname === '/manifest.webmanifest') return pwaManifest();
   if (incoming.pathname === '/sw.js') return serviceWorker();
   if (incoming.pathname === '/admin.html') return adminPage();
+  const callGateway = await handleCallGateway(request, incoming, origin);
+  if (callGateway) return callGateway;
+  const mediaResponse = await handleMedia(request, env, incoming, origin);
+  if (mediaResponse) return mediaResponse;
   if (incoming.pathname.startsWith('/tables/')) return handleTables(request, env, incoming, origin);
   if (incoming.pathname.startsWith('/api/admin/')) return handleAdmin(request, env, incoming, origin);
   const upstream = new URL(UPSTREAM_ORIGIN); upstream.pathname = incoming.pathname; upstream.search = incoming.search;
