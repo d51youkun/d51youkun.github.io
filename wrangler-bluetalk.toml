@@ -4,7 +4,7 @@ compatibility_date = "2026-09-01"
 workers_dev = true
 
 kv_namespaces = [
-  { binding = "BLUETALK_KV", id = "00000000000000000000000000000000" }
+  { binding = "BLUETALK_KV", id = "d10e32d4336848b9a7de80f2f40ca34e" }
 ]
 
 [observability]
