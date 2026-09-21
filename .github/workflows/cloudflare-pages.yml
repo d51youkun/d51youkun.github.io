@@ -32,7 +32,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: .
-          command: pages project create bluechat --production-branch main --account-id 7ece58c3241a1b80e660bff102f3352a
+          command: pages project create bluechat --production-branch main
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

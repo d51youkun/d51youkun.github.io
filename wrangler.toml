@@ -1,4 +1,4 @@
 name = "bluechat"
-main = "worker.js"
 compatibility_date = "2026-09-21"
-workers_dev = true
+account_id = "7ece58c3241a1b80e660bff102f3352a"
+pages_build_output_dir = "dist"
