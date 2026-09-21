@@ -26,10 +26,9 @@ jobs:
         run: python3 build.py
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: bluechat
-          directory: dist
-          branch: main
+          workingDirectory: .
+          command: pages deploy dist --project-name bluechat
