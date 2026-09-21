@@ -232,11 +232,13 @@ const APP_ENHANCEMENTS = `<script>(function(){
   new MutationObserver(()=>{installDirectGateways();patchIceQueue();repairImages();addProfileTools();exactFriendSearch();addQrButton();bindAdminName();applyBadges();wireLegacyStickerTools();wireAdvancedChat()}).observe(document.documentElement,{childList:true,subtree:true});document.addEventListener('keydown',adminTrigger);document.addEventListener('DOMContentLoaded',()=>{terms();installDirectGateways();patchIceQueue();repairImages();addProfileTools();exactFriendSearch();addQrButton();bindAdminName();wireLegacyStickerTools();wireAdvancedChat();if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{})});
 })();</script>`;
 
+const AVATAR_LEAK_GUARD = `<script>(function(){function clean(){document.querySelectorAll('.msg-bubble').forEach(function(b){var t=b.textContent||'';if(t.includes('api.dicebear.com/7.x/thumbs/svg?seed=')||t.includes('alt=""'))b.textContent=''})}clean();new MutationObserver(clean).observe(document.documentElement,{childList:true,subtree:true})})();</script>`;
+
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
   const withManifest = text.includes('</head>') ? text.replace('</head>', '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', APP_ENHANCEMENTS + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', APP_ENHANCEMENTS + AVATAR_LEAK_GUARD + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
