@@ -155,7 +155,19 @@ async function handleTurnCredentials(request, env, url, origin) {
   if (url.pathname !== '/api/turn-credentials' || request.method !== 'GET') return null;
   const endpoint = String(env.METERED_TURN_ENDPOINT || '').trim();
   const apiKey = String(env.METERED_TURN_API_KEY || '').trim();
-  if (!endpoint || !apiKey) return json({ ok: false, configured: false }, 503, origin);
+  // Metered Open Relay publishes a shared, card-free fallback for testing.
+  // Prefer account-scoped short-lived credentials whenever the secrets exist.
+  if (!endpoint || !apiKey) return json({
+    ok: true,
+    configured: false,
+    shared: true,
+    iceServers: [
+      { urls: 'stun:openrelay.metered.ca:80' },
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    ],
+  }, 200, origin);
   let upstream;
   try {
     upstream = new URL(endpoint);
