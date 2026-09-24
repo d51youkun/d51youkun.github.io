@@ -283,14 +283,16 @@ const APP_ENHANCEMENTS = `<script>(function(){
 
 const CALL_SCRIPT = `<script>(function(){
   if(window.__btCall)return;window.__btCall=1;
+  var VOICE=['https://bluechat-call-1.by-youhei.workers.dev','https://bluechat-call-2.by-youhei.workers.dev','https://bluechat-call-3.by-youhei.workers.dev'];
+  var VIDEO=['https://bluechat-video-1.by-youhei.workers.dev'];
   var ICE=[],pc=null,callRow=null,peer=null,localStream=null,seenSig={},processed={},answered=false,sigTimer=null;
   function q(id){return document.getElementById(id)}
-  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])})}
   function mode(){return callRow&&callRow.call_type==='video'?'video':'voice'}
   function modeOf(c){return c&&c.call_type==='video'?'video':'voice'}
+  function base(c){var key=String(c.id||'0'),hash=0;for(var i=0;i<key.length;i++)hash=(hash*31+key.charCodeAt(i))>>>0;var pool=c.call_type==='video'?VIDEO:VOICE;return pool[hash%pool.length]}
   function toastMsg(s){var t=q('toastMsg');if(t){t.textContent=s;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2600)}}
   async function loadIce(){try{var r=await fetch('/api/turn-credentials');var j=await r.json();if(j&&j.ok&&Array.isArray(j.iceServers)&&j.iceServers.length)return j.iceServers}catch(e){}return [{urls:'stun:stun.l.google.com:19302'}]}
-  async function sig(type,payload){if(!callRow||!peer)return;try{await fetch('/api/call-gateway/signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode(),call_id:callRow.id,from:ME.id,to:peer.id,signal_type:type,payload:payload||null})})}catch(e){}}
+  async function sig(type,payload){if(!callRow||!peer)return;try{await fetch(base(callRow)+'/api/call/signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to:peer.id,from:ME.id,call_id:callRow.id,type:type,sdp:payload||null,timestamp:Date.now()})})}catch(e){}}
   function stopMedia(){if(localStream){try{localStream.getTracks().forEach(function(t){t.stop()})}catch(e){}localStream=null}}
   function stopRing(){var a=q('ringtoneAudio');if(a){try{a.pause();a.currentTime=0}catch(e){}}}
   function cleanupUi(){var o=q('callOverlay');if(o)o.style.display='none';var t=q('incomingCallToast');if(t)t.style.display='none';stopRing();stopMedia();if(pc){try{pc.close()}catch(e){}pc=null}callRow=null;peer=null;answered=false;seenSig={};window.__btPendingOffer=null;if(sigTimer){clearInterval(sigTimer);sigTimer=null}var rv=q('remoteVideo'),lv=q('localVideo');if(rv){rv.srcObject=null;rv.style.display='none'}if(lv){lv.srcObject=null;lv.style.display='none'}}
@@ -298,7 +300,8 @@ const CALL_SCRIPT = `<script>(function(){
   function startRing(){var a=q('ringtoneAudio');if(!a)return;try{a.loop=true;a.currentTime=0;a.play().catch(function(){})}catch(e){}}
   function newPC(){var p=new RTCPeerConnection({iceServers:ICE});p.onicecandidate=function(e){if(e.candidate)sig('candidate',e.candidate.toJSON?e.candidate.toJSON():e.candidate)};p.ontrack=function(e){var s=e.streams&&e.streams[0];if(!s)return;var rv=q('remoteVideo');if(rv){rv.srcObject=s;rv.style.display=callRow&&callRow.call_type==='video'?'block':'none'}q('callOverlayStatus').textContent='通話中'};p.onconnectionstatechange=function(){if(!pc)return;if(p.connectionState==='connected'){answered=true;q('callOverlayStatus').textContent='通話中'}else if(p.connectionState==='failed'){toastMsg('接続に失敗しました');hangup()}};return p}
   function startSigPoll(){if(sigTimer)clearInterval(sigTimer);sigTimer=setInterval(pollSignals,1000);pollSignals()}
-  async function pollSignals(){if(!callRow||!pc)return;var list;try{var r=await fetch('/api/call-gateway/signals/'+encodeURIComponent(ME.id)+'?mode='+mode()+'&call_id='+encodeURIComponent(callRow.id));list=await r.json()}catch(e){return}if(!Array.isArray(list))return;for(const x of list){var id=x.id||((x.from||x.sender_id||'')+'_'+(x.type||x.signal_type||'')+'_'+String(JSON.stringify(x.sdp!==undefined?x.sdp:x.payload||'')).slice(0,40));if(seenSig[id])continue;seenSig[id]=1;try{await handleSignal(x)}catch(e){}}}
+  async function fetchSignals(c){var r=await fetch(base(c)+'/api/call/signals/'+encodeURIComponent(ME.id)+'?call_id='+encodeURIComponent(c.id));var list=await r.json();return Array.isArray(list)?list:[]}
+  async function pollSignals(){if(!callRow||!pc)return;var list;try{list=await fetchSignals(callRow)}catch(e){return}for(const x of list){var id=x.id||((x.from||'')+'_'+(x.type||'')+'_'+String(JSON.stringify(x.sdp||'')).slice(0,40));if(seenSig[id])continue;seenSig[id]=1;try{await handleSignal(x)}catch(e){}}}
   async function handleSignal(x){var type=x.type||x.signal_type,data=x.sdp!==undefined?x.sdp:x.payload;
     if(type==='answer'){answered=true;q('callOverlayStatus').textContent='接続中…';if(pc&&data)await pc.setRemoteDescription(data)}
     else if(type==='candidate'){if(pc&&data){try{await pc.addIceCandidate(data)}catch(e){}}}
@@ -313,7 +316,7 @@ const CALL_SCRIPT = `<script>(function(){
     var offer=await pc.createOffer();await pc.setLocalDescription(offer);await sig('offer',{type:offer.type,sdp:offer.sdp});showOverlay(u,'呼び出し中…');startSigPoll();
     setTimeout(function(){if(callRow&&!answered){toastMsg('呼び出しに応答がありません');sig('bye');cleanupUi()}},45000)}
   async function checkIncoming(){if(callRow||!ME||typeof API==='undefined'||!q('callOverlay'))return;var calls;try{calls=await API.listAll('calls')}catch(e){return}var now=Date.now();var c=(calls||[]).filter(function(x){return x&&x.callee_id===ME.id&&x.caller_id!==ME.id&&!x.status&&!processed[x.id]&&now-(x.created_at||0)<60000}).sort(function(a,b){return (b.created_at||0)-(a.created_at||0)})[0];if(!c)return;processed[c.id]=1;
-    var list;try{var r=await fetch('/api/call-gateway/signals/'+encodeURIComponent(ME.id)+'?mode='+modeOf(c)+'&call_id='+encodeURIComponent(c.id));list=await r.json()}catch(e){return}if(!Array.isArray(list))return;var offer=list.filter(function(x){return (x.type||x.signal_type)==='offer'&&!seenSig[x.id]})[0];if(!offer)return;seenSig[offer.id||'off']=1;
+    var list;try{list=await fetchSignals(c)}catch(e){return}var offer=list.filter(function(x){return (x.type||x.signal_type)==='offer'&&!seenSig[x.id]})[0];if(!offer)return;seenSig[offer.id||'off']=1;
     callRow=c;peer=await userOf(c.caller_id);window.__btPendingOffer=offer.sdp!==undefined?offer.sdp:offer.payload;var u=peer||{};var t=q('incomingCallToast');if(t){q('incomingCallAvatar').src=u.avatar_url||'';q('incomingCallName').textContent=u.display_name||u.username||'';q('incomingCallSub').textContent=c.call_type==='video'?'ビデオ通話の着信':'音声通話の着信';t.style.display='flex'}startRing()}
   async function acceptCall(){if(!callRow||!window.__btPendingOffer)return;var t=q('incomingCallToast');if(t)t.style.display='none';stopRing();try{localStream=await navigator.mediaDevices.getUserMedia(callRow.call_type==='video'?{video:true,audio:true}:{audio:true})}catch(e){toastMsg('マイク・カメラへのアクセスが必要です');sig('decline');cleanupUi();return}
     ICE=ICE.length?ICE:await loadIce();pc=newPC();localStream.getTracks().forEach(function(tr){try{pc.addTrack(tr,localStream)}catch(e){}});
