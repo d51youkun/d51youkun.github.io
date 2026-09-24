@@ -102,7 +102,7 @@ async function handleBtMedia(request, env, url) {
     };
     const decodeChunk = (raw0, idx) => {
       let s = raw0;
-      if (idx === 0) { const cm = s.indexOf(','); if (cm >= 0) s = s.slice(cm + 1); }
+      if (s.indexOf('data:') === 0) { const cm = s.indexOf(','); if (cm >= 0) s = s.slice(cm + 1); }
       const bin = atob(s);
       return Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
     };
@@ -453,7 +453,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-E';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-F';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -517,7 +517,7 @@ const MEDIA_SHIM = `<script>(function(){
     var total=Math.ceil(file.size/SLICE),mime=file.type||'application/octet-stream';
     for(var i=0;i<total;i++){
       var buf=await file.slice(i*SLICE,(i+1)*SLICE).arrayBuffer();
-      var r=await raw('/bt-media/'+id+'/'+i,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:'data:'+mime+';base64,'+b64buf(buf)})});
+      var r=await raw('/bt-media/'+id+'/'+i,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:(i===0?'data:'+mime+';base64,':'')+b64buf(buf)})});
       if(!r.ok)throw new Error('chunk failed');
       if(onprog&&i%5===0)onprog(Math.round(100*(i+1)/total));
     }
