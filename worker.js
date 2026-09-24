@@ -53,6 +53,44 @@ async function isAdmin(request, env) {
   return Boolean(token && await env.BLUETALK_KV.get(SESSION_PREFIX + token));
 }
 
+async function handleBtMedia(request, env, url) {
+  const store = /^(?:\/bt-media)(?:\/([A-Za-z0-9-]+))(?:\/(\d+)|\/complete)?/.exec(url.pathname);
+  if (!store) return null;
+  const id = store[1];
+  if (!id) return json({ ok: false, error: 'missing id' }, 400, url ? undefined : undefined);
+  if (request.method === 'PUT' && store[2] !== undefined) {
+    const body = await request.json().catch(() => ({}));
+    const data = String(body.data || '');
+    if (!data) return json({ ok: false, error: 'missing chunk' }, 400, undefined);
+    await env.BLUETALK_KV.put(`bluetalk:media:${id}:${store[2]}`, data);
+    return json({ ok: true }, 200, undefined);
+  }
+  if (request.method === 'POST' && url.pathname.endsWith('/complete')) {
+    const body = await request.json().catch(() => ({}));
+    const total = Math.max(1, Number(body.totalChunks || 1));
+    const mime = String(body.mimeType || 'application/octet-stream').slice(0, 120);
+    await env.BLUETALK_KV.put(`bluetalk:media:${id}:meta`, JSON.stringify({ totalChunks: total, mimeType: mime, created_at: Date.now() }));
+    return json({ ok: true, url: `/bt-media/${id}` }, 201, undefined);
+  }
+  if (request.method === 'GET' && !url.pathname.endsWith('/complete') && store[2] === undefined) {
+    const metaRaw = await env.BLUETALK_KV.get(`bluetalk:media:${id}:meta`);
+    if (!metaRaw) return new Response('Not found', { status: 404 });
+    const meta = JSON.parse(metaRaw);
+    const parts = [];
+    for (let i = 0; i < meta.totalChunks; i++) {
+      const c = await env.BLUETALK_KV.get(`bluetalk:media:${id}:${i}`);
+      if (c === null) return new Response('Not found', { status: 404 });
+      parts.push(c);
+    }
+    const data = parts.join('');
+    const comma = data.indexOf(',');
+    const encoded = comma >= 0 ? data.slice(comma + 1) : '';
+    const bytes = data.slice(0, comma).includes(';base64') ? Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(encoded));
+    return new Response(bytes, { headers: { 'Content-Type': meta.mimeType, 'Cache-Control': 'public, max-age=31536000, immutable' } });
+  }
+  return null;
+}
+
 async function handleTables(request, env, url, origin) {
   const parts = url.pathname.replace(/^\/tables\/?/, '').split('/').filter(Boolean);
   const table = parts[0] || '';
@@ -315,10 +353,44 @@ html[data-bt-theme="dark"] .auth-tabs button{color:#d5dee9!important}
 html[data-bt-theme="dark"] .auth-tabs button.active{background:#000!important;color:#fff!important;border:2px solid #fff!important}
 html[data-bt-theme="dark"] .close-x,html[data-bt-theme="dark"] .nav-item{color:#d5dee9!important}
 html[data-bt-theme="dark"] .switch-slider{background:#42536a!important}
+html[data-bt-theme="dark"] .chat-input-bar{position:relative;z-index:60;padding-bottom:calc(10px + env(safe-area-inset-bottom))!important}
+html[data-bt-theme="dark"] .nav-rail,html[data-bt-theme="dark"] .app-shell nav{padding-bottom:env(safe-area-inset-bottom)!important}
+html[data-bt-theme="dark"] .round-btn,html[data-bt-theme="dark"] .mini-btn{pointer-events:auto!important;touch-action:manipulation}
 html[data-bt-theme="dark"] ::-webkit-scrollbar{width:8px;height:8px}
 html[data-bt-theme="dark"] ::-webkit-scrollbar-thumb{background:#42536a;border-radius:8px}
 html[data-bt-theme="dark"] ::-webkit-scrollbar-track{background:transparent}
 </style>`;
+const MEDIA_SHIM = `<script>(function(){
+  if(window.__btMediaShim)return;window.__btMediaShim=1;
+  var raw=window.fetch.bind(window);
+  window.fetch=async function(input,init){
+    try{
+      var url=typeof input==='string'?input:(input&&input.url)||'';
+      if(url.indexOf('/tables/messages')>=0&&init&&init.method==='POST'&&init.body){
+        var b=JSON.parse(init.body);
+        var d=String(b.media_data||'');
+        if(d.indexOf('data:')===0&&d.length>150000){
+          var id=(crypto.randomUUID?crypto.randomUUID():'m'+Date.now()+Math.random().toString(16).slice(2));
+          var size=150000,total=Math.ceil(d.length/size),mime=(d.slice(5,d.indexOf(';'))||'application/octet-stream');
+          for(var i=0;i<total;i++){var r=await raw('/bt-media/'+id+'/'+i,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:d.slice(i*size,(i+1)*size)})});if(!r.ok)throw new Error('chunk failed')}
+          var c=await raw('/bt-media/'+id+'/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({totalChunks:total,mimeType:mime})});
+          if(!c.ok)throw new Error('complete failed');
+          b.media_data='/bt-media/'+id;
+          init={...init,body:JSON.stringify(b)};
+        }
+      }
+    }catch(e){console.warn('[bt] media upload failed',e)}
+    return raw(input,init);
+  };
+  function closePicker(){var p=document.getElementById('stickerPicker');if(p&&p.classList.contains('open'))p.classList.remove('open')}
+  document.addEventListener('click',function(e){
+    if(!e.target.closest('#stickerPicker')&&!e.target.closest('#openStickerPickerBtn'))closePicker();
+  },true);
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    if(b.id==='attachMediaBtn'){var i=document.getElementById('mediaFileInput');if(i)setTimeout(function(){},0)}
+  },false);
+})();</script>`;
 const CALL_SCRIPT = `<script>(function(){
   if(window.__btCall)return;window.__btCall=1;
   var VOICE=['https://bluechat-call-1.by-youhei.workers.dev','https://bluechat-call-2.by-youhei.workers.dev','https://bluechat-call-3.by-youhei.workers.dev'];
@@ -380,7 +452,7 @@ async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + CALL_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
@@ -397,6 +469,8 @@ export default { async fetch(request, env) {
   if (accountStatus) return accountStatus;
   const turnCredentials = await handleTurnCredentials(request, env, incoming, origin);
   if (turnCredentials) return turnCredentials;
+  const btMedia = await handleBtMedia(request, env, incoming);
+  if (btMedia) return btMedia;
   if (incoming.pathname.startsWith('/tables/')) return handleTables(request, env, incoming, origin);
   if (incoming.pathname.startsWith('/api/admin/')) return handleAdmin(request, env, incoming, origin);
   const upstream = new URL(UPSTREAM_ORIGIN); upstream.pathname = incoming.pathname; upstream.search = incoming.search;
