@@ -402,6 +402,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-C';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -446,28 +447,74 @@ html[data-bt-theme="dark"] ::-webkit-scrollbar-track{background:transparent}
 const MEDIA_SHIM = `<script>(function(){
   if(window.__btMediaShim)return;window.__btMediaShim=1;
   var raw=window.fetch.bind(window);
+  var MAX_CHUNK=150000,FILE_CAP=20*1024*1024;
+  window.__btUploadDataUrl=async function(d){
+    var id=(crypto.randomUUID?crypto.randomUUID():'m'+Date.now()+Math.random().toString(16).slice(2));
+    var total=Math.ceil(d.length/MAX_CHUNK),mime=(d.slice(5,d.indexOf(';'))||'application/octet-stream');
+    for(var i=0;i<total;i++){var r=await raw('/bt-media/'+id+'/'+i,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:d.slice(i*MAX_CHUNK,(i+1)*MAX_CHUNK)})});if(!r.ok)throw new Error('chunk failed')}
+    var c=await raw('/bt-media/'+id+'/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({totalChunks:total,mimeType:mime})});
+    if(!c.ok)throw new Error('complete failed');
+    return '/bt-media/'+id;
+  };
   window.fetch=async function(input,init){
     try{
       var url=typeof input==='string'?input:(input&&input.url)||'';
-      if(url.indexOf('/tables/messages')>=0&&init&&init.method==='POST'&&init.body){
+      if(init&&init.method==='POST'&&init.body&&url.indexOf('/tables/')===0){
         var b=JSON.parse(init.body);
-        var d=String(b.media_data||'');
-        if(d.indexOf('data:')===0&&d.length>150000){
-          var id=(crypto.randomUUID?crypto.randomUUID():'m'+Date.now()+Math.random().toString(16).slice(2));
-          var size=150000,total=Math.ceil(d.length/size),mime=(d.slice(5,d.indexOf(';'))||'application/octet-stream');
-          for(var i=0;i<total;i++){var r=await raw('/bt-media/'+id+'/'+i,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:d.slice(i*size,(i+1)*size)})});if(!r.ok)throw new Error('chunk failed')}
-          var c=await raw('/bt-media/'+id+'/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({totalChunks:total,mimeType:mime})});
-          if(!c.ok)throw new Error('complete failed');
-          b.media_data='/bt-media/'+id;
-          init={...init,body:JSON.stringify(b)};
+        var field=(url.indexOf('/tables/messages')===0)?'media_data':(url.indexOf('/tables/stickers')===0)?'image_url':(url.indexOf('/tables/users')===0)?'avatar_url':null;
+        if(field){
+          var d=String(b[field]||'');
+          if(d.indexOf('data:')===0&&d.length>MAX_CHUNK){
+            b[field]=await window.__btUploadDataUrl(d);
+            init={...init,body:JSON.stringify(b)};
+          }
         }
       }
     }catch(e){console.warn('[bt] media upload failed',e)}
     return raw(input,init);
   };
-  function closePicker(){var p=document.getElementById('stickerPicker');if(p&&p.classList.contains('open'))p.classList.remove('open')}
-  document.addEventListener('click',function(e){
-    if(!e.target.closest('#stickerPicker')&&!e.target.closest('#openStickerPickerBtn'))closePicker();
+  function toast(s){try{if(typeof showToast==='function')showToast(s)}catch(e){}}
+  function myId(){return(typeof ME!=='undefined'&&ME)?ME.id:''}
+  function readFile(f){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(r.result)};r.onerror=rej;r.readAsDataURL(f)})}
+  function compressImage(file,maxDim,q){return new Promise(function(res,rej){
+    if(file.type==='image/gif'||file.type==='image/webp'){readFile(file).then(res,rej);return}
+    var img=new Image();var u=URL.createObjectURL(file);
+    img.onload=function(){try{var s=Math.min(1,maxDim/Math.max(img.width,img.height));var c=document.createElement('canvas');c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);res(c.toDataURL('image/jpeg',q))}catch(e){rej(e)}};
+    img.onerror=function(){URL.revokeObjectURL(u);rej(new Error('img'))};
+    img.src=u;
+  })}
+  window.compressImageFile=function(f,maxDim,q){return compressImage(f,maxDim||2560,q||0.9)};
+  async function sendMedia(file){
+    if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
+    if(file.size>FILE_CAP){toast('ファイルが大きすぎます（20MBまで）');return}
+    try{
+      if(file.type.startsWith('image/')){var d=await compressImage(file,2560,0.9);await sendMessage({type:'image',media_data:d})}
+      else if(file.type.startsWith('video/')){toast('動画を送信しています...（大きいファイルは時間がかかります）');var d2=await readFile(file);await sendMessage({type:'video',media_data:d2})}
+      else{toast('画像または動画ファイルを選んでください')}
+    }catch(e){console.error(e);toast('送信に失敗しました')}
+  }
+  async function sendGeneric(file){
+    if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
+    if(file.size>FILE_CAP){toast('ファイルが大きすぎます（20MBまで）');return}
+    try{
+      if(file.type.startsWith('image/')||file.type.startsWith('video/')){await sendMedia(file);return}
+      var d=await readFile(file);await sendMessage({type:'file',media_data:d,file_name:file.name});
+    }catch(e){console.error(e);toast('送信に失敗しました')}
+  }
+  async function importStickers(files,packName){
+    if(!files||!files.length){toast('画像を選択してください');return}
+    var ok=0;
+    for(var i=0;i<files.length;i++){var f=files[i];if(!f.type.startsWith('image/'))continue;if(f.size>FILE_CAP){toast((f.name||'ファイル')+' は20MBを超えています');continue}
+      try{var d=await readFile(f);await API.create('stickers',{user_id:myId(),image_url:d,name:packName||'マイスタンプ'});ok++}catch(e){}}
+    if(ok){if(typeof refreshStickers==='function')await refreshStickers();toast(ok+'枚取り込みました')}
+  }
+  document.addEventListener('change',function(e){
+    var t=e.target;if(!t||!t.id)return;
+    try{
+      if(t.id==='mediaFileInput'){e.stopImmediatePropagation();e.preventDefault();var f=t.files[0];t.value='';if(f)sendMedia(f)}
+      else if(t.id==='genericFileInput'){e.stopImmediatePropagation();e.preventDefault();var f2=t.files[0];t.value='';if(f2)sendGeneric(f2)}
+      else if(t.id==='stickerFilesInput'){e.stopImmediatePropagation();e.preventDefault();var fs=[].slice.call(t.files);var pn=(document.getElementById('stickerPackName')||{value:''}).value||'マイスタンプ';t.value='';importStickers(fs,pn)}
+    }catch(err){console.error(err)}
   },true);
 })();</script>`;
 const CALL_SCRIPT = `<script>(function(){
@@ -818,7 +865,7 @@ async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
