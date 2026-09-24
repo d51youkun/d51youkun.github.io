@@ -402,7 +402,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-C';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-D';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -447,7 +447,7 @@ html[data-bt-theme="dark"] ::-webkit-scrollbar-track{background:transparent}
 const MEDIA_SHIM = `<script>(function(){
   if(window.__btMediaShim)return;window.__btMediaShim=1;
   var raw=window.fetch.bind(window);
-  var MAX_CHUNK=150000,FILE_CAP=20*1024*1024;
+  var MAX_CHUNK=150000,FILE_CAP=12*1024*1024;
   window.__btUploadDataUrl=async function(d){
     var id=(crypto.randomUUID?crypto.randomUUID():'m'+Date.now()+Math.random().toString(16).slice(2));
     var total=Math.ceil(d.length/MAX_CHUNK),mime=(d.slice(5,d.indexOf(';'))||'application/octet-stream');
@@ -486,7 +486,7 @@ const MEDIA_SHIM = `<script>(function(){
   window.compressImageFile=function(f,maxDim,q){return compressImage(f,maxDim||2560,q||0.9)};
   async function sendMedia(file){
     if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
-    if(file.size>FILE_CAP){toast('ファイルが大きすぎます（20MBまで）');return}
+    if(file.size>FILE_CAP){toast('ファイルが大きすぎます（12MBまで）');return}
     try{
       if(file.type.startsWith('image/')){var d=await compressImage(file,2560,0.9);await sendMessage({type:'image',media_data:d})}
       else if(file.type.startsWith('video/')){toast('動画を送信しています...（大きいファイルは時間がかかります）');var d2=await readFile(file);await sendMessage({type:'video',media_data:d2})}
@@ -495,7 +495,7 @@ const MEDIA_SHIM = `<script>(function(){
   }
   async function sendGeneric(file){
     if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
-    if(file.size>FILE_CAP){toast('ファイルが大きすぎます（20MBまで）');return}
+    if(file.size>FILE_CAP){toast('ファイルが大きすぎます（12MBまで）');return}
     try{
       if(file.type.startsWith('image/')||file.type.startsWith('video/')){await sendMedia(file);return}
       var d=await readFile(file);await sendMessage({type:'file',media_data:d,file_name:file.name});
@@ -504,7 +504,7 @@ const MEDIA_SHIM = `<script>(function(){
   async function importStickers(files,packName){
     if(!files||!files.length){toast('画像を選択してください');return}
     var ok=0;
-    for(var i=0;i<files.length;i++){var f=files[i];if(!f.type.startsWith('image/'))continue;if(f.size>FILE_CAP){toast((f.name||'ファイル')+' は20MBを超えています');continue}
+    for(var i=0;i<files.length;i++){var f=files[i];if(!f.type.startsWith('image/'))continue;if(f.size>FILE_CAP){toast((f.name||'ファイル')+' は12MBを超えています');continue}
       try{var d=await readFile(f);await API.create('stickers',{user_id:myId(),image_url:d,name:packName||'マイスタンプ'});ok++}catch(e){}}
     if(ok){if(typeof refreshStickers==='function')await refreshStickers();toast(ok+'枚取り込みました')}
   }
