@@ -281,6 +281,25 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
+const EARLY_THEME = `<script>try{if(localStorage.getItem('bt_dark_mode')==='1')document.documentElement.setAttribute('data-bt-theme','dark')}catch(e){}</script>`;
+const DARK_CSS = `<style>
+html[data-bt-theme="dark"] .nav-rail,html[data-bt-theme="dark"] .main-panel,html[data-bt-theme="dark"] .chat-room,html[data-bt-theme="dark"] .app-shell{background:var(--bt-bg,#0e1724)!important;color:var(--bt-text,#edf5ff)!important}
+html[data-bt-theme="dark"] .chat-header,html[data-bt-theme="dark"] .chat-input-bar,html[data-bt-theme="dark"] .profile-card,html[data-bt-theme="dark"] .panel-header{background:var(--bt-white,#172333)!important;border-color:var(--bt-border,#2c415b)!important}
+html[data-bt-theme="dark"] .chat-input-bar textarea,html[data-bt-theme="dark"] .search-box input{background:#101d2c!important;color:#edf5ff!important;border-color:#2c415b!important}
+html[data-bt-theme="dark"] .call-overlay{background:rgba(10,18,30,.96)!important;color:#edf5ff!important}
+html[data-bt-theme="dark"] .call-controls button{background:#223a58!important;color:#dcecff!important}
+html[data-bt-theme="dark"] .end-call{background:#3a1a1e!important;color:#ff8a8a!important}
+html[data-bt-theme="dark"] #toastMsg,html[data-bt-theme="dark"] .toast{background:#223a58!important;color:#edf5ff!important}
+html[data-bt-theme="dark"] .auth-page{background:#0e1724!important}
+html[data-bt-theme="dark"] .auth-card{background:#172333!important;color:#edf5ff!important;box-shadow:0 10px 40px #0006!important}
+html[data-bt-theme="dark"] .auth-card .field input{background:#101d2c!important;color:#edf5ff!important;border-color:#2c415b!important}
+html[data-bt-theme="dark"] .auth-tabs button{color:#a7b6ca!important}
+html[data-bt-theme="dark"] .auth-tabs button.active{color:#edf5ff!important}
+html[data-bt-theme="dark"] .empty-state,html[data-bt-theme="dark"] .call-status,html[data-bt-theme="dark"] .hint,html[data-bt-theme="dark"] .uid{color:#a7b6ca!important}
+html[data-bt-theme="dark"] .msg-row .msg-bubble{background:#1f2c3e!important;color:#edf5ff!important}
+html[data-bt-theme="dark"] .msg-row.me .msg-bubble{background:#1c3d63!important;color:#edf5ff!important}
+html[data-bt-theme="dark"] .close-x,html[data-bt-theme="dark"] .nav-item{color:#a7b6ca!important}
+</style>`;
 const CALL_SCRIPT = `<script>(function(){
   if(window.__btCall)return;window.__btCall=1;
   var VOICE=['https://bluechat-call-1.by-youhei.workers.dev','https://bluechat-call-2.by-youhei.workers.dev','https://bluechat-call-3.by-youhei.workers.dev'];
@@ -341,8 +360,8 @@ const CALL_SCRIPT = `<script>(function(){
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
-  const withManifest = text.includes('</head>') ? text.replace('</head>', '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', APP_ENHANCEMENTS + CALL_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
+  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + CALL_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
