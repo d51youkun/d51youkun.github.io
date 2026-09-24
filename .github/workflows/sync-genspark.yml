@@ -1,0 +1,78 @@
+name: Sync gensparkspace UI
+
+# nfieyeke.gensparkspace.com が更新されたら自動で検知し、
+# Deploy BlueTalk を発火させて最新UIを bluetalk.by-youhei.workers.dev に反映する。
+# ※ Workerは上流をライブプロキシするためUIは即時反映だが、
+#    変更検知の記録とデプロイ起動（監査・確実性）をこのワークフローが担う。
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sync-genspark
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch gensparkspace UI and compute digest
+        id: digest
+        env:
+          UPSTREAM: https://nfieyeke.gensparkspace.com
+        run: |
+          set -euo pipefail
+          files=("index.html" "app.html" "css/style.css" "js/api.js" "js/auth.js" "js/app.js")
+          combined=""
+          for f in "${files[@]}"; do
+            if body="$(curl --fail-with-body --silent --show-error "${UPSTREAM}/${f}")"; then
+              hash="$(printf '%s' "${body}" | sha256sum | cut -d' ' -f1)"
+            else
+              hash="FETCH_FAILED"
+            fi
+            echo "${f} ${hash}" | tee snapshot-latest.txt.tmp
+            combined="${combined}${hash}"
+          done
+          digest="$(printf '%s' "${combined}" | sha256sum | cut -d' ' -f1)"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Compare with previous digest
+        id: changed
+        run: |
+          set -euo pipefail
+          prev="(none)"
+          [ -f snapshot/digest.txt ] && prev="$(cat snapshot/digest.txt)"
+          if [ "${{ steps.digest.outputs.digest }}" = "${prev}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "gensparkspace UI is unchanged (digest ${prev})"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "gensparkspace UI changed: ${prev} -> ${{ steps.digest.outputs.digest }}"
+          fi
+
+      - name: Commit snapshot and trigger deploy
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p snapshot
+          mv snapshot-latest.txt.tmp snapshot/files.txt
+          echo "${{ steps.digest.outputs.digest }}" > snapshot/digest.txt
+          curl --fail-with-body --silent --show-error \
+            "https://nfieyeke.gensparkspace.com/index.html" -o snapshot/index.html
+          git config user.name "genspark-dev"
+          git config user.email "actions@users.noreply.github.com"
+          git add snapshot/
+          git commit -m "chore(genspark): UI update detected (${{ steps.digest.outputs.digest }})"
+          git push
+          gh workflow run deploy-bluetalk.yml --ref main
+          echo "Deploy BlueTalk triggered"
