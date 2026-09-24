@@ -111,7 +111,16 @@ async function handleTables(request, env, url, origin) {
   if (request.method === 'POST' && !id) {
     const body = await request.json().catch(() => ({}));
     const row = { ...body, id: body.id || crypto.randomUUID(), created_at: body.created_at || Date.now() };
-    rows.push(row); await writeTable(env, table, rows); return json(row, 201, origin);
+    rows.push(row); await writeTable(env, table, rows);
+    if (table === 'messages' && row.conversation_id) {
+      const convs = await readTable(env, 'conversations');
+      const ci = convs.findIndex((c) => String(c.id) === String(row.conversation_id));
+      if (ci >= 0 && Array.isArray(convs[ci].hidden_for) && convs[ci].hidden_for.length) {
+        convs[ci] = { ...convs[ci], hidden_for: [], updated_at: Date.now() };
+        await writeTable(env, 'conversations', convs);
+      }
+    }
+    return json(row, 201, origin);
   }
   if ((request.method === 'PATCH' || request.method === 'PUT') && id) {
     const index = rows.findIndex((item) => String(item.id) === id);
@@ -129,6 +138,10 @@ async function handleTables(request, env, url, origin) {
   }
   if (request.method === 'DELETE' && id) {
     await writeTable(env, table, rows.filter((item) => String(item.id) !== id));
+    if (table === 'conversations') {
+      const messages = await readTable(env, 'messages');
+      await writeTable(env, 'messages', messages.filter((m) => String(m.conversation_id) !== id));
+    }
     if (table === 'users') {
       const [friendships, conversations, messages, stickers, calls, signals] = await Promise.all([
         readTable(env, 'friendships'), readTable(env, 'conversations'), readTable(env, 'messages'),
@@ -386,10 +399,6 @@ const MEDIA_SHIM = `<script>(function(){
   document.addEventListener('click',function(e){
     if(!e.target.closest('#stickerPicker')&&!e.target.closest('#openStickerPickerBtn'))closePicker();
   },true);
-  document.addEventListener('click',function(e){
-    var b=e.target.closest('button');if(!b)return;
-    if(b.id==='attachMediaBtn'){var i=document.getElementById('mediaFileInput');if(i)setTimeout(function(){},0)}
-  },false);
 })();</script>`;
 const CALL_SCRIPT = `<script>(function(){
   if(window.__btCall)return;window.__btCall=1;
@@ -448,11 +457,147 @@ const CALL_SCRIPT = `<script>(function(){
 })();
 </script>`;
 
+const GROUP_SCRIPT = `<script>(function(){
+  if(window.__btGroup)return;window.__btGroup=1;
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function q(id){return document.getElementById(id)}
+  function toast(s){try{if(typeof showToast==='function')showToast(s)}catch(e){}}
+  function myId(){return(typeof ME!=='undefined'&&ME)?ME.id:null}
+  var css=document.createElement('style');
+  css.textContent='#btMembersBtn{display:none;background:transparent!important;border:none!important;color:inherit!important;font-size:18px;cursor:pointer;padding:4px 6px}.chat-row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}.msg-row[data-btsender]:not(.me){position:relative;margin-top:20px}.msg-row[data-btsender]:not(.me)::before{content:attr(data-btsender);position:absolute;top:0;left:44px;font-size:11px;font-weight:600;color:var(--bt-text-light,#8a97a8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}#btSheet{position:fixed;inset:0;z-index:10000;display:none;align-items:flex-end;justify-content:center;background:rgba(3,6,12,.62)}#btSheet.open{display:flex}.bt-sheet{background:#141b26;color:#fff;width:min(430px,100%);border-radius:18px 18px 0 0;padding:12px 14px calc(16px + env(safe-area-inset-bottom));box-shadow:0 -8px 40px rgba(0,0,0,.55)}.bt-sheet h4{margin:6px 8px 8px;font-size:13px;color:#9fb2c9;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bt-sheet button,.bt-members-foot button{display:block;width:100%;text-align:left;background:transparent!important;border:none!important;color:#fff!important;padding:13px 12px!important;font-size:15px;border-radius:12px!important;cursor:pointer}.bt-sheet button:active{background:#223047!important}.bt-sheet button.danger,.bt-members-foot button.danger{color:#ff7070!important}#btMembers{position:fixed;inset:0;z-index:10001;display:none;align-items:center;justify-content:center;background:rgba(3,6,12,.7)}#btMembers.open{display:flex}.bt-members-card{background:#141b26;color:#fff;width:min(360px,92vw);max-height:72vh;border-radius:18px;padding:16px;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,.6)}.bt-members-card h4{margin:0 0 10px;font-size:15px;color:#fff}.bt-member-list{overflow:auto;flex:1;min-height:40px}.bt-member{display:flex;gap:10px;align-items:center;padding:8px 4px;border-bottom:1px solid #24324a}.bt-member img{width:36px;height:36px;border-radius:50%;flex:none}.bt-member .n{font-size:14px;font-weight:600;color:#fff}.bt-member .u{font-size:12px;color:#9fb2c9}#btGroupSection{padding:10px 12px;border-bottom:1px solid rgba(120,140,170,.25)}.bt-members-foot{padding-top:10px}.bt-members-foot hr{border:none;border-top:1px solid #2a3950;margin:6px 0}';
+  document.head.appendChild(css);
+  function convById(id){var list=(typeof conversations!=='undefined'&&Array.isArray(conversations))?conversations:[];for(var i=0;i<list.length;i++){if(list[i]&&list[i].id===id)return list[i]}return null}
+  function nameOfConv(c){if(!c)return 'トーク';if(c.type==='group')return c.name||'グループ';var ids=Array.isArray(c.member_ids)?c.member_ids:[];var oid=null;for(var i=0;i<ids.length;i++){if(ids[i]!==myId())oid=ids[i]}var u=(typeof userById==='function')?userById(oid):null;return u?(u.display_name||u.username||'トーク'):'トーク'}
+  function ensureSheet(){if(q('btSheet'))return;var d=document.createElement('div');d.id='btSheet';d.innerHTML='<div class="bt-sheet"><h4 id="btSheetTitle"></h4><div id="btSheetBtns"></div></div>';document.body.appendChild(d);d.addEventListener('click',function(e){if(e.target===d)closeSheet()})}
+  function closeSheet(){var s=q('btSheet');if(s)s.classList.remove('open')}
+  function addBtn(box,label,fn,danger){var el=document.createElement('button');if(danger)el.className='danger';el.textContent=label;el.addEventListener('click',fn);box.appendChild(el)}
+  function openSheet(convId){var c=convById(convId);if(!c)return;ensureSheet();q('btSheetTitle').textContent=(c.type==='group'?'👥 ':'💬 ')+nameOfConv(c);var b=q('btSheetBtns');b.innerHTML='';addBtn(b,'メンバーを見る',function(){closeSheet();openMembers(convId)});if(c.type==='group'){addBtn(b,'グループから脱退',function(){closeSheet();leaveGroup(convId)},true)}else{addBtn(b,'トークを削除',function(){closeSheet();deleteDirect(convId)},true)}addBtn(b,'キャンセル',function(){closeSheet()});q('btSheet').classList.add('open')}
+  async function deleteDirect(convId){
+    var c=null;try{c=await API.get('conversations',convId)}catch(e){}
+    if(!c)return;
+    if(!confirm('このトークを削除しますか？（自分のトーク一覧から削除されます）'))return;
+    try{
+      var hidden=Array.isArray(c.hidden_for)?c.hidden_for.slice():[];
+      if(hidden.indexOf(myId())<0)hidden.push(myId());
+      var others=Array.isArray(c.member_ids)?c.member_ids.filter(function(x){return x!==myId()}):[];
+      var othersGone=true;
+      for(var i=0;i<others.length;i++){if(hidden.indexOf(others[i])<0){othersGone=false;break}}
+      if(othersGone){await API.remove('conversations',convId)}
+      else{await API.update('conversations',convId,{hidden_for:hidden})}
+      if(typeof activeConversationId!=='undefined'&&activeConversationId===convId&&typeof backToList==='function')backToList();
+      if(typeof refreshConversations==='function')await refreshConversations();
+      toast('トークを削除しました');
+    }catch(e){toast('削除に失敗しました')}
+  }
+  async function leaveGroup(convId){
+    var c=null;try{c=await API.get('conversations',convId)}catch(e){}
+    if(!c||c.type!=='group')return;
+    if(!confirm('「'+(c.name||'グループ')+'」から脱退しますか？'))return;
+    try{
+      var rest=(Array.isArray(c.member_ids)?c.member_ids:[]).filter(function(x){return x!==myId()});
+      if(rest.length===0){await API.remove('conversations',convId)}
+      else{await API.update('conversations',convId,{member_ids:rest})}
+      if(typeof activeConversationId!=='undefined'&&activeConversationId===convId&&typeof backToList==='function')backToList();
+      if(typeof refreshConversations==='function')await refreshConversations();
+      toast('グループから脱退しました');
+    }catch(e){toast('脱退に失敗しました')}
+  }
+  function ensureMembers(){if(q('btMembers'))return;var d=document.createElement('div');d.id='btMembers';d.innerHTML='<div class="bt-members-card"><h4 id="btMembersTitle"></h4><div class="bt-member-list" id="btMembersList"></div><div class="bt-members-foot" id="btMembersFoot"></div></div>';document.body.appendChild(d);d.addEventListener('click',function(e){if(e.target===d)closeMembers()})}
+  function closeMembers(){var m=q('btMembers');if(m)m.classList.remove('open')}
+  async function openMembers(convId){
+    var c=null;try{c=await API.get('conversations',convId)}catch(e){}
+    if(!c)return;
+    ensureMembers();
+    var ids=Array.isArray(c.member_ids)?c.member_ids:[];
+    q('btMembersTitle').textContent=(c.type==='group'?(c.name||'グループ'):'トーク')+'（'+ids.length+'名）';
+    var list=q('btMembersList');list.innerHTML='';
+    for(var i=0;i<ids.length;i++){
+      var id=ids[i];
+      var u=(typeof userById==='function')?userById(id):null;
+      var row=document.createElement('div');row.className='bt-member';
+      var av=(typeof avatarFor==='function')?avatarFor(u||{username:id}):'';
+      row.innerHTML='<img src="'+esc(av)+'" alt=""><div><div class="n">'+esc(u?(u.display_name||u.username||'メンバー'):'メンバー')+'</div><div class="u">'+esc(u?('@'+(u.username||'')):'')+'</div></div>';
+      list.appendChild(row);
+      if(!u)(function(rowEl,uid){API.get('users',uid).then(function(u2){if(!u2)return;if(typeof allUsers!=='undefined'&&Array.isArray(allUsers)){var dup=false;for(var j=0;j<allUsers.length;j++){if(allUsers[j]&&allUsers[j].id===uid){dup=true;break}}if(!dup)allUsers.push(u2)}rowEl.querySelector('.n').textContent=u2.display_name||u2.username||'メンバー';rowEl.querySelector('.u').textContent='@'+(u2.username||'');var im=rowEl.querySelector('img');if(typeof avatarFor==='function')im.src=avatarFor(u2)}).catch(function(){})})(row,id);
+    }
+    var foot=q('btMembersFoot');foot.innerHTML='';
+    if(c.type==='group'&&myId()&&ids.indexOf(myId())>=0){addBtn(foot,'グループから脱退',function(){closeMembers();leaveGroup(convId)},true);var hr=document.createElement('hr');foot.appendChild(hr)}
+    addBtn(foot,'閉じる',function(){closeMembers()});
+    q('btMembers').classList.add('open');
+  }
+  var groupMode=false;
+  function addGroupUi(){
+    var list=q('newChatFriendList');if(!list)return;
+    if(!groupMode)list._btOrig=list.innerHTML;
+    var sec=q('btGroupSection');
+    if(!sec){sec=document.createElement('div');sec.id='btGroupSection';list.parentNode.insertBefore(sec,list)}
+    sec.innerHTML='<input id="btGroupName" placeholder="グループ名を入力" maxlength="30"><button id="btGroupToggle" type="button">'+(groupMode?'💬 個人トークに戻る':'👥 グループを作る')+'</button>';
+    q('btGroupToggle').addEventListener('click',function(){groupMode=!groupMode;applyGroupMode()});
+    applyGroupMode();
+  }
+  function applyGroupMode(){
+    var list=q('newChatFriendList');if(!list)return;
+    if(!groupMode){
+      if(list._btOrig!=null){list.innerHTML=list._btOrig;list._btOrig=null;
+        var rows=list.querySelectorAll('[data-select]');
+        for(var i=0;i<rows.length;i++){(function(r){r.addEventListener('click',function(){if(typeof openOrCreateDirectChat==='function')openOrCreateDirectChat(r.getAttribute('data-select'))})})(rows[i])}
+      }
+      return;
+    }
+    var friends=[];var fids=(typeof friendIds!=='undefined'&&friendIds)?friendIds:new Set();
+    fids.forEach(function(id){var u=(typeof userById==='function')?userById(id):null;if(u)friends.push(u)});
+    if(friends.length===0){list.innerHTML='<p style="padding:12px;color:var(--bt-text-light);font-size:13px;">友だちがいません。先に友だちを追加してください。</p>';return}
+    var html='';
+    for(var i=0;i<friends.length;i++){var f=friends[i];var av=(typeof avatarFor==='function')?avatarFor(f):'';html+='<label class="friend-row" style="display:flex;cursor:pointer"><input type="checkbox" class="bt-gpick" value="'+esc(f.id)+'" style="margin-right:8px"><img src="'+esc(av)+'" alt=""><div class="info"><div class="name">'+esc(f.display_name)+'</div></div></label>'}
+    html+='<button id="btGroupCreate" type="button" style="width:100%;margin-top:10px;padding:12px;font-weight:700">グループを作成する</button>';
+    list.innerHTML=html;
+    q('btGroupCreate').addEventListener('click',createGroup);
+  }
+  async function createGroup(){
+    var nameEl=q('btGroupName');var name=nameEl?nameEl.value.trim():'';
+    if(!name){toast('グループ名を入力してください');return}
+    var picked=[];var boxes=document.querySelectorAll('.bt-gpick:checked');
+    for(var i=0;i<boxes.length;i++)picked.push(boxes[i].value);
+    if(picked.length===0){toast('メンバーを1人以上選んでください');return}
+    try{
+      var conv=await API.create('conversations',{type:'group',name:name,member_ids:[myId()].concat(picked),last_message:'',last_message_at:Date.now()});
+      groupMode=false;
+      var m=q('newChatModal');if(m)m.classList.remove('show');
+      if(typeof refreshConversations==='function')await refreshConversations();
+      if(typeof openConversation==='function'&&conv&&conv.id)openConversation(conv.id);
+      toast('グループを作成しました');
+    }catch(e){toast('グループ作成に失敗しました')}
+  }
+  try{
+    if(typeof openNewChatModal==='function'&&!window.__btOrigOpenNewChat){window.__btOrigOpenNewChat=openNewChatModal;window.openNewChatModal=async function(){var r=await window.__btOrigOpenNewChat.apply(this,arguments);try{addGroupUi()}catch(e){}return r}}
+    if(typeof openConversation==='function'&&!window.__btOrigOpenConv){window.__btOrigOpenConv=openConversation;window.openConversation=async function(){var r=await window.__btOrigOpenConv.apply(this,arguments);try{updateHeaderBtn()}catch(e){}return r}}
+    if(typeof renderMessageHtml==='function'&&!window.__btOrigRenderMsg){window.__btOrigRenderMsg=renderMessageHtml;window.renderMessageHtml=function(m){var html=window.__btOrigRenderMsg.apply(this,arguments);try{var c=(typeof activeConversation!=='undefined')?activeConversation:null;if(c&&c.type==='group'&&m&&m.sender_id!==myId()&&m.type!=='call'){var u=(typeof userById==='function')?userById(m.sender_id):null;var nm=u?(u.display_name||u.username||'メンバー'):'メンバー';html=html.replace('class="msg-row ','data-btsender="'+esc(nm)+'" class="msg-row ')}}catch(e){}return html}}
+    if(typeof refreshConversations==='function'&&!window.__btOrigRefreshConv){window.__btOrigRefreshConv=refreshConversations;window.refreshConversations=async function(){var r=await window.__btOrigRefreshConv.apply(this,arguments);try{if(myId()&&typeof conversations!=='undefined'&&Array.isArray(conversations)){var vis=[];var changed=false;for(var i=0;i<conversations.length;i++){var c=conversations[i];var hidden=c&&Array.isArray(c.hidden_for)&&c.hidden_for.indexOf(myId())>=0;if(hidden)changed=true;else vis.push(c)}if(changed){conversations=vis;if(typeof renderChatList==='function')renderChatList()}}}catch(e){}return r}}
+  }catch(e){}
+  function ensureHeaderBtn(){var h=document.querySelector('.chat-header .actions');if(!h||q('btMembersBtn'))return;var b=document.createElement('button');b.id='btMembersBtn';b.innerHTML='&#128101;';b.title='メンバー';b.addEventListener('click',function(){if(typeof activeConversationId!=='undefined'&&activeConversationId)openMembers(activeConversationId)});h.appendChild(b)}
+  function updateHeaderBtn(){var b=q('btMembersBtn');if(!b)return;var c=(typeof activeConversation!=='undefined')?activeConversation:null;b.style.display=(c&&c.type==='group')?'block':'none'}
+  function bindLongPress(){
+    var list=q('chatList');if(!list||list.__btLP)return;list.__btLP=1;
+    var timer=null,fired=false,sx=0,sy=0;
+    list.addEventListener('pointerdown',function(e){var row=e.target.closest?e.target.closest('.chat-row'):null;if(!row)return;fired=false;sx=e.clientX;sy=e.clientY;var id=row.getAttribute('data-conv');timer=setTimeout(function(){fired=true;try{if(navigator.vibrate)navigator.vibrate(25)}catch(err){}openSheet(id)},550)});
+    var clear=function(){if(timer){clearTimeout(timer);timer=null}};
+    list.addEventListener('pointerup',clear);list.addEventListener('pointercancel',clear);list.addEventListener('pointerleave',clear);
+    list.addEventListener('pointermove',function(e){if(timer&&(Math.abs(e.clientX-sx)>10||Math.abs(e.clientY-sy)>10))clear()});
+    list.addEventListener('click',function(e){if(fired){e.stopImmediatePropagation();e.preventDefault();fired=false}},true);
+    list.addEventListener('contextmenu',function(e){var row=e.target.closest?e.target.closest('.chat-row'):null;if(row){e.preventDefault();openSheet(row.getAttribute('data-conv'))}});
+  }
+  function boot(){ensureSheet();ensureMembers();ensureHeaderBtn();try{updateHeaderBtn()}catch(e){}bindLongPress()}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+  setInterval(function(){try{updateHeaderBtn()}catch(e){}},4000);
+  window.__btDebug={openSheet:openSheet,openMembers:openMembers,addGroupUi:addGroupUi,leaveGroup:leaveGroup,deleteDirect:deleteDirect};
+})();
+</script>`;
+
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {

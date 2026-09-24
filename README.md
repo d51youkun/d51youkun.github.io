@@ -85,6 +85,7 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 4. **ダークモード補完(DARK_CSS + EARLY_THEME)** — トグル機構(属性 `data-bt-theme` + `bt_dark_mode`)は本体UIのものを使用し、配色ギャップのみ補完: ナビ・入力バー・通話オーバーレイ・Toast・ログインカード等。**早期適用スクリプト**が全ページの初描画前に反映(ログインページ含む)。**ダーク標準**(未設定時はdark — 旧アプリの `data-theme="dark"` 既定を踏襲)、トグルでlight選択は永続。`?theme=dark|light` で強制切替可能(デバッグ・共有用)。**高コントラスト仕様**: ボタンは一律「黒地 + 白枠2px + 白文字」(hoverは暗グレー)、本文・名称は纯白、補助テキスト #d5dee9、入力欄は黒地+白文字
 5. **画像フォールバック** — 読み込み失敗imgをdicebearアバターに差し替え
 6. `</head>` 直前に PWA用 `<link rel="manifest">` と apple-touch-icon + `/sw.js` 登録
+7. **グループトーク・長押し操作(GROUP_SCRIPT)** — 「新しいトーク」モーダルに「👥 グループを作る」を追加(グループ名+複数友だち選択で `type:'group'` の会話を作成)。グループチャットではヘッダーに 👤 メンバーボタン(メンバー一覧モーダル)を表示し、他人のメッセージに送信者名ラベルを付与。トークリストの**長押し(550ms)・右クリック**でアクションシート: グループは「メンバーを見る / グループから脱退」、1対1トークは「トークを削除」。削除は `hidden_for` による**自分側のみの非表示**(相手の履歴は保持。相手からの新着メッセージで自動的に再表示)。両者が削除、または最後のメンバーが脱退した場合は会話+メッセージを完全削議(DELETE conversations でメッセージもカスケード削除)
 
 **削除された重複注入**(gensparkspace UIがネイティブ実装済みのため): 規約モーダル(termsModal) / 通知許可・アカウント削除ボタン(requestNotifyBtn・deleteAccountBtn) / 完全一致ID検索(friendSearchInput) / 自分のQR(myQrModal・showMyQrBtn) / スタンプ帳(stickerGrid等) / コンポーザー3ボタントレイ(attachMediaBtn等と競合) / ファイル送信フォールバック / ダーク・レスポンシブCSS(darkModeToggle・@media自前実装と競合) / 通話・メディアのfetchフック(gensparkspace app.jsはcall_signals・/api/media・RTCPeerConnectionを未使用のため死にコード)。
 
@@ -100,7 +101,7 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 |---|---|
 | `users` | `id, username, password, display_name, avatar_url, verified, title, banned, ban_reason, ban_message, ban_appeal_message, profile_changed_at, created_at, updated_at` |
 | `friendships` | `id, user_id, friend_id` (相互に2行) |
-| `conversations` | `id, member_ids[], (group名等)` |
+| `conversations` | `id, type(direct/group), name, member_ids[], hidden_for[](自分側で削除済みのuser id), last_message, last_message_at` |
 | `messages` | `id, conversation_id, sender_id, type(text/image/video/file/sticker…), content, attachment_url, file_name, mime_type, created_at` |
 | `stickers` | `id, user_id, image_url(dataURL可), name` |
 | `calls` | `id, caller_id, callee_id, call_type(voice/video)` |
