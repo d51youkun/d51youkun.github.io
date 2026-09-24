@@ -16,7 +16,6 @@ concurrency:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   check-and-deploy:
@@ -74,5 +73,5 @@ jobs:
           git add snapshot/
           git commit -m "chore(genspark): UI update detected (${{ steps.digest.outputs.digest }})"
           git push
-          gh workflow run deploy-bluetalk.yml --ref main
-          echo "Deploy BlueTalk triggered"
+          # このpushが Deploy BlueTalk (on: push main) を自動発火し、最新がデプロイされる
+          echo "Snapshot pushed — Deploy BlueTalk triggered via push"
