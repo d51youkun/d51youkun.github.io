@@ -281,7 +281,8 @@ function pwaManifest() {
 }
 
 function serviceWorker() {
-  return new Response("self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>cs[0]?.focus()||clients.openWindow('/app.html')))});", { headers: { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' } });
+  const heal = "self.addEventListener('install',e=>{self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil((async()=>{try{const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)))}catch(x){}try{await self.registration.unregister()}catch(x){}try{const cs=await self.clients.matchAll({type:'window'});cs.forEach(c=>c.navigate(c.url))}catch(x){}})())});self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>cs[0]?.focus()||clients.openWindow('/app.html')))});";
+  return new Response(heal, { headers: { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' } });
 }
 
 async function handleMedia(request, env, url, origin) {
@@ -736,7 +737,21 @@ const STICKER_SHIM = `<script>(function(){
       el.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openPack(row)},true);
     });
   }
-  new MutationObserver(function(){try{enhance()}catch(e){}}).observe(document.documentElement,{childList:true,subtree:true});
+  function ensureLineRow(){
+    if(document.getElementById('btLineRow'))return;
+    var anchor=document.getElementById('stickerGrid')||document.getElementById('stickerUrlInput')||document.getElementById('stickerFilesInput');
+    var view=document.getElementById('stickersView');
+    if(!anchor&&view)anchor=view.firstChild;
+    if(!anchor)return;
+    var row=document.createElement('div');row.id='btLineRow';
+    row.style.cssText='display:flex;gap:8px;margin:0 0 12px;padding:10px;background:#101827;border:2px solid #42536a;border-radius:12px;flex-wrap:wrap';
+    row.innerHTML='<input id="btLineUrlInput" type="text" placeholder="LINEスタンプのURLを貼り付け（例: store.line.me/stickershop/product/1263049/ja）" style="flex:1;min-width:180px;background:#05070c;color:#fff;border:2px solid #42536a;border-radius:9px;padding:10px"><button id="btLineImportBtn" type="button" style="background:#000;color:#fff;border:2px solid #fff;border-radius:9px;padding:10px 14px;font-weight:700;cursor:pointer">📦 LINEスタンプを取り込む</button>';
+    row.parentNode=anchor.parentNode;anchor.parentNode.insertBefore(row,anchor);
+    document.getElementById('btLineImportBtn').addEventListener('click',function(){var i=document.getElementById('btLineUrlInput');if(i)i.value=i.value.trim();smart()});
+    document.getElementById('btLineUrlInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();smart()}});
+  }
+  new MutationObserver(function(){try{enhance();ensureLineRow()}catch(e){}}).observe(document.documentElement,{childList:true,subtree:true});
+  if(document.readyState!=='loading'){try{enhance();ensureLineRow()}catch(e){}}else document.addEventListener('DOMContentLoaded',function(){try{enhance();ensureLineRow()}catch(e){}});
   if(document.readyState!=='loading')enhance();else document.addEventListener('DOMContentLoaded',enhance);
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 })();
