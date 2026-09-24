@@ -319,6 +319,42 @@ async function handleMedia(request, env, url, origin) {
   return null;
 }
 
+async function handleLineStickers(request, env, url, origin) {
+  const m = url.pathname.match(/^\/api\/line-stickers\/(\d{6,12})$/);
+  if (!m) return null;
+  const pid = m[1];
+  const cacheKey = `bluetalk:linepack:${pid}`;
+  const cached = await env.BLUETALK_KV.get(cacheKey);
+  if (cached) return json(JSON.parse(cached), 200, origin);
+  const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36', 'Accept-Language': 'ja,en;q=0.8' };
+  let html = '';
+  try {
+    const r = await fetch(`https://store.line.me/stickershop/product/${pid}/ja`, { headers });
+    if (r.ok) html = await r.text();
+  } catch {}
+  if (!html) {
+    try {
+      const r = await fetch(`https://store.line.me/stickershop/product/${pid}/en`, { headers });
+      if (r.ok) html = await r.text();
+    } catch {}
+  }
+  if (!html) return json({ ok: false, error: 'sticker pack not found' }, 404, origin);
+  const t = html.match(/<title>([^<]*?)\s*[-|]\s*LINE/);
+  const title = t ? t[1].replace(/&amp;/g, '&').slice(0, 60) : 'LINEスタンプ';
+  const ids = []; const seen = new Set();
+  const re = /stickershop\.line-scdn\.net\/stickershop\/v1\/sticker\/(\d+)\//g;
+  let mm;
+  while ((mm = re.exec(html)) !== null) {
+    if (!seen.has(mm[1])) { seen.add(mm[1]); ids.push(mm[1]); }
+    if (ids.length >= 60) break;
+  }
+  if (!ids.length) return json({ ok: false, error: 'no stickers found' }, 404, origin);
+  const stickers = ids.map((sid) => `https://stickershop.line-scdn.net/stickershop/v1/sticker/${sid}/android/sticker.png?v=1`);
+  const payload = { ok: true, title, productId: pid, stickers };
+  await env.BLUETALK_KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: 86400 });
+  return json(payload, 200, origin);
+}
+
 async function handleCallGateway(request, url, origin) {
   const signalMatch = url.pathname.match(/^\/api\/call-gateway\/signals?\/?([^/]*)$/);
   if (!signalMatch) return null;
@@ -342,11 +378,12 @@ async function handleCallGateway(request, url, origin) {
 }
 
 function adminPage() {
-  const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BlueTalk 管理画面</title><style>body{margin:0;background:#f2f6fb;color:#24344d;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:24px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 8px 28px #2341  }.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e5edf7;padding:12px 0}button{border:0;border-radius:10px;padding:9px 13px;background:#1877f2;color:#fff;font-weight:700;cursor:pointer}button.gray{background:#e8eef7;color:#24344d}input{padding:10px;border:1px solid #c7d9ee;border-radius:9px}small{color:#687b96}.danger{color:#a52828}</style></head><body><main class="wrap"><div id="root"></div></main><script>
+  const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BlueTalk 管理画面</title><style>body{margin:0;background:#f2f6fb;color:#24344d;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:24px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 8px 28px #2341  }.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e5edf7;padding:12px 0}button{border:0;border-radius:10px;padding:9px 13px;background:#1877f2;color:#fff;font-weight:700;cursor:pointer}button.gray{background:#e8eef7;color:#24344d}input{padding:10px;border:1px solid #c7d9ee;border-radius:9px}small{color:#687b96}.danger{color:#a52828}#btConvModal{position:fixed;inset:0;z-index:9999;background:rgba(10,16,28,.72);display:flex;align-items:center;justify-content:center;padding:14px}.bt-cm-card{background:#fff;border-radius:16px;width:min(560px,96vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.45)}.bt-cm-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;background:#1877f2;color:#fff}.bt-cm-head button{background:#fff!important;color:#1877f2!important;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:700}.bt-cm-msgs{overflow:auto;padding:14px;background:#eef3fa;flex:1}.bt-cm-row{display:flex;gap:8px;margin-bottom:10px;align-items:flex-end}.bt-cm-row.bt-me{flex-direction:row-reverse}.bt-cm-ava{width:30px;height:30px;border-radius:50%;flex:none}.bt-cm-col{max-width:78%;display:flex;flex-direction:column;gap:2px}.bt-cm-row.bt-me .bt-cm-col{align-items:flex-end}.bt-cm-name{font-size:11px;color:#5b6b81}.bt-cm-bubble{background:#fff;color:#24344d;border-radius:12px;padding:8px 12px;font-size:13.5px;line-height:1.5;word-break:break-word;box-shadow:0 1px 2px rgba(0,0,0,.08)}.bt-cm-row.bt-me .bt-cm-bubble{background:#1877f2;color:#fff}.bt-cm-time{font-size:10px;color:#8296ad}.bt-cm-media{max-width:220px;max-height:200px;border-radius:8px;display:block}.bt-cm-empty{color:#5b6b81}</style></head><body><main class="wrap"><div id="root"></div></main><script>
   const root=document.getElementById('root'), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function login(){root.innerHTML='<section class="card"><h1>BlueTalk 管理画面</h1><p>管理者コードを入力してください。</p><input id="pw" type="password" placeholder="管理者コード"><button id="go">ログイン</button><p id="msg" class="danger"></p></section>';document.getElementById('go').onclick=async()=>{const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});const j=await r.json();if(!r.ok){document.getElementById('msg').textContent='認証に失敗しました';return}localStorage.setItem('bluetalk_admin_token',j.token);dashboard()}}
-  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr,ar]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h}),fetch('/api/admin/appeals',{headers:h}).catch(function(){return {ok:false}})]);if(!ur.ok||!cr.ok||!ar.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), ap=ar.ok?((await ar.json()).appeals||[]):[], names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section><section class="card"><h2>誤Ban申し立て（利用者から管理者へ）</h2><div id="appeals"></div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'<button data-act="pass" data-id="'+esc(x.id)+'">パスワード変更</button><button data-act="del" data-id="'+esc(x.id)+'">強制削除</button></div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else if(b.dataset.act==='pass'){const np=prompt('このアカウントの新しいパスワードを入力してください（パスワードを強制変更）','');if(!np||!np.trim())return;body={password:np}}else if(b.dataset.act==='del'){if(!confirm('このアカウントを強制削除しますか？利用者の全データ（会話・メッセージ等）が削除され、元に戻せません。'))return;await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE',headers:h});dashboard();return}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>'<details><summary>'+esc(x.name||x.id)+'</summary><div class="row">'+(by[x.id]||[]).join('<br>')+'</div></details>').join('')||'会話はありません';document.getElementById('appeals').innerHTML=ap.slice().reverse().map(x=>'<div class="row"><b>'+esc(names[x.user_id]||x.user_id)+'</b><span style="display:block;width:100%">'+esc(x.message)+'</span>'+(x.status==='resolved'?'<small>対応済み</small>':'')+'<button data-ap="resolve" data-aid="'+esc(x.id)+'">対応済みにする</button><button data-ap="reply" data-uid="'+esc(x.user_id)+'">返信する</button></div>').join('')||'申し立てはありません';document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=async()=>{if(b.dataset.ap==='resolve'){await fetch('/api/admin/appeals/'+encodeURIComponent(b.dataset.aid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({status:'resolved'})})}else{const msg=prompt('返信内容（利用者の削除通知画面に表示されます）','');if(msg===null)return;await fetch('/api/admin/users/'+encodeURIComponent(b.dataset.uid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ban_appeal_message:msg,admin_override:true})})}dashboard()})}
-  if(localStorage.getItem('bluetalk_admin_token'))dashboard();else login();
+  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr,ar]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h}),fetch('/api/admin/appeals',{headers:h}).catch(function(){return {ok:false}})]);if(!ur.ok||!cr.ok||!ar.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), ap=ar.ok?((await ar.json()).appeals||[]):[], names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section><section class="card"><h2>誤Ban申し立て（利用者から管理者へ）</h2><div id="appeals"></div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'<button data-act="pass" data-id="'+esc(x.id)+'">パスワード変更</button><button data-act="del" data-id="'+esc(x.id)+'">強制削除</button></div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else if(b.dataset.act==='pass'){const np=prompt('このアカウントの新しいパスワードを入力してください（パスワードを強制変更）','');if(!np||!np.trim())return;body={password:np}}else if(b.dataset.act==='del'){if(!confirm('このアカウントを強制削除しますか？利用者の全データ（会話・メッセージ等）が削除され、元に戻せません。'))return;await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE',headers:h});dashboard();return}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>{const ids=(x.member_ids||[]);const title=x.type==='group'?('👥 '+(x.name||'グループ')+'（'+ids.length+'名・'+ids.map(i=>names[i]||i).slice(0,6).join('、')+'）'):ids.map(i=>names[i]||i).join(' ⇔ ');const ms=(c.messages||[]).filter(m=>m.conversation_id===x.id).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const last=ms.length?ms[ms.length-1]:null;const when=last?new Date(last.sent_at||last.created_at||0).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';return '<div class="row"><b>'+esc(title)+'</b><small>'+ms.length+'件'+(when?'・最終 '+when:'')+'</small><button data-conv="'+esc(x.id)+'">トークを見る</button></div>'}).join('')||'会話はありません';window.__btMon={convs:c.conversations||[],msgs:c.messages||[],names:names,users:u};document.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>openConv(b.dataset.conv));document.getElementById('appeals').innerHTML=ap.slice().reverse().map(x=>'<div class="row"><b>'+esc(names[x.user_id]||x.user_id)+'</b><span style="display:block;width:100%">'+esc(x.message)+'</span>'+(x.status==='resolved'?'<small>対応済み</small>':'')+'<button data-ap="resolve" data-aid="'+esc(x.id)+'">対応済みにする</button><button data-ap="reply" data-uid="'+esc(x.user_id)+'">返信する</button></div>').join('')||'申し立てはありません';document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=async()=>{if(b.dataset.ap==='resolve'){await fetch('/api/admin/appeals/'+encodeURIComponent(b.dataset.aid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({status:'resolved'})})}else{const msg=prompt('返信内容（利用者の削除通知画面に表示されます）','');if(msg===null)return;await fetch('/api/admin/users/'+encodeURIComponent(b.dataset.uid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ban_appeal_message:msg,admin_override:true})})}dashboard()})}
+  function openConv(cid){const M=window.__btMon;if(!M)return;const cv=M.convs.filter(x=>x.id===cid)[0];if(!cv)return;const ids=cv.member_ids||[];const title=cv.type==='group'?('👥 '+(cv.name||'グループ')+'（'+ids.length+'名）'):ids.map(i=>M.names[i]||i).join(' ⇔ ');const ms=M.msgs.filter(m=>m.conversation_id===cid).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const ava=(uid)=>{const uu=(M.users||[]).filter(x=>x.id===uid)[0];return (uu&&uu.avatar_url)||'https://api.dicebear.com/7.x/thumbs/svg?seed='+encodeURIComponent(uid)};let h='<div class="bt-cm-head"><b>'+esc(title)+'</b><button id="btCmClose">閉じる</button></div><div class="bt-cm-msgs">';if(!ms.length)h+='<p class="bt-cm-empty">メッセージはまだありません</p>';ms.forEach(m=>{const left=cv.type==='group'||m.sender_id===ids[0];const name=M.names[m.sender_id]||m.sender_id;const t=(m.sent_at||m.created_at)?new Date(m.sent_at||m.created_at).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';let body='';if(m.type==='sticker'&&m.sticker_url)body='<img class="bt-cm-media" src="'+esc(m.sticker_url)+'">';else if(m.type==='image'&&m.media_data)body='<img class="bt-cm-media" src="'+esc(m.media_data)+'">';else if(m.type==='video'&&m.media_data)body='<video class="bt-cm-media" src="'+esc(m.media_data)+'" controls></video>';else if(m.type==='file'&&m.media_data)body='<a href="'+esc(m.media_data)+'" download="'+esc(m.file_name||'file')+'">📎 '+esc(m.file_name||'ファイル')+'</a>';else if(m.type==='call')body='<i>📞 通話</i>';else body=esc(m.content||'');if(!body&&m.media_data)body='<img class="bt-cm-media" src="'+esc(m.media_data)+'">';h+='<div class="bt-cm-row '+(left?'':'bt-me')+'">'+(left?'<img class="bt-cm-ava" src="'+esc(ava(m.sender_id))+'">':'')+'<div class="bt-cm-col"><span class="bt-cm-name">'+esc(name)+'</span><span class="bt-cm-bubble">'+body+'</span><span class="bt-cm-time">'+esc(t)+'</span></div></div>'});h+='</div>';let mo=document.getElementById('btConvModal');if(mo)mo.remove();mo=document.createElement('div');mo.id='btConvModal';mo.innerHTML='<div class="bt-cm-card">'+h+'</div>';mo.addEventListener('click',e=>{if(e.target===mo)mo.remove()});document.body.appendChild(mo);document.getElementById('btCmClose').onclick=()=>mo.remove()}
+if(localStorage.getItem('bluetalk_admin_token'))dashboard();else login();
   </script></body></html>`;
   return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
@@ -625,6 +662,50 @@ const GROUP_SCRIPT = `<script>(function(){
 })();
 </script>`;
 
+const STICKER_SHIM = `<script>(function(){
+  if(window.__btStickerShim)return;window.__btStickerShim=1;
+  function toast(s){try{if(typeof showToast==='function')showToast(s)}catch(e){}}
+  function lineProduct(v){var m=v.match(/store\.line\.me\/stickershop\/product\/(\d+)/)||v.match(/line\.me\/S?\/sticker\/(\d+)/)||v.match(/^\s*(\d{6,12})\s*$/);return m?m[1]:null}
+  function lineSingle(v){var m=v.match(/stickershop\.line-scdn\.net\/stickershop\/v1\/sticker\/(\d+)\//);return m?{url:v,name:'LINEスタンプ'}:null}
+  async function importProduct(pid){
+    toast('LINEスタンプを取得中...');
+    try{
+      var r=await fetch('/api/line-stickers/'+encodeURIComponent(pid));var j=await r.json();
+      if(!r.ok||!j.ok||!j.stickers||!j.stickers.length){toast('スタンプを取得できませんでした（無料スタンプのURLをお試しください）');return}
+      var cnt=0;
+      for(var i=0;i<j.stickers.length;i++){try{await API.create('stickers',{user_id:(typeof ME!=='undefined'&&ME)?ME.id:'',image_url:j.stickers[i],name:j.title||'LINEスタンプ'});cnt++}catch(e){}}
+      if(typeof refreshStickers==='function')await refreshStickers();
+      var input=document.getElementById('stickerUrlInput');if(input)input.value='';
+      toast((j.title||'スタンプ')+'を'+cnt+'枚取り込みました');
+    }catch(e){toast('取り込みに失敗しました')}
+  }
+  async function importSingle(item){
+    try{await API.create('stickers',{user_id:(typeof ME!=='undefined'&&ME)?ME.id:'',image_url:item.url,name:item.name});if(typeof refreshStickers==='function')await refreshStickers();var input=document.getElementById('stickerUrlInput');if(input)input.value='';toast('スタンプを取り込みました')}catch(e){toast('取り込みに失敗しました')}
+  }
+  function smart(){
+    var input=document.getElementById('stickerUrlInput');var v=input?input.value.trim():'';
+    if(!v)return;
+    var pid=lineProduct(v);if(pid){importProduct(pid);return}
+    var single=lineSingle(v);if(single){importSingle(single);return}
+    if(typeof window.__btOrigAddSticker==='function')window.__btOrigAddSticker();
+  }
+  function rebind(){
+    var btn=document.getElementById('addStickerBtn');
+    if(btn&&!btn.__btRebound){
+      btn.__btRebound=1;
+      if(typeof window.addStickerFromUrl==='function')window.__btOrigAddSticker=window.addStickerFromUrl;
+      var clone=btn.cloneNode(true);btn.parentNode.replaceChild(clone,btn);clone.__btRebound=1;
+      clone.addEventListener('click',function(e){e.preventDefault();smart()});
+      return true;
+    }
+    return false;
+  }
+  window.addStickerFromUrl=smart;
+  var tries=0;var t=setInterval(function(){if(rebind()||++tries>20)clearInterval(t)},1200);
+  if(document.readyState!=='loading')rebind();else document.addEventListener('DOMContentLoaded',rebind);
+})();
+</script>`;
+
 const BAN_SCRIPT = `<script>(function(){
   if(window.__btBan)return;window.__btBan=1;
   var CACHE_KEY='bt_ban_active';
@@ -686,7 +767,7 @@ async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + BAN_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
@@ -699,6 +780,8 @@ export default { async fetch(request, env) {
   if (callGateway) return callGateway;
   const mediaResponse = await handleMedia(request, env, incoming, origin);
   if (mediaResponse) return mediaResponse;
+  const lineStickers = await handleLineStickers(request, env, incoming, origin);
+  if (lineStickers) return lineStickers;
   const accountStatus = await handleAccountStatus(request, env, incoming, origin);
   if (accountStatus) return accountStatus;
   const turnCredentials = await handleTurnCredentials(request, env, incoming, origin);
