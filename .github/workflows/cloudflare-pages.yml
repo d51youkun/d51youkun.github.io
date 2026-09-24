@@ -48,6 +48,29 @@ jobs:
           sed -i "s/00000000000000000000000000000000/${namespace_id}/" wrangler.toml
           echo "BlueTalk KV namespace is ready: ${namespace_id}"
 
+      - name: Ensure R2 bucket bluetalk-media (optional)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CFG: wrangler.toml
+        run: |
+          set -uo pipefail
+          acct="${CLOUDFLARE_ACCOUNT_ID:-7ece58c3241a1b80e660bff102f3352a}"
+          api="https://api.cloudflare.com/client/v4/accounts/${acct}/r2/buckets"
+          code="$(curl -s -o /tmp/r2list.json -w '%{http_code}' -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$api" || echo 000)"
+          if [ "$code" != "200" ]; then
+            echo "::notice::R2 is not reachable with this API token (HTTP ${code}). Deploying without the R2 binding — large-file upload stays disabled."
+            exit 0
+          fi
+          if ! grep -q 'bluetalk-media' /tmp/r2list.json; then
+            code2="$(curl -s -o /tmp/r2create.json -w '%{http_code}' -X POST -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" --data '{"name":"bluetalk-media"}' "$api" || echo 000)"
+            echo "create bucket bluetalk-media: HTTP ${code2}"
+            if [ "$code2" != "200" ] && [ "$code2" != "201" ]; then head -c 400 /tmp/r2create.json; echo; exit 0; fi
+          fi
+          grep -q 'BLUETALK_MEDIA' "$CFG" && { echo "R2 binding already present"; exit 0; }
+          printf '\n[[r2_buckets]]\nbinding = "BLUETALK_MEDIA"\nbucket_name = "bluetalk-media"\n' >> "$CFG"
+          echo "R2 binding BLUETALK_MEDIA -> bluetalk-media appended to ${CFG}"
+
       - name: Ensure Cloudflare Pages project exists
         continue-on-error: true
         env:

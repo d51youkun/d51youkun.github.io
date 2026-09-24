@@ -220,3 +220,44 @@ node server/sync-server.js                          # :8766
 - 旧URL・Pages とも `on: push main` なので、README更新でも両デプロイが走る(軽微なコストのため許容)
 - gensparkspace側でUIを更新したら基本何もしなくてよい(自動デプロイ)。緊急反映は Actions の「Sync gensparkspace UI」を手動実行
 - アカウント削除はユーザー自身がプロフィール →「アカウントを削除」(カスケード削除)
+
+---
+
+## 大容量メディア（8K・数分の動画 = 数GB）
+
+### なぜ必要か
+Cloudflare KV は 1 値あたり **25 MiB** 上限・無料枠は**合計 1 GB**、Worker の
+リクエストボディ上限は **100 MB**（Free/Pro）です。8K の 5 分動画（実測で
+1.5〜6 GB 程度）は KV には物理的に収まりません。そこで **Cloudflare R2**
+（オブジェクトストレージ、無料枠 10 GB）へ中継する経路を追加しました。
+
+### 仕組み
+| 経路 | 用途 | 上限 |
+| --- | --- | --- |
+| `/bt-media/<id>/<n>`（KV・従来） | 小さい画像・スタンプ・短い動画 | 200 MB |
+| `/bt-big/<id>/*`（R2・新規） | 8K などの大容量動画/ファイル | 6 GB（1ファイル） |
+
+クライアントは起動時に `GET /bt-big/config` を取得し、R2 が有効なら
+`> 24 MB` のファイルを自動的に R2 マルチパート経路へ振り分けます。
+R2 が無効（バインディング未設定）の場合は従来の KV 経路にフォールバックし、
+上限を超えるファイルには「R2を有効化してください」と案内します。
+
+- `POST /bt-big/<id>/init` … `createMultipartUpload`（メタは KV に保存）
+- `PUT  /bt-big/<id>/part/<n>?u=<uploadId>` … 32 MiB 単位で R2 へ中継
+- `POST /bt-big/<id>/complete` … `complete`（R2 がオブジェクトを確定）
+- `POST /bt-big/<id>/abort` … 中断時に多重パートを破棄
+- `GET  /bt-big/<id>` … `Range` 対応のストリーミング再生（206 Partial Content）
+- `DELETE /bt-big/<id>` … 管理者トークン必須
+
+クライアント側は進捗バー（％・MB/s・残り時間）を表示し、パート単位で
+最大4回リトライしてから中断します。
+
+### 有効化（初回のみ・人間の操作が必要）
+1. Cloudflare ダッシュボードで **R2 を有効化**（無料枠あり）。
+2. 既存のデプロイ用 API トークンを編集し、権限 **Workers R2 Storage: Edit**
+   を追加（トークン値は変わらないので GitHub Secrets の更新は不要）。
+3. `main` へ push（または Actions を再実行）すると、ワークフローが
+   バケット `bluetalk-media` を作成し、`wrangler.toml` /
+   `wrangler-bluetalk.toml` に `[[r2_buckets]] BLUETALK_MEDIA` を追記して
+   デプロイします。R2 が未設定の間もこのステップはスキップされ、
+   デプロイ自体は成功し続けます。

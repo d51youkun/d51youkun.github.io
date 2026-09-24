@@ -144,6 +144,112 @@ async function handleBtMedia(request, env, url) {
   return null;
 }
 
+// ===== 大容量メディア（Cloudflare R2 マルチパート） =====
+// 8K・数分の動画は数GBになり、KV（値25MiB上限 / 無料枠1GB）には格納できない。
+// R2 バインディング BLUETALK_MEDIA があればマルチパートへ中継し、無ければ 503 を返す
+// （クライアントは従来の KV 経路へ自動フォールバックする）。
+const BIG_MAX_BYTES = 6 * 1024 * 1024 * 1024;
+const BIG_PART_BYTES = 32 * 1024 * 1024;
+
+function bigMediaEnabled(env) { return Boolean(env && env.BLUETALK_MEDIA); }
+
+function bigRangeHeader(range, size) {
+  if (!range) return null;
+  if (typeof range.suffix === 'number') {
+    const start = Math.max(0, size - range.suffix);
+    return { header: 'bytes ' + start + '-' + (size - 1) + '/' + size, length: size - start };
+  }
+  const start = Number(range.offset || 0);
+  const length = Number(range.length || (size - start));
+  return { header: 'bytes ' + start + '-' + (start + length - 1) + '/' + size, length };
+}
+
+async function handleBtBig(request, env, url, origin) {
+  if (url.pathname === '/bt-big/config') {
+    return json({ ok: true, enabled: bigMediaEnabled(env), partSize: BIG_PART_BYTES, minPartBytes: 5 * 1024 * 1024, maxBytes: BIG_MAX_BYTES }, 200, origin);
+  }
+  const m = /^\/bt-big\/([A-Za-z0-9-]{6,64})(?:\/(init|part|complete|abort)\/(\d+)?)?$/.exec(url.pathname);
+  if (!m) return null;
+  const id = m[1];
+  const action = m[2] || '';
+  const partNo = m[3] ? Number(m[3]) : 0;
+  const metaKey = 'bluetalk:big:' + id + ':meta';
+  if (!bigMediaEnabled(env)) return json({ ok: false, error: 'r2_disabled' }, 503, origin);
+  const bucket = env.BLUETALK_MEDIA;
+
+  if (request.method === 'POST' && action === 'init') {
+    const body = await request.json().catch(() => ({}));
+    const mime = String(body.mimeType || 'application/octet-stream').slice(0, 120);
+    const name = String(body.name || '').slice(0, 200);
+    const sizeBytes = Math.max(0, Number(body.sizeBytes || 0));
+    if (sizeBytes > BIG_MAX_BYTES) return json({ ok: false, error: 'too_large', maxBytes: BIG_MAX_BYTES }, 413, origin);
+    const mp = await bucket.createMultipartUpload('media/' + id, { httpMetadata: { contentType: mime } });
+    await env.BLUETALK_KV.put(metaKey, JSON.stringify({ uploadId: mp.uploadId, key: 'media/' + id, mime, name, sizeBytes, done: false, created_at: Date.now() }));
+    return json({ ok: true, uploadId: mp.uploadId, partSize: BIG_PART_BYTES, minPartBytes: 5 * 1024 * 1024, maxBytes: BIG_MAX_BYTES }, 201, origin);
+  }
+
+  const metaRaw = await env.BLUETALK_KV.get(metaKey);
+  if (!metaRaw) return json({ ok: false, error: 'not_found' }, 404, origin);
+  const meta = JSON.parse(metaRaw);
+
+  if (request.method === 'PUT' && action === 'part' && partNo >= 1 && partNo <= 10000) {
+    if (!request.body) return json({ ok: false, error: 'empty_part' }, 400, origin);
+    const mp = bucket.resumeMultipartUpload(meta.key, meta.uploadId);
+    const uploaded = await mp.uploadPart(partNo, request.body);
+    return json({ ok: true, partNumber: partNo, etag: uploaded.etag }, 200, origin);
+  }
+
+  if (request.method === 'POST' && action === 'complete') {
+    const body = await request.json().catch(() => ({}));
+    const parts = (Array.isArray(body.parts) ? body.parts : [])
+      .map((p) => ({ partNumber: Number(p.partNumber || p.n || 0), etag: String(p.etag || '') }))
+      .filter((p) => p.partNumber >= 1 && p.etag);
+    if (!parts.length) return json({ ok: false, error: 'no_parts' }, 400, origin);
+    parts.sort((a, b) => a.partNumber - b.partNumber);
+    const mp = bucket.resumeMultipartUpload(meta.key, meta.uploadId);
+    const obj = await mp.complete(parts);
+    meta.done = true;
+    meta.parts = parts.length;
+    meta.sizeBytes = Number(body.sizeBytes || meta.sizeBytes || (obj && obj.size) || 0);
+    meta.completed_at = Date.now();
+    await env.BLUETALK_KV.put(metaKey, JSON.stringify(meta));
+    return json({ ok: true, url: '/bt-big/' + id, sizeBytes: meta.sizeBytes, parts: parts.length }, 201, origin);
+  }
+
+  if (request.method === 'POST' && action === 'abort') {
+    try { await bucket.resumeMultipartUpload(meta.key, meta.uploadId).abort(); } catch (e) {}
+    await env.BLUETALK_KV.delete(metaKey);
+    return json({ ok: true }, 200, origin);
+  }
+
+  if (request.method === 'DELETE' && !action) {
+    if (!await isAdmin(request, env)) return json({ ok: false, error: 'forbidden' }, 403, origin);
+    try { await bucket.delete(meta.key); } catch (e) {}
+    await env.BLUETALK_KV.delete(metaKey);
+    return json({ ok: true }, 200, origin);
+  }
+
+  if (request.method === 'GET' && !action && meta.done) {
+    const obj = await bucket.get(meta.key, { range: request.headers.get('Range') ? request.headers : undefined });
+    if (!obj) return new Response('Not found', { status: 404 });
+    const headers = new Headers();
+    obj.writeHttpMetadata(headers);
+    if (!headers.get('Content-Type')) headers.set('Content-Type', meta.mime || 'application/octet-stream');
+    headers.set('ETag', obj.httpEtag);
+    headers.set('Accept-Ranges', 'bytes');
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    const r = bigRangeHeader(obj.range, obj.size);
+    if (r) {
+      headers.set('Content-Range', r.header);
+      headers.set('Content-Length', String(r.length));
+      return new Response(obj.body, { status: 206, headers });
+    }
+    headers.set('Content-Length', String(obj.size));
+    return new Response(obj.body, { status: 200, headers });
+  }
+  return null;
+}
+
 async function cascadeDeleteUserData(env, id) {
   const [friendships, conversations, messages, stickers, calls, signals, appeals] = await Promise.all([
     readTable(env, 'friendships'), readTable(env, 'conversations'), readTable(env, 'messages'),
@@ -503,8 +609,14 @@ html[data-bt-theme="dark"] ::-webkit-scrollbar-track{background:transparent}
 const MEDIA_SHIM = `<script>(function(){
   if(window.__btMediaShim)return;window.__btMediaShim=1;
   var raw=window.fetch.bind(window);
-  var MAX_CHUNK=150000,VIDEO_CAP=200*1024*1024,IMAGE_CAP=30*1024*1024,GENERIC_CAP=200*1024*1024,SLICE=1536*1024;
-  window.__btUploadDataUrl=async function(d){
+  var MAX_CHUNK=150000,IMAGE_CAP=30*1024*1024,SLICE=1536*1024;
+  var KV_MAX=200*1024*1024,MAX_SEND=6*1024*1024*1024;
+  var BIG={enabled:false,partSize:32*1024*1024,maxBytes:MAX_SEND,ready:null};
+  window.__btBig=BIG;
+  BIG.ready=(async function(){try{var r=await raw('/bt-big/config');var j=await r.json();if(j&&j.ok){BIG.enabled=!!j.enabled;BIG.partSize=Number(j.partSize)||BIG.partSize;BIG.maxBytes=Number(j.maxBytes)||BIG.maxBytes}}catch(e){}return BIG})();
+  function isVideoFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('video/')===0)||/\.(mp4|mov|m4v|webm|mkv|avi|3gp|mts|m2ts)$/i.test(f.name||''))}
+  function isImageFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('image/')===0)||/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(f.name||''))}
+  async function uploadKVDataUrl(d){
     var id=(crypto.randomUUID?crypto.randomUUID():'m'+Date.now()+Math.random().toString(16).slice(2));
     var total=Math.ceil(d.length/MAX_CHUNK),mime=(d.slice(5,d.indexOf(';'))||'application/octet-stream');
     for(var i=0;i<total;i++){var r=await raw('/bt-media/'+id+'/'+i,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:d.slice(i*MAX_CHUNK,(i+1)*MAX_CHUNK)})});if(!r.ok)throw new Error('chunk failed')}
@@ -517,7 +629,7 @@ const MEDIA_SHIM = `<script>(function(){
     for(var i=0;i<u.length;i+=STEP){s+=String.fromCharCode.apply(null,u.subarray(i,i+STEP))}
     return btoa(s);
   }
-  window.__btUploadFileSlices=async function(file,onprog){
+  async function uploadKVFile(file,onprog){
     var id=(crypto.randomUUID?crypto.randomUUID():'v'+Date.now()+Math.random().toString(16).slice(2));
     var total=Math.ceil(file.size/SLICE),mime=file.type||'application/octet-stream';
     for(var i=0;i<total;i++){
@@ -529,6 +641,76 @@ const MEDIA_SHIM = `<script>(function(){
     var c=await raw('/bt-media/'+id+'/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({totalChunks:total,mimeType:mime,sizeBytes:file.size,chunkBytes:SLICE})});
     if(!c.ok)throw new Error('complete failed');
     return '/bt-media/'+id;
+  };
+  // ── 大容量（8K動画など）アップロード: R2 マルチパート ──
+  function btProg(label,pct,sub){
+    try{
+      var el=document.getElementById('__btBigBar');
+      if(!el){
+        el=document.createElement('div');el.id='__btBigBar';
+        el.style.cssText='position:fixed;left:10px;right:10px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:99998;background:#0d1626;color:#fff;border-radius:14px;padding:10px 13px;font:600 13px/1.45 system-ui,-apple-system,sans-serif;box-shadow:0 12px 34px rgba(0,0,0,.42)';
+        el.innerHTML='<div style="display:flex;justify-content:space-between;gap:10px"><span data-lbl></span><span data-pct></span></div><div style="height:6px;background:#26374f;border-radius:4px;margin-top:8px;overflow:hidden"><div data-bar style="height:100%;width:0%;background:#1877f2;transition:width .2s"></div></div><div data-sub style="opacity:.72;font-weight:500;font-size:11.5px;margin-top:6px"></div>';
+        document.body.appendChild(el);
+      }
+      el.querySelector('[data-lbl]').textContent=label||'';
+      el.querySelector('[data-pct]').textContent=pct>0?pct+'%':'';
+      el.querySelector('[data-bar]').style.width=Math.max(0,Math.min(100,pct||0))+'%';
+      el.querySelector('[data-sub]').textContent=sub||'';
+    }catch(e){}
+  }
+  function btProgEnd(){try{var el=document.getElementById('__btBigBar');if(el)el.remove()}catch(e){}}
+  function mb(n){return (n/1048576).toFixed(1)+'MB'}
+  async function btUploadBig(file,onprog){
+    var id=(crypto.randomUUID?crypto.randomUUID():'b'+Date.now()+Math.random().toString(16).slice(2));
+    var mime=file.type||'application/octet-stream';
+    var r0=await raw('/bt-big/'+id+'/init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mimeType:mime,name:file.name||'',sizeBytes:file.size})});
+    if(!r0.ok)throw new Error('アップロードを開始できませんでした (HTTP '+r0.status+')');
+    var j0=await r0.json();
+    var uploadId=j0.uploadId;
+    var PART=Math.max(5*1024*1024,Number(j0.partSize)||BIG.partSize);
+    var total=Math.max(1,Math.ceil(file.size/PART));
+    var parts=[],sent=0,t0=Date.now();
+    btProg('アップロードを準備中',0,'0% ・ '+mb(file.size)+' の動画');
+    for(var i=1;i<=total;i++){
+      var blob=file.slice((i-1)*PART,Math.min(i*PART,file.size));
+      var ok=false,err=null;
+      for(var a=0;a<4&&!ok;a++){
+        try{
+          var r=await raw('/bt-big/'+id+'/part/'+i+'?u='+encodeURIComponent(uploadId),{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:blob});
+          if(r.ok){var pj=await r.json();parts.push({partNumber:i,etag:pj.etag});ok=true;}
+          else{err=new Error('part '+i+' HTTP '+r.status);await new Promise(function(z){setTimeout(z,700*(a+1))});}
+        }catch(e){err=e;await new Promise(function(z){setTimeout(z,700*(a+1))});}
+      }
+      if(!ok){
+        try{await raw('/bt-big/'+id+'/abort',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uploadId:uploadId})})}catch(e){}
+        btProgEnd();
+        throw err||new Error('part '+i+' の送信に失敗しました');
+      }
+      sent+=blob.size;
+      var pct=Math.min(100,Math.round(100*sent/file.size));
+      var spd=sent/Math.max(0.5,(Date.now()-t0)/1000);
+      btProg('アップロード中',pct,mb(sent)+' / '+mb(file.size)+' ・ '+(spd/1048576).toFixed(1)+'MB/s ・ 残り約'+Math.max(1,Math.round((file.size-sent)/Math.max(1,spd)))+'秒');
+      if(onprog)onprog(pct);
+    }
+    var r1=await raw('/bt-big/'+id+'/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uploadId:uploadId,parts:parts,sizeBytes:file.size})});
+    if(!r1.ok){btProgEnd();throw new Error('完了処理に失敗しました (HTTP '+r1.status+')')}
+    btProg('アップロード完了',100,'送信を確定しています...');
+    setTimeout(btProgEnd,1200);
+    return '/bt-big/'+id;
+  }
+  window.__btUploadFileSlices=async function(file,onprog){
+    await BIG.ready;
+    if(BIG.enabled&&file.size>24*1024*1024)return await btUploadBig(file,onprog);
+    return await uploadKVFile(file,onprog);
+  };
+  window.__btUploadDataUrl=async function(d){
+    await BIG.ready;
+    if(BIG.enabled&&d.length>24*1024*1024){
+      var blob=await (await raw(d)).blob();
+      if(!blob||!blob.size)throw new Error('メディアを読み込めませんでした');
+      return await btUploadBig(blob,null);
+    }
+    return await uploadKVDataUrl(d);
   };
   window.fetch=async function(input,init){
     try{
@@ -563,12 +745,14 @@ const MEDIA_SHIM = `<script>(function(){
   async function sendMedia(file){
     if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
     try{
-      if(file.type.startsWith('image/')){
+      await BIG.ready;
+      if(isImageFile(file)){
         if(file.size>IMAGE_CAP){toast('画像が大きすぎます（30MBまで）');return}
         var d=await compressImage(file,2560,0.9);await sendMessage({type:'image',media_data:d});
-      }else if(file.type.startsWith('video/')){
-        if(file.size>VIDEO_CAP){toast('動画が大きすぎます（200MBまで）');return}
-        toast('動画をアップロード中... 0%');
+      }else if(isVideoFile(file)){
+        if(file.size>MAX_SEND){toast('動画が大きすぎます（最大'+(MAX_SEND/1073741824)+'GBまで）');return}
+        if(!BIG.enabled&&file.size>KV_MAX){toast('この動画は大きすぎます。サーバー側でR2（大容量ストレージ）を有効にすると最大6GBまで送信できます');return}
+        btProg('アップロードを準備中',0,'');
         var url=await window.__btUploadFileSlices(file,function(p){toast('動画をアップロード中... '+p+'%')});
         await sendMessage({type:'video',media_data:url});
       }else{toast('画像または動画ファイルを選んでください')}
@@ -576,11 +760,13 @@ const MEDIA_SHIM = `<script>(function(){
   }
   async function sendGeneric(file){
     if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
-    if(file.size>GENERIC_CAP){toast('ファイルが大きすぎます（200MBまで）');return}
+    await BIG.ready;
+    if(file.size>MAX_SEND){toast('ファイルが大きすぎます（最大'+(MAX_SEND/1073741824)+'GBまで）');return}
+    if(!BIG.enabled&&file.size>KV_MAX){toast('このファイルは大きすぎます。サーバー側でR2（大容量ストレージ）を有効にすると最大6GBまで送信できます');return}
     try{
-      if(file.type.startsWith('image/')||file.type.startsWith('video/')){await sendMedia(file);return}
+      if(isImageFile(file)||isVideoFile(file)){await sendMedia(file);return}
       var media;
-      if(file.size>8*1024*1024){toast('ファイルをアップロード中...');media=await window.__btUploadFileSlices(file)}
+      if(file.size>8*1024*1024){btProg('アップロードを準備中',0,'');media=await window.__btUploadFileSlices(file,function(p){btProg('アップロード中',p,'')})}
       else{media=await readFile(file)}
       await sendMessage({type:'file',media_data:media,file_name:file.name});
     }catch(e){console.error(e);toast('送信に失敗しました')}
@@ -976,6 +1162,8 @@ async function handler(request, env) {
   if (accountStatus) return accountStatus;
   const turnCredentials = await handleTurnCredentials(request, env, incoming, origin);
   if (turnCredentials) return turnCredentials;
+  const btBig = await handleBtBig(request, env, incoming, origin);
+  if (btBig) return btBig;
   const btMedia = await handleBtMedia(request, env, incoming);
   if (btMedia) return btMedia;
   if (incoming.pathname.startsWith('/tables/')) return handleTables(request, env, incoming, origin);
