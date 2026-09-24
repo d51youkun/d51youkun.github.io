@@ -281,7 +281,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const EARLY_THEME = `<script>try{if(localStorage.getItem('bt_dark_mode')==='1')document.documentElement.setAttribute('data-bt-theme','dark')}catch(e){}</script>`;
+const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"] .nav-rail,html[data-bt-theme="dark"] .main-panel,html[data-bt-theme="dark"] .chat-room,html[data-bt-theme="dark"] .app-shell{background:var(--bt-bg,#0e1724)!important;color:var(--bt-text,#edf5ff)!important}
 html[data-bt-theme="dark"] .chat-header,html[data-bt-theme="dark"] .chat-input-bar,html[data-bt-theme="dark"] .profile-card,html[data-bt-theme="dark"] .panel-header{background:var(--bt-white,#172333)!important;border-color:var(--bt-border,#2c415b)!important}
