@@ -91,6 +91,23 @@ async function handleBtMedia(request, env, url) {
   return null;
 }
 
+async function cascadeDeleteUserData(env, id) {
+  const [friendships, conversations, messages, stickers, calls, signals, appeals] = await Promise.all([
+    readTable(env, 'friendships'), readTable(env, 'conversations'), readTable(env, 'messages'),
+    readTable(env, 'stickers'), readTable(env, 'calls'), readTable(env, 'call_signals'), readTable(env, 'appeals')
+  ]);
+  const removedConversationIds = new Set(conversations.filter((c) => Array.isArray(c.member_ids) && c.member_ids.includes(id)).map((c) => c.id));
+  await Promise.all([
+    writeTable(env, 'friendships', friendships.filter((r) => r.user_id !== id && r.friend_id !== id)),
+    writeTable(env, 'conversations', conversations.filter((c) => !removedConversationIds.has(c.id))),
+    writeTable(env, 'messages', messages.filter((m) => m.sender_id !== id && !removedConversationIds.has(m.conversation_id))),
+    writeTable(env, 'stickers', stickers.filter((s) => s.user_id !== id)),
+    writeTable(env, 'calls', calls.filter((c) => c.caller_id !== id && c.callee_id !== id)),
+    writeTable(env, 'call_signals', signals.filter((s) => s.from_user_id !== id && s.to_user_id !== id)),
+    writeTable(env, 'appeals', appeals.filter((a) => a.user_id !== id))
+  ]);
+}
+
 async function handleTables(request, env, url, origin) {
   const parts = url.pathname.replace(/^\/tables\/?/, '').split('/').filter(Boolean);
   const table = parts[0] || '';
@@ -106,7 +123,9 @@ async function handleTables(request, env, url, origin) {
   }
   if (request.method === 'GET' && id) {
     const row = rows.find((item) => String(item.id) === id);
-    return row && !(table === 'users' && row.banned) ? json(row, 200, origin) : json({ error: 'not found' }, 404, origin);
+    if (!row) return json({ error: 'not found' }, 404, origin);
+    if (table === 'users' && (row.banned || row.deleted)) return json({ ...row, password: '' }, 200, origin);
+    return json(row, 200, origin);
   }
   if (request.method === 'POST' && !id) {
     const body = await request.json().catch(() => ({}));
@@ -137,25 +156,19 @@ async function handleTables(request, env, url, origin) {
     await writeTable(env, table, rows); return json(rows[index], 200, origin);
   }
   if (request.method === 'DELETE' && id) {
+    if (table === 'users') {
+      const index = rows.findIndex((item) => String(item.id) === id);
+      if (index >= 0) {
+        rows[index] = { ...rows[index], deleted: true, banned: true, password: '', ban_reason: rows[index].ban_reason || 'self', deleted_at: Date.now() };
+        await writeTable(env, 'users', rows);
+        await cascadeDeleteUserData(env, id);
+      }
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
     await writeTable(env, table, rows.filter((item) => String(item.id) !== id));
     if (table === 'conversations') {
       const messages = await readTable(env, 'messages');
       await writeTable(env, 'messages', messages.filter((m) => String(m.conversation_id) !== id));
-    }
-    if (table === 'users') {
-      const [friendships, conversations, messages, stickers, calls, signals] = await Promise.all([
-        readTable(env, 'friendships'), readTable(env, 'conversations'), readTable(env, 'messages'),
-        readTable(env, 'stickers'), readTable(env, 'calls'), readTable(env, 'call_signals')
-      ]);
-      const removedConversationIds = new Set(conversations.filter((c) => Array.isArray(c.member_ids) && c.member_ids.includes(id)).map((c) => c.id));
-      await Promise.all([
-        writeTable(env, 'friendships', friendships.filter((r) => r.user_id !== id && r.friend_id !== id)),
-        writeTable(env, 'conversations', conversations.filter((c) => !removedConversationIds.has(c.id))),
-        writeTable(env, 'messages', messages.filter((m) => m.sender_id !== id && !removedConversationIds.has(m.conversation_id))),
-        writeTable(env, 'stickers', stickers.filter((s) => s.user_id !== id)),
-        writeTable(env, 'calls', calls.filter((c) => c.caller_id !== id && c.callee_id !== id)),
-        writeTable(env, 'call_signals', signals.filter((s) => s.from_user_id !== id && s.to_user_id !== id))
-      ]);
     }
     return new Response(null, { status: 204, headers: corsHeaders(origin) });
   }
@@ -171,7 +184,7 @@ async function handleAdmin(request, env, url, origin) {
     return json({ ok: true, token, expiresIn: ADMIN_SESSION_TTL }, 200, origin);
   }
   if (!(await isAdmin(request, env))) return json({ ok: false, error: 'forbidden' }, 403, origin);
-  if (url.pathname === '/api/admin/users' && request.method === 'GET') return json({ ok: true, users: await readTable(env, 'users') }, 200, origin);
+  if (url.pathname === '/api/admin/users' && request.method === 'GET') return json({ ok: true, users: (await readTable(env, 'users')).filter((item) => !item.deleted) }, 200, origin);
   if (url.pathname === '/api/admin/conversations' && request.method === 'GET') {
     const [conversations, messages, users] = await Promise.all([readTable(env, 'conversations'), readTable(env, 'messages'), readTable(env, 'users')]);
     return json({ ok: true, conversations, messages, users }, 200, origin);
@@ -182,6 +195,23 @@ async function handleAdmin(request, env, url, origin) {
     if (index < 0) return json({ ok: false, error: 'not found' }, 404, origin);
     rows[index] = { ...rows[index], ...(await request.json().catch(() => ({}))), id: rows[index].id, updated_at: Date.now() };
     await writeTable(env, 'users', rows); return json({ ok: true, user: rows[index] }, 200, origin);
+  }
+  if (url.pathname === '/api/admin/appeals' && request.method === 'GET') return json({ ok: true, appeals: await readTable(env, 'appeals') }, 200, origin);
+  const appealMatch = url.pathname.match(/^\/api\/admin\/appeals\/([^/]+)$/);
+  if (appealMatch && request.method === 'PATCH') {
+    const rows = await readTable(env, 'appeals'); const index = rows.findIndex((item) => String(item.id) === appealMatch[1]);
+    if (index < 0) return json({ ok: false, error: 'not found' }, 404, origin);
+    rows[index] = { ...rows[index], ...(await request.json().catch(() => ({}))), id: rows[index].id, updated_at: Date.now() };
+    await writeTable(env, 'appeals', rows); return json({ ok: true, appeal: rows[index] }, 200, origin);
+  }
+  const userDelMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+  if (userDelMatch && request.method === 'DELETE') {
+    const rows = await readTable(env, 'users'); const index = rows.findIndex((item) => String(item.id) === userDelMatch[1]);
+    if (index < 0) return json({ ok: false, error: 'not found' }, 404, origin);
+    rows[index] = { ...rows[index], deleted: true, banned: true, password: '', ban_reason: rows[index].ban_reason || 'violation', deleted_at: Date.now() };
+    await writeTable(env, 'users', rows);
+    await cascadeDeleteUserData(env, userDelMatch[1]);
+    return json({ ok: true }, 200, origin);
   }
   return json({ ok: false, error: 'not found' }, 404, origin);
 }
@@ -194,7 +224,9 @@ async function handleAccountStatus(request, env, url, origin) {
   if (!user) return json({ ok: false, error: 'not found' }, 404, origin);
   return json({
     ok: true,
-    banned: Boolean(user.banned),
+    banned: Boolean(user.banned || user.deleted),
+    deleted: Boolean(user.deleted),
+    selfDeleted: Boolean(user.deleted && user.ban_reason === 'self'),
     reason: String(user.ban_reason || ''),
     message: String(user.ban_message || ''),
     appealMessage: String(user.ban_appeal_message || ''),
@@ -313,7 +345,7 @@ function adminPage() {
   const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BlueTalk 管理画面</title><style>body{margin:0;background:#f2f6fb;color:#24344d;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:24px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 8px 28px #2341  }.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e5edf7;padding:12px 0}button{border:0;border-radius:10px;padding:9px 13px;background:#1877f2;color:#fff;font-weight:700;cursor:pointer}button.gray{background:#e8eef7;color:#24344d}input{padding:10px;border:1px solid #c7d9ee;border-radius:9px}small{color:#687b96}.danger{color:#a52828}</style></head><body><main class="wrap"><div id="root"></div></main><script>
   const root=document.getElementById('root'), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function login(){root.innerHTML='<section class="card"><h1>BlueTalk 管理画面</h1><p>管理者コードを入力してください。</p><input id="pw" type="password" placeholder="管理者コード"><button id="go">ログイン</button><p id="msg" class="danger"></p></section>';document.getElementById('go').onclick=async()=>{const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});const j=await r.json();if(!r.ok){document.getElementById('msg').textContent='認証に失敗しました';return}localStorage.setItem('bluetalk_admin_token',j.token);dashboard()}}
-  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h})]);if(!ur.ok||!cr.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'</div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>'<details><summary>'+esc(x.name||x.id)+'</summary><div class="row">'+(by[x.id]||[]).join('<br>')+'</div></details>').join('')||'会話はありません'}
+  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr,ar]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h}),fetch('/api/admin/appeals',{headers:h}).catch(function(){return {ok:false}})]);if(!ur.ok||!cr.ok||!ar.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), ap=ar.ok?((await ar.json()).appeals||[]):[], names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section><section class="card"><h2>誤Ban申し立て（利用者から管理者へ）</h2><div id="appeals"></div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'<button data-act="pass">パスワード変更</button><button data-act="del">強制削除</button></div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else if(b.dataset.act==='pass'){const np=prompt('このアカウントの新しいパスワードを入力してください（パスワードを強制変更）','');if(!np||!np.trim())return;body={password:np}}else if(b.dataset.act==='del'){if(!confirm('このアカウントを強制削除しますか？利用者の全データ（会話・メッセージ等）が削除され、元に戻せません。'))return;await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE',headers:h});dashboard();return}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>'<details><summary>'+esc(x.name||x.id)+'</summary><div class="row">'+(by[x.id]||[]).join('<br>')+'</div></details>').join('')||'会話はありません'};document.getElementById('appeals').innerHTML=ap.slice().reverse().map(x=>'<div class="row"><b>'+esc(names[x.user_id]||x.user_id)+'</b><span style="display:block;width:100%">'+esc(x.message)+'</span>'+(x.status==='resolved'?'<small>対応済み</small>':'')+'<button data-ap="resolve" data-aid="'+esc(x.id)+'">対応済みにする</button><button data-ap="reply" data-uid="'+esc(x.user_id)+'">返信する</button></div>').join('')||'申し立てはありません';document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=async()=>{if(b.dataset.ap==='resolve'){await fetch('/api/admin/appeals/'+encodeURIComponent(b.dataset.aid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({status:'resolved'})})}else{const msg=prompt('返信内容（利用者の削除通知画面に表示されます）','');if(msg===null)return;await fetch('/api/admin/users/'+encodeURIComponent(b.dataset.uid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ban_appeal_message:msg,admin_override:true})})}dashboard()})
   if(localStorage.getItem('bluetalk_admin_token'))dashboard();else login();
   </script></body></html>`;
   return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
@@ -593,11 +625,68 @@ const GROUP_SCRIPT = `<script>(function(){
 })();
 </script>`;
 
+const BAN_SCRIPT = `<script>(function(){
+  if(window.__btBan)return;window.__btBan=1;
+  var CACHE_KEY='bt_ban_active';
+  function myId(){try{return localStorage.getItem('bt_current_user')}catch(e){return null}}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function lock(){window.__btBanActive=1}
+  try{(function(){var d=Object.getOwnPropertyDescriptor(Storage.prototype,'removeItem');if(d&&d.configurable){var orig=d.value;Object.defineProperty(Storage.prototype,'removeItem',{value:function(k){if(k==='bt_current_user'&&window.__btBanActive)return;return orig.call(this,k)},writable:true,configurable:true})}})()}catch(e){}
+  var css=document.createElement('style');
+  css.textContent='#btBanScreen{position:fixed;inset:0;z-index:2147483647;background:rgba(7,11,18,.97);display:none;align-items:center;justify-content:center;padding:16px;font-family:system-ui,-apple-system,sans-serif}#btBanScreen .bt-ban-card{background:#0e1421;color:#fff;border:2px solid #42536a;border-radius:18px;max-width:430px;width:100%;max-height:88vh;overflow:auto;padding:26px 22px;text-align:center;box-shadow:0 16px 60px rgba(0,0,0,.8)}#btBanScreen .bt-ban-icon{font-size:40px;margin-bottom:6px}#btBanScreen h2{margin:4px 0 8px;font-size:19px}#btBanScreen .bt-ban-lead{color:#ffd9d9;font-weight:700;font-size:14px;line-height:1.7;margin:0 0 12px}#btBanScreen .bt-ban-box{background:#101827;border:1px solid #2a3950;border-radius:10px;padding:10px 12px;text-align:left;font-size:13px;line-height:1.6;color:#e7eef7;margin:8px 0}#btBanScreen .bt-ban-box b{color:#9fb2c9;font-size:12px}#btBanScreen .bt-ban-appeal{border-top:1px solid #2a3950;margin-top:14px;padding-top:12px;text-align:left}#btBanScreen .bt-ban-appeal p{font-size:13px;color:#c7d3e2;margin:0 0 8px}#btBanScreen textarea{width:100%;box-sizing:border-box;min-height:84px;background:#05070c;color:#fff;border:2px solid #42536a;border-radius:10px;padding:10px;font-size:14px;resize:vertical}#btBanScreen button{width:100%;margin-top:10px;background:#000!important;color:#fff!important;border:2px solid #fff!important;border-radius:10px;padding:12px;font-size:15px;font-weight:700;cursor:pointer}#btBanScreen #btAppealOk{color:#8fd49f;font-size:13px;margin:8px 0 0}';
+  document.head.appendChild(css);
+  function ensure(){var s=document.getElementById('btBanScreen');if(s)return s;s=document.createElement('div');s.id='btBanScreen';document.body.appendChild(s);return s}
+  function box(t,b){return b?'<div class="bt-ban-box"><b>'+esc(t)+'</b><br>'+esc(b)+'</div>':''}
+  function show(st){
+    var s=ensure();lock();
+    try{sessionStorage.setItem(CACHE_KEY,'1')}catch(e){}
+    var self=st&&st.selfDeleted;
+    var title=self?'アカウントを削除しました':'アカウントが削除されました';
+    var lead=self?'このアカウントは削除されました。':'利用規約に反したため、このアカウントは削除されました。';
+    var h='<div class="bt-ban-card"><div class="bt-ban-icon">&#9940;</div><h2>'+esc(title)+'</h2><p class="bt-ban-lead">'+esc(lead)+'</p>';
+    h+=box('違反内容',st&&st.reason);
+    h+=box('管理者からのメッセージ',st&&st.message);
+    h+=box('管理者からの返信',st&&st.appealMessage);
+    if(!self){
+      h+='<div class="bt-ban-appeal"><p>誤った削除・停止と思われる場合は、管理者へメッセージを送れます。</p>';
+      h+='<textarea id="btAppealText" maxlength="2000" placeholder="状況を詳しくご記入ください"></textarea>';
+      h+='<button id="btAppealSend" type="button">管理者へメッセージを送る</button>';
+      h+='<p id="btAppealOk" style="display:none">送信しました。管理者からの返信をお待ちください。</p></div>';
+    }
+    h+='</div>';
+    s.innerHTML=h;s.style.display='flex';
+    var btn=document.getElementById('btAppealSend');
+    if(btn)btn.addEventListener('click',async function(){
+      var ta=document.getElementById('btAppealText');var v=ta?ta.value.trim():'';
+      if(!v){if(typeof showToast==='function')showToast('メッセージを入力してください');else alert('メッセージを入力してください');return}
+      btn.disabled=true;btn.textContent='送信中...';
+      try{
+        await fetch('/tables/appeals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:myId()||'',message:v.slice(0,2000),status:'open',created_at:Date.now()})});
+        var ok=document.getElementById('btAppealOk');if(ok)ok.style.display='block';btn.textContent='送信しました';ta.value='';ta.disabled=true;
+      }catch(e){btn.disabled=false;btn.textContent='管理者へメッセージを送る'}
+    });
+  }
+  function hide(){try{if(sessionStorage.getItem(CACHE_KEY))sessionStorage.removeItem(CACHE_KEY)}catch(e){}window.__btBanActive=0;var s=document.getElementById('btBanScreen');if(s)s.style.display='none'}
+  async function check(){
+    var id=myId();if(!id)return;
+    var r;try{r=await fetch('/api/account-status/'+encodeURIComponent(id),{cache:'no-store'})}catch(e){return}
+    if(r.status===404){show({});return}
+    var j=null;try{j=await r.json()}catch(e){return}
+    if(j&&j.ok&&(j.banned||j.deleted))show(j);
+    else if(j&&j.ok&&!j.banned&&!j.deleted)hide();
+  }
+  try{if(sessionStorage.getItem(CACHE_KEY)){lock();var s=ensure();s.innerHTML='<div class="bt-ban-card"><div class="bt-ban-icon">&#9940;</div><h2>アカウントが削除されました</h2><p class="bt-ban-lead">利用規約に反したため、このアカウントは削除されました。</p></div>';s.style.display='flex'}}catch(e){}
+  window.__btBanDebug={show:show,check:check};
+  var t=null;function boot(){if(t)clearInterval(t);check();t=setInterval(check,45000)}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+})();
+</script>`;
+
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + BAN_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {

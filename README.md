@@ -59,16 +59,19 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 ### 2.3 管理API `/api/admin/*`
 
 - `POST /api/admin/login` — `{password}` をSHA-256化し、worker内定数のハッシュと照合。成功でセッショントークン(UUID×2連結)を発行、KV `bluetalk:admin-session:<token>` に **TTL 8時間** で保存
-- `GET /api/admin/users` — 全ユーザー(banned含む)
+- `GET /api/admin/users` — 全ユーザー(banned含む、deleted除く)
 - `GET /api/admin/conversations` — 会話 + 全メッセージ + ユーザー(監視用)
-- `PATCH /api/admin/users/<id>` — 任意フィールド更新(verified / banned / ban_reason / ban_message / ban_appeal_message / title 等)
+- `PATCH /api/admin/users/<id>` — 任意フィールド更新(verified / banned / ban_reason / ban_message / ban_appeal_message / title / **password(パスワード強制変更)** 等)
+- `DELETE /api/admin/users/<id>` — **強制アカウント削除**。ユーザー行を削除済みトゥームストン化(`deleted:true, banned:true, password:''`)し、友情・会話・メッセージ・スタンプ・通話・シグナル・appealを全カスケード削除
+- `GET /api/admin/appeals` — 利用者からの誤Ban申し立て一覧
+- `PATCH /api/admin/appeals/<id>` — 申し立てのステータス更新(`{status:'resolved'}` で対応済み)
 - 認証は `Authorization: Bearer <token>` または `X-Admin-Token` ヘッダ
 
 ### 2.4 その他のAPI
 
 | エンドポイント | 仕様 |
 |---|---|
-| `GET /api/account-status/<userId>` | Ban状態照合。`{ok, banned, reason, message, appealMessage, updatedAt}` |
+| `GET /api/account-status/<userId>` | Ban・削除状態照合。`{ok, banned, deleted, selfDeleted, reason, message, appealMessage, updatedAt}`。Ban/削除済みアカウントのログイン端末で削除通知画面(BAN_SCRIPT)を表示するために45秒ごとにポーリングされる |
 | `GET /api/turn-credentials` | WebRTC用TURN資格情報。Secrets `METERED_TURN_ENDPOINT` + `METERED_TURN_API_KEY` があれば **metered.live の短期資格情報**(https かつ `*.metered.live` のみ許可、最大16サーバーに制限)を、無ければ共有フォールバック(openrelay.metered.ca STUN/TURN)を返す |
 | `POST /api/media` | メディアアップロード。`{data: dataURL, mimeType, name}` を **180,000字ずつのチャンク** に分割し bluechat-sync Worker へ転送後 complete。dataURL長 **12MB超は413**(バイナリ換算 約9MB、UI表示上は8MB)。返値 `{uploadId, url: "/media/<id>"}` |
 | `GET /media/<id>` | bluechat-sync からblobを取得して実バイトで返す。`Cache-Control: public, max-age=31536000, immutable` |
@@ -86,6 +89,8 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 5. **画像フォールバック** — 読み込み失敗imgをdicebearアバターに差し替え
 6. `</head>` 直前に PWA用 `<link rel="manifest">` と apple-touch-icon + `/sw.js` 登録
 7. **グループトーク・長押し操作(GROUP_SCRIPT)** — 「新しいトーク」モーダルに「👥 グループを作る」を追加(グループ名+複数友だち選択で `type:'group'` の会話を作成)。グループチャットではヘッダーに 👤 メンバーボタン(メンバー一覧モーダル)を表示し、他人のメッセージに送信者名ラベルを付与。トークリストの**長押し(550ms)・右クリック**でアクションシート: グループは「メンバーを見る / グループから脱退」、1対1トークは「トークを削除」。削除は `hidden_for` による**自分側のみの非表示**(相手の履歴は保持。相手からの新着メッセージで自動的に再表示)。両者が削除、または最後のメンバーが脱退した場合は会話+メッセージを完全削議(DELETE conversations でメッセージもカスケード削除)
+8. **削除通知画面・誤Ban申し立て(BAN_SCRIPT)** — 全ページで45秒ごとに `/api/account-status/<自分のid>` をポーリングし、**Ban / 強制削除されたアカウントのログイン端末**に即座(検知後)・全画面の削除通知を表示: 「**利用規約に反したため、このアカウントは削除されました。**」+ 違反内容(ban_reason)+ 管理者からのメッセージ(ban_message)+ 管理者からの返信(ban_appeal_message)。画面内のフォームから**誤Banと思われる場合に管理者へメッセージ(appeals テーブル)を送信可能**→ 管理画面の「誤Ban申し立て」セクションに表示(対応済み化・返信ボタン)。自己削除(設定→アカウント削除)の場合は「このアカウントは削除されました。」の中立文言。検知後は `localStorage.removeItem('bt_current_user')` をロックし、画面がリロード後も維持(sessionStorageキャッシュで即表示)。解除(Ban解除)されると自動で画面が消えアプリに復帰
+9. **削除トゥームストン** — `DELETE /tables/users/<id>`(自己削除・管理の強制削除とも)は行を物理削除せず `deleted:true, banned:true, password:''` にする。単一GETのみ削済み行を返す(password空)ため、ログイン端末のapp.jsブートが404で落ちず**削除通知画面が確実に表示**される(index↔appのリダイレクトループを回避)。一覧・ログイン・管理画面では削除済み行は非表示
 
 **削除された重複注入**(gensparkspace UIがネイティブ実装済みのため): 規約モーダル(termsModal) / 通知許可・アカウント削除ボタン(requestNotifyBtn・deleteAccountBtn) / 完全一致ID検索(friendSearchInput) / 自分のQR(myQrModal・showMyQrBtn) / スタンプ帳(stickerGrid等) / コンポーザー3ボタントレイ(attachMediaBtn等と競合) / ファイル送信フォールバック / ダーク・レスポンシブCSS(darkModeToggle・@media自前実装と競合) / 通話・メディアのfetchフック(gensparkspace app.jsはcall_signals・/api/media・RTCPeerConnectionを未使用のため死にコード)。
 
@@ -99,8 +104,9 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 
 | テーブル | 主なフィールド |
 |---|---|
-| `users` | `id, username, password, display_name, avatar_url, verified, title, banned, ban_reason, ban_message, ban_appeal_message, profile_changed_at, created_at, updated_at` |
+| `users` | `id, username, password, display_name, avatar_url, verified, title, banned, ban_reason, ban_message, ban_appeal_message, deleted, deleted_at, profile_changed_at, created_at, updated_at` |
 | `friendships` | `id, user_id, friend_id` (相互に2行) |
+| `appeals` | `id, user_id, message, status(open/resolved), created_at` (誤Ban申し立て: 削除通知画面のフォーム→管理画面) |
 | `conversations` | `id, type(direct/group), name, member_ids[], hidden_for[](自分側で削除済みのuser id), last_message, last_message_at` |
 | `messages` | `id, conversation_id, sender_id, type(text/image/video/file/sticker…), content, attachment_url, file_name, mime_type, created_at` |
 | `stickers` | `id, user_id, image_url(dataURL可), name` |
