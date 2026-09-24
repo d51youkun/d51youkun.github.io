@@ -75,17 +75,18 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 | `POST /api/call-gateway/signal` | 通話シグナリング中継。`{mode: voice|video, call_id, from, to, signal_type, payload}` を受け、`call_id` のハッシュ(`hash*31+文字` 方式)で担当サーバーへ振り分け: **voice → bluechat-call-1〜3 / video → bluechat-video-1** |
 | `GET /api/call-gateway/signals/<userId>?mode=&call_id=` | 自分宛てシグナル取得(同じ振り分け規則) |
 
-### 2.5 HTML注入機能(旧URL実装分・全保持)
+### 2.5 HTML注入機能(重複排除済み)
 
-プロキシしたHTMLの `</body>` 直前に以下を注入(順序どおり)。**gensparkspaceに無い旧URL独自機能はここに実装されている**:
+プロキシしたHTMLの `</body>` 直前に注入するのは**旧URL独自の4機能のみ**(2026-09-24に重複分を削除済み):
 
-1. **APP_ENHANCEMENTS** — 規約同意モーダル(v2、`bluetalk_terms_v2` 済フラグ)/ プロフィール補助(通知許可・アカウント削除)/ 管理者トリガー(**キー入力 `d51-498go`** で `/admin.html` へ)/ 完全一致ID検索 / 自分のQR表示 / 認証バッジ(✓ Premium)とゴールド称号表示 / スタンプ帳インポート(GIF/WebP/APNG対応)/ 通話シグナル・ファイル送信のフック
-2. **AVATAR_LEAK_GUARD** — メッセージバブルに漏れるアバターHTML断片を掃除
-3. **RECOVERY_SCRIPT** — メディア・通話シグナリングの復旧フォールバック
-4. **CALL_FETCH_GATE** — fetchを横取りし `/tables/call_signals` / `/api/call-gateway/*` を直接シグナリングサーバーへ転送
-5. **RESPONSIVE_UI** — ダークテーマ変数 / 480px以下でボトムナビ化 / QRシート / Ban詳細表示
-6. **COMPOSER_UI** — 入力欄上部に「💬 チャット / 😊 スタンプ / 🖼️ 写真・ファイル」の3ボタントレイ
-7. `</head>` 直前に PWA用 `<link rel="manifest">` と apple-touch-icon
+1. **管理者トリガー** — キー入力 `d51-498go` で `/admin.html` へ / プロフィール名クリックでも管理画面導線
+2. **認証バッジ・ゴールド称号表示** — `allUsers` の `verified` / `title` を名前横に ✓ / 称号表示(gensparkspace UIは未実装のため注入で提供)
+3. **画像フォールバック** — 読み込み失敗imgをdicebearアバターに差し替え
+4. `</head>` 直前に PWA用 `<link rel="manifest">` と apple-touch-icon + `/sw.js` 登録
+
+**削除された重複注入**(gensparkspace UIがネイティブ実装済みのため): 規約モーダル(termsModal) / 通知許可・アカウント削除ボタン(requestNotifyBtn・deleteAccountBtn) / 完全一致ID検索(friendSearchInput) / 自分のQR(myQrModal・showMyQrBtn) / スタンプ帳(stickerGrid等) / コンポーザー3ボタントレイ(attachMediaBtn等と競合) / ファイル送信フォールバック / ダーク・レスポンシブCSS(darkModeToggle・@media自前実装と競合) / 通話・メディアのfetchフック(gensparkspace app.jsはcall_signals・/api/media・RTCPeerConnectionを未使用のため死にコード)。
+
+**注意**: gensparkspace UIは通話UI(callOverlay等)を持つが**シグナリング実装が未着**。Worker側の `/api/call-gateway/*` とシグナリングサーバー群は旧クライアント(Pagesバンドル)互換のため維持中。
 
 ### 2.6 CORS
 
