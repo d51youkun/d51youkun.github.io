@@ -1,3 +1,10 @@
-name = "bluechat"
+name = "bluetalk"
 compatibility_date = "2026-09-21"
 pages_build_output_dir = "dist"
+
+# bluetalk.by-youhei.workers.dev (Worker) と同じ bluetalk-kv をバインドし、
+# ユーザー・トーク・友だち・スタンプなどのデータをそのまま引き継ぐ。
+# ワークフローが実行時に実際のネームスペースIDへ置換する。
+kv_namespaces = [
+  { binding = "BLUETALK_KV", id = "00000000000000000000000000000000" }
+]
