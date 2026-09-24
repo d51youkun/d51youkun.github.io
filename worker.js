@@ -69,24 +69,72 @@ async function handleBtMedia(request, env, url) {
     const body = await request.json().catch(() => ({}));
     const total = Math.max(1, Number(body.totalChunks || 1));
     const mime = String(body.mimeType || 'application/octet-stream').slice(0, 120);
-    await env.BLUETALK_KV.put(`bluetalk:media:${id}:meta`, JSON.stringify({ totalChunks: total, mimeType: mime, created_at: Date.now() }));
+    await env.BLUETALK_KV.put(`bluetalk:media:${id}:meta`, JSON.stringify({ totalChunks: total, mimeType: mime, sizeBytes: Number(body.sizeBytes || 0), chunkBytes: Number(body.chunkBytes || 0), created_at: Date.now() }));
     return json({ ok: true, url: `/bt-media/${id}` }, 201, undefined);
   }
   if (request.method === 'GET' && !url.pathname.endsWith('/complete') && store[2] === undefined) {
     const metaRaw = await env.BLUETALK_KV.get(`bluetalk:media:${id}:meta`);
     if (!metaRaw) return new Response('Not found', { status: 404 });
     const meta = JSON.parse(metaRaw);
-    const parts = [];
-    for (let i = 0; i < meta.totalChunks; i++) {
-      const c = await env.BLUETALK_KV.get(`bluetalk:media:${id}:${i}`);
-      if (c === null) return new Response('Not found', { status: 404 });
-      parts.push(c);
+    const headers0 = { 'Content-Type': meta.mimeType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Accept-Ranges': 'bytes' };
+    const totalBytes = Number(meta.sizeBytes || 0);
+    const chunkBytes = Number(meta.chunkBytes || 0);
+    if (!totalBytes || !chunkBytes) {
+      const parts = [];
+      for (let i = 0; i < meta.totalChunks; i++) {
+        const c = await env.BLUETALK_KV.get(`bluetalk:media:${id}:${i}`);
+        if (c === null) return new Response('Not found', { status: 404 });
+        parts.push(c);
+      }
+      const data = parts.join('');
+      const comma = data.indexOf(',');
+      const encoded = comma >= 0 ? data.slice(comma + 1) : '';
+      const bytes = data.slice(0, comma).includes(';base64') ? Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(encoded));
+      return new Response(bytes, { headers: headers0 });
     }
-    const data = parts.join('');
-    const comma = data.indexOf(',');
-    const encoded = comma >= 0 ? data.slice(comma + 1) : '';
-    const bytes = data.slice(0, comma).includes(';base64') ? Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(encoded));
-    return new Response(bytes, { headers: { 'Content-Type': meta.mimeType, 'Cache-Control': 'public, max-age=31536000, immutable' } });
+    const getChunk = async (i) => {
+      for (let t = 0; t < 3; t++) {
+        const c = await env.BLUETALK_KV.get(`bluetalk:media:${id}:${i}`);
+        if (c !== null) return c;
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      return null;
+    };
+    const decodeChunk = (raw0, idx) => {
+      let s = raw0;
+      if (idx === 0) { const cm = s.indexOf(','); if (cm >= 0) s = s.slice(cm + 1); }
+      const bin = atob(s);
+      return Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+    };
+    let start = 0, end = totalBytes - 1, partial = false;
+    const range = request.headers.get('Range');
+    const rm = range ? /bytes=(\d*)-(\d*)/.exec(range) : null;
+    if (rm) {
+      if (rm[1] === '' && rm[2]) { start = Math.max(0, totalBytes - Number(rm[2])); end = totalBytes - 1; }
+      else { start = Number(rm[1] || 0); end = rm[2] ? Math.min(Number(rm[2]), totalBytes - 1) : totalBytes - 1; }
+      if (Number.isNaN(start) || start > end || start >= totalBytes) return new Response('Range not satisfiable', { status: 416, headers: { 'Content-Range': `bytes */${totalBytes}` } });
+      partial = true;
+    }
+    const i0 = Math.floor(start / chunkBytes), iN = Math.floor(end / chunkBytes);
+    let chunkStart = i0 * chunkBytes, ci = i0;
+    const stream = new ReadableStream({
+      async pull(ctrl) {
+        if (ci > iN) { ctrl.close(); return; }
+        const raw0 = await getChunk(ci);
+        if (raw0 === null) { ctrl.error(new Error('media chunk missing')); return; }
+        let bytes = decodeChunk(raw0, ci);
+        const cs = chunkStart; chunkStart += bytes.length; ci++;
+        if (partial) {
+          const s2 = Math.max(cs, start), e2 = Math.min(cs + bytes.length - 1, end);
+          if (e2 < s2) return;
+          bytes = bytes.slice(s2 - cs, e2 - cs + 1);
+        }
+        ctrl.enqueue(bytes);
+      }
+    });
+    if (partial) { headers0['Content-Range'] = `bytes ${start}-${end}/${totalBytes}`; headers0['Content-Length'] = String(end - start + 1); }
+    else headers0['Content-Length'] = String(totalBytes);
+    return new Response(stream, { status: partial ? 206 : 200, headers: headers0 });
   }
   return null;
 }
@@ -118,7 +166,10 @@ async function handleTables(request, env, url, origin) {
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 100), 1), 1000);
     const page = Math.max(Number(url.searchParams.get('page') || 1), 1);
     const start = (page - 1) * limit;
-    const visibleRows = table === 'users' ? rows.filter((item) => !item.banned) : rows;
+    let base = rows;
+    const btConv = table === 'messages' ? url.searchParams.get('bt_conv') : null;
+    if (btConv) base = rows.filter((item) => String(item.conversation_id) === btConv);
+    const visibleRows = table === 'users' ? base.filter((item) => !item.banned) : base;
     return json({ data: visibleRows.slice(start, start + limit), total: visibleRows.length, page, limit }, 200, origin);
   }
   if (request.method === 'GET' && id) {
@@ -402,7 +453,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-D';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-E';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -447,12 +498,30 @@ html[data-bt-theme="dark"] ::-webkit-scrollbar-track{background:transparent}
 const MEDIA_SHIM = `<script>(function(){
   if(window.__btMediaShim)return;window.__btMediaShim=1;
   var raw=window.fetch.bind(window);
-  var MAX_CHUNK=150000,FILE_CAP=12*1024*1024;
+  var MAX_CHUNK=150000,VIDEO_CAP=200*1024*1024,IMAGE_CAP=30*1024*1024,GENERIC_CAP=200*1024*1024,SLICE=1536*1024;
   window.__btUploadDataUrl=async function(d){
     var id=(crypto.randomUUID?crypto.randomUUID():'m'+Date.now()+Math.random().toString(16).slice(2));
     var total=Math.ceil(d.length/MAX_CHUNK),mime=(d.slice(5,d.indexOf(';'))||'application/octet-stream');
     for(var i=0;i<total;i++){var r=await raw('/bt-media/'+id+'/'+i,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:d.slice(i*MAX_CHUNK,(i+1)*MAX_CHUNK)})});if(!r.ok)throw new Error('chunk failed')}
     var c=await raw('/bt-media/'+id+'/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({totalChunks:total,mimeType:mime})});
+    if(!c.ok)throw new Error('complete failed');
+    return '/bt-media/'+id;
+  };
+  function b64buf(buf){
+    var u=new Uint8Array(buf),s='',STEP=0x8000;
+    for(var i=0;i<u.length;i+=STEP){s+=String.fromCharCode.apply(null,u.subarray(i,i+STEP))}
+    return btoa(s);
+  }
+  window.__btUploadFileSlices=async function(file,onprog){
+    var id=(crypto.randomUUID?crypto.randomUUID():'v'+Date.now()+Math.random().toString(16).slice(2));
+    var total=Math.ceil(file.size/SLICE),mime=file.type||'application/octet-stream';
+    for(var i=0;i<total;i++){
+      var buf=await file.slice(i*SLICE,(i+1)*SLICE).arrayBuffer();
+      var r=await raw('/bt-media/'+id+'/'+i,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:'data:'+mime+';base64,'+b64buf(buf)})});
+      if(!r.ok)throw new Error('chunk failed');
+      if(onprog&&i%5===0)onprog(Math.round(100*(i+1)/total));
+    }
+    var c=await raw('/bt-media/'+id+'/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({totalChunks:total,mimeType:mime,sizeBytes:file.size,chunkBytes:SLICE})});
     if(!c.ok)throw new Error('complete failed');
     return '/bt-media/'+id;
   };
@@ -469,6 +538,8 @@ const MEDIA_SHIM = `<script>(function(){
             init={...init,body:JSON.stringify(b)};
           }
         }
+      }else if(!init&&typeof input==='string'&&input.indexOf('/tables/messages')===0&&(typeof activeConversationId!=='undefined')&&activeConversationId){
+        input=input+(input.indexOf('?')>=0?'&':'?')+'bt_conv='+encodeURIComponent(activeConversationId);
       }
     }catch(e){console.warn('[bt] media upload failed',e)}
     return raw(input,init);
@@ -486,25 +557,33 @@ const MEDIA_SHIM = `<script>(function(){
   window.compressImageFile=function(f,maxDim,q){return compressImage(f,maxDim||2560,q||0.9)};
   async function sendMedia(file){
     if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
-    if(file.size>FILE_CAP){toast('ファイルが大きすぎます（12MBまで）');return}
     try{
-      if(file.type.startsWith('image/')){var d=await compressImage(file,2560,0.9);await sendMessage({type:'image',media_data:d})}
-      else if(file.type.startsWith('video/')){toast('動画を送信しています...（大きいファイルは時間がかかります）');var d2=await readFile(file);await sendMessage({type:'video',media_data:d2})}
-      else{toast('画像または動画ファイルを選んでください')}
+      if(file.type.startsWith('image/')){
+        if(file.size>IMAGE_CAP){toast('画像が大きすぎます（30MBまで）');return}
+        var d=await compressImage(file,2560,0.9);await sendMessage({type:'image',media_data:d});
+      }else if(file.type.startsWith('video/')){
+        if(file.size>VIDEO_CAP){toast('動画が大きすぎます（200MBまで）');return}
+        toast('動画をアップロード中... 0%');
+        var url=await window.__btUploadFileSlices(file,function(p){toast('動画をアップロード中... '+p+'%')});
+        await sendMessage({type:'video',media_data:url});
+      }else{toast('画像または動画ファイルを選んでください')}
     }catch(e){console.error(e);toast('送信に失敗しました')}
   }
   async function sendGeneric(file){
     if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
-    if(file.size>FILE_CAP){toast('ファイルが大きすぎます（12MBまで）');return}
+    if(file.size>GENERIC_CAP){toast('ファイルが大きすぎます（200MBまで）');return}
     try{
       if(file.type.startsWith('image/')||file.type.startsWith('video/')){await sendMedia(file);return}
-      var d=await readFile(file);await sendMessage({type:'file',media_data:d,file_name:file.name});
+      var media;
+      if(file.size>8*1024*1024){toast('ファイルをアップロード中...');media=await window.__btUploadFileSlices(file)}
+      else{media=await readFile(file)}
+      await sendMessage({type:'file',media_data:media,file_name:file.name});
     }catch(e){console.error(e);toast('送信に失敗しました')}
   }
   async function importStickers(files,packName){
     if(!files||!files.length){toast('画像を選択してください');return}
     var ok=0;
-    for(var i=0;i<files.length;i++){var f=files[i];if(!f.type.startsWith('image/'))continue;if(f.size>FILE_CAP){toast((f.name||'ファイル')+' は12MBを超えています');continue}
+    for(var i=0;i<files.length;i++){var f=files[i];if(!f.type.startsWith('image/'))continue;if(f.size>12*1024*1024){toast((f.name||'ファイル')+' は12MBを超えています');continue}
       try{var d=await readFile(f);await API.create('stickers',{user_id:myId(),image_url:d,name:packName||'マイスタンプ'});ok++}catch(e){}}
     if(ok){if(typeof refreshStickers==='function')await refreshStickers();toast(ok+'枚取り込みました')}
   }
@@ -869,6 +948,14 @@ async function enhanceHtml(response) {
 }
 
 export default { async fetch(request, env) {
+  try {
+    return await handler(request, env);
+  } catch (e) {
+    try { return json({ error: 'internal error' }, 500, request.headers.get('Origin') || new URL(request.url).origin); } catch (e2) { return new Response('error', { status: 500 }); }
+  }
+} };
+
+async function handler(request, env) {
   const incoming = new URL(request.url); const origin = request.headers.get('Origin') || incoming.origin;
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
   if (incoming.pathname === '/manifest.webmanifest') return pwaManifest();
@@ -890,4 +977,4 @@ export default { async fetch(request, env) {
   if (incoming.pathname.startsWith('/api/admin/')) return handleAdmin(request, env, incoming, origin);
   const upstream = new URL(UPSTREAM_ORIGIN); upstream.pathname = incoming.pathname; upstream.search = incoming.search;
   return enhanceHtml(await fetch(new Request(upstream.toString(), request), { redirect: 'manual' }));
-} };
+}
