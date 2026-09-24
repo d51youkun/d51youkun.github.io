@@ -321,7 +321,7 @@ async function handleMedia(request, env, url, origin) {
 }
 
 async function handleLineStickers(request, env, url, origin) {
-  const m = url.pathname.match(/^\/api\/line-stickers\/(\d{6,12})$/);
+  const m = url.pathname.match(/^\/api\/line-stickers\/(\d{4,12})$/);
   if (!m) return null;
   const pid = m[1];
   const cacheKey = `bluetalk:linepack:${pid}`;
