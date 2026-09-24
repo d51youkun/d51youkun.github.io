@@ -82,7 +82,7 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 1. **管理者トリガー** — キー入力 `d51-498go` で `/admin.html` へ / プロフィール名クリックでも管理画面導線
 2. **認証バッジ・ゴールド称号表示** — `allUsers` の `verified` / `title` を名前横に ✓ / 称号表示(gensparkspace UIは未実装のため注入で提供)
 3. **WebRTC通話シグナリング(CALL_SCRIPT)** — gensparkspace UIは通話UI(callOverlay・着信Toast・リンゴン音)を持つがシグナリング未実装のため、Worker注入で完全実装: `voiceCallBtn`/`videoCallBtn` 発信(calls行作成→offer送信)→ `acceptCallBtn`/`rejectCallBtn` 着信(calls ポーリング3秒→offer取得→answer)→ ICE candidate交換(`candidate`)→ `endCallBtn`/`bye` 終了。ミュート・ビデオ切替、45秒無応答タイムアウト、二重着信ガード付き。シグナルはブラウザから bluechat-call-1..3 / bluechat-video-1 へ**直接送受信**(call_idのハッシュでサーバー選定、旧クライアントと同一規約。Worker経由の `/api/call-gateway/*` / `/api/media` プロキシはWorker→Worker通信がCloudflareセキュリティ1042でブロックされるためクライアント直結が正規経路)
-4. **ダークモード補完(DARK_CSS + EARLY_THEME)** — トグル機構(属性 `data-bt-theme` + `bt_dark_mode`)は本体UIのものを使用し、配色ギャップのみ補完: ナビ・入力バー・通話オーバーレイ・Toast・ログインカード等。**早期適用スクリプト**が全ページの初描画前に反映(ログインページ含む)。**ダーク標準**(未設定時はdark — 旧アプリの `data-theme="dark"` 既定を踏襲)、トグルでlight選択は永続。`?theme=dark|light` で強制切替可能(デバッグ・共有用)。**高コントラスト仕様**: ボタンは一律「黒地 + 白枠1.5px + 白文字」(hoverは暗グレー)、本文・名称は纯白、補助テキスト #d5dee9、入力欄は黒地+白文字
+4. **ダークモード補完(DARK_CSS + EARLY_THEME)** — トグル機構(属性 `data-bt-theme` + `bt_dark_mode`)は本体UIのものを使用し、配色ギャップのみ補完: ナビ・入力バー・通話オーバーレイ・Toast・ログインカード等。**早期適用スクリプト**が全ページの初描画前に反映(ログインページ含む)。**ダーク標準**(未設定時はdark — 旧アプリの `data-theme="dark"` 既定を踏襲)、トグルでlight選択は永続。`?theme=dark|light` で強制切替可能(デバッグ・共有用)。**高コントラスト仕様**: ボタンは一律「黒地 + 白枠2px + 白文字」(hoverは暗グレー)、本文・名称は纯白、補助テキスト #d5dee9、入力欄は黒地+白文字
 5. **画像フォールバック** — 読み込み失敗imgをdicebearアバターに差し替え
 6. `</head>` 直前に PWA用 `<link rel="manifest">` と apple-touch-icon + `/sw.js` 登録
 

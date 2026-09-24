@@ -286,18 +286,18 @@ const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
 html[data-bt-theme="dark"] body,html[data-bt-theme="dark"] .app-shell{background:var(--bt-bg)!important;color:#fff!important}
 html[data-bt-theme="dark"] .nav-rail,html[data-bt-theme="dark"] .list-panel,html[data-bt-theme="dark"] .main-panel,html[data-bt-theme="dark"] .chat-room{background:var(--bt-bg)!important;color:#fff!important}
-html[data-bt-theme="dark"] button{background:#000!important;color:#fff!important;border:1.5px solid #fff!important;box-shadow:none!important;text-shadow:none!important}
+html[data-bt-theme="dark"] button{background:#000!important;color:#fff!important;border:2px solid #fff!important;box-shadow:none!important;text-shadow:none!important}
 html[data-bt-theme="dark"] button:hover{background:#1d1d1d!important;color:#fff!important}
 html[data-bt-theme="dark"] button:disabled{opacity:.5}
-html[data-bt-theme="dark"] .nav-rail .brand,html[data-bt-theme="dark"] .nav-item.active{background:#000!important;color:#fff!important;border:1.5px solid #fff!important;box-shadow:none!important}
+html[data-bt-theme="dark"] .nav-rail .brand,html[data-bt-theme="dark"] .nav-item.active{background:#000!important;color:#fff!important;border:2px solid #fff!important;box-shadow:none!important}
 html[data-bt-theme="dark"] .chat-header,html[data-bt-theme="dark"] .chat-input-bar,html[data-bt-theme="dark"] .profile-card,html[data-bt-theme="dark"] .panel-header{background:var(--bt-white)!important;color:#fff!important;border-color:var(--bt-border)!important}
-html[data-bt-theme="dark"] input,html[data-bt-theme="dark"] textarea{background:#05070c!important;color:#fff!important;border:1.5px solid var(--bt-border)!important}
+html[data-bt-theme="dark"] input,html[data-bt-theme="dark"] textarea{background:#05070c!important;color:#fff!important;border:2px solid var(--bt-border)!important}
 html[data-bt-theme="dark"] input::placeholder,html[data-bt-theme="dark"] textarea::placeholder{color:#8fa0b5!important}
 html[data-bt-theme="dark"] .modal-backdrop{background:rgba(0,0,0,.78)!important}
-html[data-bt-theme="dark"] .modal-box{background:var(--bt-white)!important;color:#fff!important;border:1.5px solid var(--bt-border)!important}
+html[data-bt-theme="dark"] .modal-box{background:var(--bt-white)!important;color:#fff!important;border:2px solid var(--bt-border)!important}
 html[data-bt-theme="dark"] .msg-row .msg-bubble{background:var(--bt-bubble-other)!important;color:#fff!important}
 html[data-bt-theme="dark"] .msg-row.me .msg-bubble{background:var(--bt-bubble-me)!important;color:#fff!important}
-html[data-bt-theme="dark"] .msg-file,html[data-bt-theme="dark"] .msg-call-log,html[data-bt-theme="dark"] .msg-media{background:#10161f!important;color:#fff!important;border:1.5px solid var(--bt-border)!important}
+html[data-bt-theme="dark"] .msg-file,html[data-bt-theme="dark"] .msg-call-log,html[data-bt-theme="dark"] .msg-media{background:#10161f!important;color:#fff!important;border:2px solid var(--bt-border)!important}
 html[data-bt-theme="dark"] .msg-meta,html[data-bt-theme="dark"] .msg-time{color:#d5dee9!important}
 html[data-bt-theme="dark"] .name{color:#fff!important}
 html[data-bt-theme="dark"] .chat-row .preview,html[data-bt-theme="dark"] .status,html[data-bt-theme="dark"] .uid,html[data-bt-theme="dark"] .hint,html[data-bt-theme="dark"] small,html[data-bt-theme="dark"] .empty-state,html[data-bt-theme="dark"] .call-status{color:#d5dee9!important}
@@ -305,14 +305,14 @@ html[data-bt-theme="dark"] .chat-row,html[data-bt-theme="dark"] .friend-row{back
 html[data-bt-theme="dark"] .chat-row:hover,html[data-bt-theme="dark"] .friend-row:hover{background:#111a27!important}
 html[data-bt-theme="dark"] .chat-row.active{background:#16233a!important}
 html[data-bt-theme="dark"] .call-overlay{background:rgba(4,7,12,.97)!important;color:#fff!important}
-html[data-bt-theme="dark"] .incoming-call-toast{background:var(--bt-white)!important;color:#fff!important;border:1.5px solid var(--bt-border)!important}
-html[data-bt-theme="dark"] #toastMsg,html[data-bt-theme="dark"] .toast{background:#10161f!important;color:#fff!important;border:1.5px solid var(--bt-border)!important}
-html[data-bt-theme="dark"] .sticker-item,html[data-bt-theme="dark"] .sticker-card,html[data-bt-theme="dark"] .add-sticker-card{background:#10161f!important;color:#fff!important;border:1.5px solid var(--bt-border)!important;box-shadow:none!important}
+html[data-bt-theme="dark"] .incoming-call-toast{background:var(--bt-white)!important;color:#fff!important;border:2px solid var(--bt-border)!important}
+html[data-bt-theme="dark"] #toastMsg,html[data-bt-theme="dark"] .toast{background:#10161f!important;color:#fff!important;border:2px solid var(--bt-border)!important}
+html[data-bt-theme="dark"] .sticker-item,html[data-bt-theme="dark"] .sticker-card,html[data-bt-theme="dark"] .add-sticker-card{background:#10161f!important;color:#fff!important;border:2px solid var(--bt-border)!important;box-shadow:none!important}
 html[data-bt-theme="dark"] .sticker-picker{background:var(--bt-white)!important;color:#fff!important}
 html[data-bt-theme="dark"] .auth-page{background:var(--bt-bg)!important}
-html[data-bt-theme="dark"] .auth-card{background:var(--bt-white)!important;color:#fff!important;border:1.5px solid var(--bt-border)!important;box-shadow:0 10px 40px #000a!important}
+html[data-bt-theme="dark"] .auth-card{background:var(--bt-white)!important;color:#fff!important;border:2px solid var(--bt-border)!important;box-shadow:0 10px 40px #000a!important}
 html[data-bt-theme="dark"] .auth-tabs button{color:#d5dee9!important}
-html[data-bt-theme="dark"] .auth-tabs button.active{background:#000!important;color:#fff!important;border:1.5px solid #fff!important}
+html[data-bt-theme="dark"] .auth-tabs button.active{background:#000!important;color:#fff!important;border:2px solid #fff!important}
 html[data-bt-theme="dark"] .close-x,html[data-bt-theme="dark"] .nav-item{color:#d5dee9!important}
 html[data-bt-theme="dark"] .switch-slider{background:#42536a!important}
 html[data-bt-theme="dark"] ::-webkit-scrollbar{width:8px;height:8px}
