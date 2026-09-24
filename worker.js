@@ -100,11 +100,13 @@ async function handleBtMedia(request, env, url) {
       }
       return null;
     };
-    const decodeChunk = (raw0, idx) => {
+    const decodeChunk = (raw0) => {
       let s = raw0;
-      if (s.indexOf('data:') === 0) { const cm = s.indexOf(','); if (cm >= 0) s = s.slice(cm + 1); }
+      if (s.charCodeAt(0) === 100 && s.indexOf('data:') === 0) { const cm = s.indexOf(','); if (cm >= 0) s = s.slice(cm + 1); }
       const bin = atob(s);
-      return Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+      const u = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      return u;
     };
     let start = 0, end = totalBytes - 1, partial = false;
     const range = request.headers.get('Range');
@@ -117,19 +119,22 @@ async function handleBtMedia(request, env, url) {
     }
     const i0 = Math.floor(start / chunkBytes), iN = Math.floor(end / chunkBytes);
     let chunkStart = i0 * chunkBytes, ci = i0;
+    const BATCH = 6;
     const stream = new ReadableStream({
       async pull(ctrl) {
-        if (ci > iN) { ctrl.close(); return; }
-        const raw0 = await getChunk(ci);
-        if (raw0 === null) { ctrl.error(new Error('media chunk missing')); return; }
-        let bytes = decodeChunk(raw0, ci);
-        const cs = chunkStart; chunkStart += bytes.length; ci++;
-        if (partial) {
-          const s2 = Math.max(cs, start), e2 = Math.min(cs + bytes.length - 1, end);
-          if (e2 < s2) return;
-          bytes = bytes.slice(s2 - cs, e2 - cs + 1);
+        for (let b = 0; b < BATCH; b++) {
+          if (ci > iN) { ctrl.close(); return; }
+          const raw0 = await getChunk(ci);
+          if (raw0 === null) { ctrl.error(new Error('media chunk missing')); return; }
+          let bytes = decodeChunk(raw0);
+          const cs = chunkStart; chunkStart += bytes.length; ci++;
+          if (partial) {
+            const s2 = Math.max(cs, start), e2 = Math.min(cs + bytes.length - 1, end);
+            if (e2 < s2) continue;
+            bytes = bytes.slice(s2 - cs, e2 - cs + 1);
+          }
+          ctrl.enqueue(bytes);
         }
-        ctrl.enqueue(bytes);
       }
     });
     if (partial) { headers0['Content-Range'] = `bytes ${start}-${end}/${totalBytes}`; headers0['Content-Length'] = String(end - start + 1); }
@@ -453,7 +458,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-F';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-G';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
