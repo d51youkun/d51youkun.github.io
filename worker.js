@@ -665,44 +665,80 @@ const GROUP_SCRIPT = `<script>(function(){
 const STICKER_SHIM = `<script>(function(){
   if(window.__btStickerShim)return;window.__btStickerShim=1;
   function toast(s){try{if(typeof showToast==='function')showToast(s)}catch(e){}}
+  function myId(){return(typeof ME!=='undefined'&&ME)?ME.id:''}
   function lineProduct(v){var m=v.match(/store\.line\.me\/stickershop\/product\/(\d+)/)||v.match(/line\.me\/S?\/sticker\/(\d+)/)||v.match(/^\s*(\d{6,12})\s*$/);return m?m[1]:null}
   function lineSingle(v){var m=v.match(/stickershop\.line-scdn\.net\/stickershop\/v1\/sticker\/(\d+)\//);return m?{url:v,name:'LINEスタンプ'}:null}
+  function rows(){try{return(typeof myStickers!=='undefined'&&Array.isArray(myStickers))?myStickers:[]}catch(e){return[]}}
+  function packOf(row){return row&&Array.isArray(row.pack_stickers)?row:null}
   async function importProduct(pid){
     toast('LINEスタンプを取得中...');
     try{
       var r=await fetch('/api/line-stickers/'+encodeURIComponent(pid));var j=await r.json();
       if(!r.ok||!j.ok||!j.stickers||!j.stickers.length){toast('スタンプを取得できませんでした（無料スタンプのURLをお試しください）');return}
-      var cnt=0;
-      for(var i=0;i<j.stickers.length;i++){try{await API.create('stickers',{user_id:(typeof ME!=='undefined'&&ME)?ME.id:'',image_url:j.stickers[i],name:j.title||'LINEスタンプ'});cnt++}catch(e){}}
+      var main='https://stickershop.line-scdn.net/stickershop/v1/product/'+pid+'/LINEStorePC/main.png?v=1';
+      await API.create('stickers',{user_id:myId(),image_url:main,name:j.title||'LINEスタンプ',pack_id:String(pid),pack_stickers:j.stickers});
       if(typeof refreshStickers==='function')await refreshStickers();
       var input=document.getElementById('stickerUrlInput');if(input)input.value='';
-      toast((j.title||'スタンプ')+'を'+cnt+'枚取り込みました');
+      toast((j.title||'スタンプ')+'（'+j.stickers.length+'枚）を取り込みました');
     }catch(e){toast('取り込みに失敗しました')}
   }
   async function importSingle(item){
-    try{await API.create('stickers',{user_id:(typeof ME!=='undefined'&&ME)?ME.id:'',image_url:item.url,name:item.name});if(typeof refreshStickers==='function')await refreshStickers();var input=document.getElementById('stickerUrlInput');if(input)input.value='';toast('スタンプを取り込みました')}catch(e){toast('取り込みに失敗しました')}
+    try{await API.create('stickers',{user_id:myId(),image_url:item.url,name:item.name});if(typeof refreshStickers==='function')await refreshStickers();var input=document.getElementById('stickerUrlInput');if(input)input.value='';toast('スタンプを取り込みました')}catch(e){toast('取り込みに失敗しました')}
   }
   function smart(){
     var input=document.getElementById('stickerUrlInput');var v=input?input.value.trim():'';
     if(!v)return;
     var pid=lineProduct(v);if(pid){importProduct(pid);return}
     var single=lineSingle(v);if(single){importSingle(single);return}
-    if(typeof window.__btOrigAddSticker==='function')window.__btOrigAddSticker();
-  }
-  function rebind(){
-    var btn=document.getElementById('addStickerBtn');
-    if(btn&&!btn.__btRebound){
-      btn.__btRebound=1;
-      if(typeof window.addStickerFromUrl==='function')window.__btOrigAddSticker=window.addStickerFromUrl;
-      var clone=btn.cloneNode(true);btn.parentNode.replaceChild(clone,btn);clone.__btRebound=1;
-      clone.addEventListener('click',function(e){e.preventDefault();smart()});
-      return true;
-    }
-    return false;
+    toast('画像URLまたはLINEスタンプのURLを入力してください');
   }
   window.addStickerFromUrl=smart;
-  var tries=0;var t=setInterval(function(){if(rebind()||++tries>20)clearInterval(t)},1200);
-  if(document.readyState!=='loading')rebind();else document.addEventListener('DOMContentLoaded',rebind);
+  document.addEventListener('click',function(e){
+    var b=e.target.closest?e.target.closest('#addStickerBtn'):null;
+    if(!b)return;
+    e.stopImmediatePropagation();e.preventDefault();
+    smart();
+  },true);
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='Enter')return;var i=document.getElementById('stickerUrlInput');
+    if(!i||e.target!==i)return;
+    e.stopImmediatePropagation();e.preventDefault();
+    smart();
+  },true);
+  var css=document.createElement('style');
+  css.textContent='.bt-pack-badge{position:absolute;bottom:4px;right:6px;background:rgba(0,0,0,.72);color:#fff;font-size:10px;padding:2px 6px;border-radius:8px;pointer-events:none}.bt-sticker-card,.bt-sticker-item{position:relative;cursor:pointer}#btPackModal{position:fixed;inset:0;z-index:10002;background:rgba(3,6,12,.78);display:flex;align-items:center;justify-content:center;padding:14px}#btPackModal .bt-pk-card{background:#141b26;color:#fff;width:min(430px,94vw);max-height:80vh;border-radius:18px;padding:14px;display:flex;flex-direction:column;box-shadow:0 16px 60px rgba(0,0,0,.6)}#btPackModal .bt-pk-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}#btPackModal .bt-pk-head b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#btPackModal .bt-pk-head small{color:#9fb2c9;flex:none}#btPackModal .bt-pk-close{background:#223047!important;border:none!important;color:#fff!important;border-radius:10px;padding:7px 12px;cursor:pointer;font-size:13px}#btPackModal .bt-pk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;overflow:auto;padding:4px}#btPackModal .bt-pk-grid img{width:100%;border-radius:10px;background:#0d121c;cursor:pointer;transition:transform .12s}#btPackModal .bt-pk-grid img:hover{transform:scale(1.06)}#btPackModal .bt-pk-hint{font-size:11px;color:#9fb2c9;margin:10px 4px 0}';
+  document.head.appendChild(css);
+  function openPack(row){
+    if(!row)return;
+    var old=document.getElementById('btPackModal');if(old)old.remove();
+    var mo=document.createElement('div');mo.id='btPackModal';
+    var h='<div class="bt-pk-card"><div class="bt-pk-head"><b>'+esc(row.name||'LINEスタンプ')+'</b><small>'+row.pack_stickers.length+'枚</small><button class="bt-pk-close" id="btPkClose">閉じる</button></div><div class="bt-pk-grid" id="btPkGrid">';
+    for(var i=0;i<row.pack_stickers.length;i++){h+='<img src="'+esc(row.pack_stickers[i])+'" data-btsticker="'+esc(row.pack_stickers[i])+'" alt="">'}
+    h+='</div><p class="bt-pk-hint">スタンプをタップするとトークに送信されます</p></div>';
+    mo.innerHTML=h;
+    mo.addEventListener('click',function(e){if(e.target===mo)mo.remove()});
+    document.body.appendChild(mo);
+    document.getElementById('btPkClose').addEventListener('click',function(){mo.remove()});
+    document.getElementById('btPkGrid').addEventListener('click',async function(e){
+      var im=e.target.closest?e.target.closest('img[data-btsticker]'):null;if(!im)return;
+      if(typeof activeConversationId==='undefined'||!activeConversationId||(typeof sendMessage!=='function')){toast('送信するにはトークを開いてください');return}
+      try{await sendMessage({type:'sticker',sticker_url:im.getAttribute('data-btsticker')});mo.remove();toast('スタンプを送りました')}catch(err){toast('送信に失敗しました')}
+    });
+  }
+  window.__btOpenPack=openPack;
+  function enhance(){
+    var packs={};rows().forEach(function(r){if(packOf(r))packs[r.image_url]=r});
+    document.querySelectorAll('.sticker-card,.sticker-item').forEach(function(el){
+      var url=el.classList.contains('sticker-item')?(el.getAttribute('data-send')||''):(el.querySelector('img')?el.querySelector('img').src:'');
+      var row=packs[url];if(!row||el.__btPack)return;
+      el.__btPack=1;el.classList.add(el.classList.contains('sticker-item')?'bt-sticker-item':'bt-sticker-card');
+      var bd=document.createElement('span');bd.className='bt-pack-badge';bd.textContent='📦'+row.pack_stickers.length+'枚';el.appendChild(bd);
+      el.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openPack(row)},true);
+    });
+  }
+  new MutationObserver(function(){try{enhance()}catch(e){}}).observe(document.documentElement,{childList:true,subtree:true});
+  if(document.readyState!=='loading')enhance();else document.addEventListener('DOMContentLoaded',enhance);
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 })();
 </script>`;
 

@@ -64,6 +64,7 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 - `PATCH /api/admin/users/<id>` — 任意フィールド更新(verified / banned / ban_reason / ban_message / ban_appeal_message / title / **password(パスワード強制変更)** 等)
 - `DELETE /api/admin/users/<id>` — **強制アカウント削除**。ユーザー行を削除済みトゥームストン化(`deleted:true, banned:true, password:''`)し、友情・会話・メッセージ・スタンプ・通話・シグナル・appealを全カスケード削除
 - `GET /api/admin/appeals` — 利用者からの誤Ban申し立て一覧
+- 会話監視(管理画面UI) — 会話一覧は「**誰と誰**(1対1は `A ⇔ B`、グループは `👥 名前( n名・メンバー列挙)`)+メッセージ件数+最終送信時刻」を表示し、「**トークを見る**」で実トーク形式の閲覧モーダル(LINE風バブル・左右配置・アイコン・送信者名・時刻・スタンプ/画像/動画/ファイルの実表示)を開く(教育目的の規約違反調査用)
 - `PATCH /api/admin/appeals/<id>` — 申し立てのステータス更新(`{status:'resolved'}` で対応済み)
 - 認証は `Authorization: Bearer <token>` または `X-Admin-Token` ヘッダ
 
@@ -72,6 +73,7 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 | エンドポイント | 仕様 |
 |---|---|
 | `GET /api/account-status/<userId>` | Ban・削除状態照合。`{ok, banned, deleted, selfDeleted, reason, message, appealMessage, updatedAt}`。Ban/削除済みアカウントのログイン端末で削除通知画面(BAN_SCRIPT)を表示するために45秒ごとにポーリングされる |
+| `GET /api/line-stickers/<productId>` | **LINEスタンプ一括取り込み**。`store.line.me/stickershop/product/<id>/ja`(失敗時 `/en`)をサーバー側取得(UA偽装不要の通常GET)し、`<title>`からパック名・HTML内の `/stickershop/v1/sticker/<sid>/` から全スタンプ画像URL(`.../<sid>/android/sticker.png?v=1`、最大60枚)を抽出して返す。旧 `productDataPC.ja.json` は廃止(404)済みのため頁スクレイプ方式。KV `bluetalk:linepack:<id>` に24時間キャッシュ。無料スタンプの製品IDに対応 |
 | `GET /api/turn-credentials` | WebRTC用TURN資格情報。Secrets `METERED_TURN_ENDPOINT` + `METERED_TURN_API_KEY` があれば **metered.live の短期資格情報**(https かつ `*.metered.live` のみ許可、最大16サーバーに制限)を、無ければ共有フォールバック(openrelay.metered.ca STUN/TURN)を返す |
 | `POST /api/media` | メディアアップロード。`{data: dataURL, mimeType, name}` を **180,000字ずつのチャンク** に分割し bluechat-sync Worker へ転送後 complete。dataURL長 **12MB超は413**(バイナリ換算 約9MB、UI表示上は8MB)。返値 `{uploadId, url: "/media/<id>"}` |
 | `GET /media/<id>` | bluechat-sync からblobを取得して実バイトで返す。`Cache-Control: public, max-age=31536000, immutable` |
@@ -91,6 +93,7 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 7. **グループトーク・長押し操作(GROUP_SCRIPT)** — 「新しいトーク」モーダルに「👥 グループを作る」を追加(グループ名+複数友だち選択で `type:'group'` の会話を作成)。グループチャットではヘッダーに 👤 メンバーボタン(メンバー一覧モーダル)を表示し、他人のメッセージに送信者名ラベルを付与。トークリストの**長押し(550ms)・右クリック**でアクションシート: グループは「メンバーを見る / グループから脱退」、1対1トークは「トークを削除」。削除は `hidden_for` による**自分側のみの非表示**(相手の履歴は保持。相手からの新着メッセージで自動的に再表示)。両者が削除、または最後のメンバーが脱退した場合は会話+メッセージを完全削議(DELETE conversations でメッセージもカスケード削除)
 8. **削除通知画面・誤Ban申し立て(BAN_SCRIPT)** — 全ページで45秒ごとに `/api/account-status/<自分のid>` をポーリングし、**Ban / 強制削除されたアカウントのログイン端末**に即座(検知後)・全画面の削除通知を表示: 「**利用規約に反したため、このアカウントは削除されました。**」+ 違反内容(ban_reason)+ 管理者からのメッセージ(ban_message)+ 管理者からの返信(ban_appeal_message)。画面内のフォームから**誤Banと思われる場合に管理者へメッセージ(appeals テーブル)を送信可能**→ 管理画面の「誤Ban申し立て」セクションに表示(対応済み化・返信ボタン)。自己削除(設定→アカウント削除)の場合は「このアカウントは削除されました。」の中立文言。検知後は `localStorage.removeItem('bt_current_user')` をロックし、画面がリロード後も維持(sessionStorageキャッシュで即表示)。解除(Ban解除)されると自動で画面が消えアプリに復帰
 9. **削除トゥームストン** — `DELETE /tables/users/<id>`(自己削除・管理の強制削除とも)は行を物理削除せず `deleted:true, banned:true, password:''` にする。単一GETのみ削済み行を返す(password空)ため、ログイン端末のapp.jsブートが404で落ちず**削除通知画面が確実に表示**される(index↔appのリダイレクトループを回避)。一覧・ログイン・管理画面では削除済み行は非表示
+10. **LINEスタンプ一括取り込み+パックUI(STICKER_SHIM)** — スタンプ欄にLINEストアURL(`store.line.me/stickershop/product/<id>` / `line.me/S/sticker/<id>` / 数字ID)を入れて「追加」ボタンまたはEnterで、`/api/line-stickers/<id>` 経由で**パック1枚のカード**として登録(メイン画像 `product/<id>/LINEStorePC/main.png` + パック名 + `pack_stickers` 配列(全スタンプURL、最大60枚)を単一行で保存)。**パックカード(📦n枚バッジ付き)をタップするとパックモーダルが開き、全スタンプがグリッド表示**、スタンプをタップするとそのままトークへ送信。単一のline-scdn画像URLも従来通り個別登録。ボタン・Enter両経路ともdocumentのcaptureフェーズで横取り(`stopImmediatePropagation`)しapp.jsの旧handler(ストアURLをそのままname='ja'で保存してしまうバグ)を確実に無効化。単一URL以外の通常画像URLは案内トーストを表示
 
 **削除された重複注入**(gensparkspace UIがネイティブ実装済みのため): 規約モーダル(termsModal) / 通知許可・アカウント削除ボタン(requestNotifyBtn・deleteAccountBtn) / 完全一致ID検索(friendSearchInput) / 自分のQR(myQrModal・showMyQrBtn) / スタンプ帳(stickerGrid等) / コンポーザー3ボタントレイ(attachMediaBtn等と競合) / ファイル送信フォールバック / ダーク・レスポンシブCSS(darkModeToggle・@media自前実装と競合) / 通話・メディアのfetchフック(gensparkspace app.jsはcall_signals・/api/media・RTCPeerConnectionを未使用のため死にコード)。
 
