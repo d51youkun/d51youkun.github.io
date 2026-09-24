@@ -81,8 +81,9 @@ KVキー: `bluetalk:table:<テーブル名>` にJSON配列を保存。
 
 1. **管理者トリガー** — キー入力 `d51-498go` で `/admin.html` へ / プロフィール名クリックでも管理画面導線
 2. **認証バッジ・ゴールド称号表示** — `allUsers` の `verified` / `title` を名前横に ✓ / 称号表示(gensparkspace UIは未実装のため注入で提供)
-3. **画像フォールバック** — 読み込み失敗imgをdicebearアバターに差し替え
-4. `</head>` 直前に PWA用 `<link rel="manifest">` と apple-touch-icon + `/sw.js` 登録
+3. **WebRTC通話シグナリング(CALL_SCRIPT)** — gensparkspace UIは通話UI(callOverlay・着信Toast・リンゴン音)を持つがシグナリング未実装のため、Worker注入で完全実装: `voiceCallBtn`/`videoCallBtn` 発信(calls行作成→offer送信)→ `acceptCallBtn`/`rejectCallBtn` 着信(calls ポーリング3秒→offer取得→answer)→ ICE candidate交換(`candidate`)→ `endCallBtn`/`bye` 終了。ミュート・ビデオ切替、45秒無応答タイムアウト、二重着信ガード付き。シグナルは `/api/call-gateway/*`(voice→call-1..3 / video→video-1、call_idハッシュでサーバー選定)経由で旧クライアントと共通
+4. **画像フォールバック** — 読み込み失敗imgをdicebearアバターに差し替え
+5. `</head>` 直前に PWA用 `<link rel="manifest">` と apple-touch-icon + `/sw.js` 登録
 
 **削除された重複注入**(gensparkspace UIがネイティブ実装済みのため): 規約モーダル(termsModal) / 通知許可・アカウント削除ボタン(requestNotifyBtn・deleteAccountBtn) / 完全一致ID検索(friendSearchInput) / 自分のQR(myQrModal・showMyQrBtn) / スタンプ帳(stickerGrid等) / コンポーザー3ボタントレイ(attachMediaBtn等と競合) / ファイル送信フォールバック / ダーク・レスポンシブCSS(darkModeToggle・@media自前実装と競合) / 通話・メディアのfetchフック(gensparkspace app.jsはcall_signals・/api/media・RTCPeerConnectionを未使用のため死にコード)。
 

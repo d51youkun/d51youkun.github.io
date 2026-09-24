@@ -281,11 +281,65 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
+const CALL_SCRIPT = `<script>(function(){
+  if(window.__btCall)return;window.__btCall=1;
+  var ICE=[],pc=null,callRow=null,peer=null,localStream=null,seenSig={},processed={},answered=false,sigTimer=null;
+  function q(id){return document.getElementById(id)}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])})}
+  function mode(){return callRow&&callRow.call_type==='video'?'video':'voice'}
+  function modeOf(c){return c&&c.call_type==='video'?'video':'voice'}
+  function toastMsg(s){var t=q('toastMsg');if(t){t.textContent=s;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2600)}}
+  async function loadIce(){try{var r=await fetch('/api/turn-credentials');var j=await r.json();if(j&&j.ok&&Array.isArray(j.iceServers)&&j.iceServers.length)return j.iceServers}catch(e){}return [{urls:'stun:stun.l.google.com:19302'}]}
+  async function sig(type,payload){if(!callRow||!peer)return;try{await fetch('/api/call-gateway/signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode(),call_id:callRow.id,from:ME.id,to:peer.id,signal_type:type,payload:payload||null})})}catch(e){}}
+  function stopMedia(){if(localStream){try{localStream.getTracks().forEach(function(t){t.stop()})}catch(e){}localStream=null}}
+  function stopRing(){var a=q('ringtoneAudio');if(a){try{a.pause();a.currentTime=0}catch(e){}}}
+  function cleanupUi(){var o=q('callOverlay');if(o)o.style.display='none';var t=q('incomingCallToast');if(t)t.style.display='none';stopRing();stopMedia();if(pc){try{pc.close()}catch(e){}pc=null}callRow=null;peer=null;answered=false;seenSig={};window.__btPendingOffer=null;if(sigTimer){clearInterval(sigTimer);sigTimer=null}var rv=q('remoteVideo'),lv=q('localVideo');if(rv){rv.srcObject=null;rv.style.display='none'}if(lv){lv.srcObject=null;lv.style.display='none'}}
+  function showOverlay(u,status){var o=q('callOverlay');if(!o)return;o.style.display='flex';q('callOverlayAvatar').src=u&&u.avatar_url||'';q('callOverlayName').textContent=u?(u.display_name||u.username||''):'';q('callOverlayStatus').textContent=status}
+  function startRing(){var a=q('ringtoneAudio');if(!a)return;try{a.loop=true;a.currentTime=0;a.play().catch(function(){})}catch(e){}}
+  function newPC(){var p=new RTCPeerConnection({iceServers:ICE});p.onicecandidate=function(e){if(e.candidate)sig('candidate',e.candidate.toJSON?e.candidate.toJSON():e.candidate)};p.ontrack=function(e){var s=e.streams&&e.streams[0];if(!s)return;var rv=q('remoteVideo');if(rv){rv.srcObject=s;rv.style.display=callRow&&callRow.call_type==='video'?'block':'none'}q('callOverlayStatus').textContent='通話中'};p.onconnectionstatechange=function(){if(!pc)return;if(p.connectionState==='connected'){answered=true;q('callOverlayStatus').textContent='通話中'}else if(p.connectionState==='failed'){toastMsg('接続に失敗しました');hangup()}};return p}
+  function startSigPoll(){if(sigTimer)clearInterval(sigTimer);sigTimer=setInterval(pollSignals,1000);pollSignals()}
+  async function pollSignals(){if(!callRow||!pc)return;var list;try{var r=await fetch('/api/call-gateway/signals/'+encodeURIComponent(ME.id)+'?mode='+mode()+'&call_id='+encodeURIComponent(callRow.id));list=await r.json()}catch(e){return}if(!Array.isArray(list))return;for(const x of list){var id=x.id||((x.from||x.sender_id||'')+'_'+(x.type||x.signal_type||'')+'_'+String(JSON.stringify(x.sdp!==undefined?x.sdp:x.payload||'')).slice(0,40));if(seenSig[id])continue;seenSig[id]=1;try{await handleSignal(x)}catch(e){}}}
+  async function handleSignal(x){var type=x.type||x.signal_type,data=x.sdp!==undefined?x.sdp:x.payload;
+    if(type==='answer'){answered=true;q('callOverlayStatus').textContent='接続中…';if(pc&&data)await pc.setRemoteDescription(data)}
+    else if(type==='candidate'){if(pc&&data){try{await pc.addIceCandidate(data)}catch(e){}}}
+    else if(type==='decline'){toastMsg('呼び出しを拒否されました');cleanupUi()}
+    else if(type==='bye'){cleanupUi()}}
+  function findUser(id){try{if(typeof allUsers!=='undefined'&&allUsers&&allUsers.length){var u=allUsers.filter(function(x){return x.id===id})[0];if(u)return u}}catch(e){}return null}
+  async function userOf(id){var u=findUser(id);if(u)return u;try{var u2=await API.get('users',id);return u2||{display_name:'ユーザー',username:''}}catch(e){return {display_name:'ユーザー',username:''}}}
+  async function startCall(type){if(!ME||!activeConversationId||callRow)return;var convs;try{convs=await API.listAll('conversations')}catch(e){return}var conv=(convs||[]).filter(function(c){return c.id===activeConversationId})[0];if(!conv)return;var ids=conv.member_ids||[];var pid=ids.filter(function(x){return x!==ME.id})[0];if(!pid)return toastMsg('通話相手がいません');
+    try{localStream=await navigator.mediaDevices.getUserMedia(type==='video'?{video:true,audio:true}:{audio:true})}catch(e){toastMsg('マイク・カメラへのアクセスが必要です');return}
+    ICE=await loadIce();var u=await userOf(pid);peer=u;var row;try{row=await API.create('calls',{caller_id:ME.id,callee_id:pid,call_type:type})}catch(e){stopMedia();toastMsg('通話を開始できませんでした');return}callRow=row;pc=newPC();localStream.getTracks().forEach(function(tr){try{pc.addTrack(tr,localStream)}catch(e){}});
+    if(type==='video'){var lv=q('localVideo');if(lv){lv.srcObject=localStream;lv.style.display='block'}var rv=q('remoteVideo');if(rv)rv.style.display='block'}
+    var offer=await pc.createOffer();await pc.setLocalDescription(offer);await sig('offer',{type:offer.type,sdp:offer.sdp});showOverlay(u,'呼び出し中…');startSigPoll();
+    setTimeout(function(){if(callRow&&!answered){toastMsg('呼び出しに応答がありません');sig('bye');cleanupUi()}},45000)}
+  async function checkIncoming(){if(callRow||!ME||typeof API==='undefined'||!q('callOverlay'))return;var calls;try{calls=await API.listAll('calls')}catch(e){return}var now=Date.now();var c=(calls||[]).filter(function(x){return x&&x.callee_id===ME.id&&x.caller_id!==ME.id&&!x.status&&!processed[x.id]&&now-(x.created_at||0)<60000}).sort(function(a,b){return (b.created_at||0)-(a.created_at||0)})[0];if(!c)return;processed[c.id]=1;
+    var list;try{var r=await fetch('/api/call-gateway/signals/'+encodeURIComponent(ME.id)+'?mode='+modeOf(c)+'&call_id='+encodeURIComponent(c.id));list=await r.json()}catch(e){return}if(!Array.isArray(list))return;var offer=list.filter(function(x){return (x.type||x.signal_type)==='offer'&&!seenSig[x.id]})[0];if(!offer)return;seenSig[offer.id||'off']=1;
+    callRow=c;peer=await userOf(c.caller_id);window.__btPendingOffer=offer.sdp!==undefined?offer.sdp:offer.payload;var u=peer||{};var t=q('incomingCallToast');if(t){q('incomingCallAvatar').src=u.avatar_url||'';q('incomingCallName').textContent=u.display_name||u.username||'';q('incomingCallSub').textContent=c.call_type==='video'?'ビデオ通話の着信':'音声通話の着信';t.style.display='flex'}startRing()}
+  async function acceptCall(){if(!callRow||!window.__btPendingOffer)return;var t=q('incomingCallToast');if(t)t.style.display='none';stopRing();try{localStream=await navigator.mediaDevices.getUserMedia(callRow.call_type==='video'?{video:true,audio:true}:{audio:true})}catch(e){toastMsg('マイク・カメラへのアクセスが必要です');sig('decline');cleanupUi();return}
+    ICE=ICE.length?ICE:await loadIce();pc=newPC();localStream.getTracks().forEach(function(tr){try{pc.addTrack(tr,localStream)}catch(e){}});
+    if(callRow.call_type==='video'){var lv=q('localVideo');if(lv){lv.srcObject=localStream;lv.style.display='block'}var rv=q('remoteVideo');if(rv)rv.style.display='block'}
+    try{API.update('calls',callRow.id,{status:'answered'}).catch(function(){})}catch(e){}
+    await pc.setRemoteDescription(window.__btPendingOffer);var ans=await pc.createAnswer();await pc.setLocalDescription(ans);showOverlay(peer,'接続中…');startSigPoll();await sig('answer',{type:ans.type,sdp:ans.sdp});window.__btPendingOffer=null}
+  async function declineCall(){if(callRow){try{API.update('calls',callRow.id,{status:'declined'}).catch(function(){})}catch(e){}await sig('decline')}cleanupUi()}
+  async function hangup(){if(callRow){try{API.update('calls',callRow.id,{status:'ended'}).catch(function(){})}catch(e){}await sig('bye')}cleanupUi()}
+  function bind(){var v=q('voiceCallBtn'),d=q('videoCallBtn'),a=q('acceptCallBtn'),r=q('rejectCallBtn'),e=q('endCallBtn'),m=q('toggleMuteBtn'),t=q('toggleVideoBtn');
+    if(v&&!v.__bt)v.__bt=1,v.onclick=function(){startCall('voice')};
+    if(d&&!d.__bt)d.__bt=1,d.onclick=function(){startCall('video')};
+    if(a&&!a.__bt)a.__bt=1,a.onclick=acceptCall;
+    if(r&&!r.__bt)r.__bt=1,r.onclick=declineCall;
+    if(e&&!e.__bt)e.__bt=1,e.onclick=hangup;
+    if(m&&!m.__bt)m.__bt=1,m.onclick=function(){if(!localStream)return;var tr=localStream.getAudioTracks()[0];if(!tr)return;tr.enabled=!tr.enabled;m.innerHTML=tr.enabled?'<i class="fa-solid fa-microphone"></i>':'<i class="fa-solid fa-microphone-slash"></i>';m.style.color=tr.enabled?'':'#e05252'};
+    if(t&&!t.__bt)t.__bt=1,t.onclick=function(){if(!localStream)return;var tr=localStream.getVideoTracks()[0];if(!tr)return toastMsg('この通話にはビデオがありません');tr.enabled=!tr.enabled;t.innerHTML=tr.enabled?'<i class="fa-solid fa-video"></i>':'<i class="fa-solid fa-video-slash"></i>';t.style.color=tr.enabled?'':'#e05252'}}
+  function boot(){bind();setInterval(checkIncoming,3000);setInterval(bind,4000)}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+})();
+</script>`;
+
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = await response.text();
   const withManifest = text.includes('</head>') ? text.replace('</head>', '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', APP_ENHANCEMENTS + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', APP_ENHANCEMENTS + CALL_SCRIPT + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
