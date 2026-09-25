@@ -1760,7 +1760,7 @@ function stripStaleInjection(html) {
   } catch (e) { return html; }
 }
 
-async const KEEP_SHIM = `<script>(function(){
+const KEEP_SHIM = `<script>(function(){
   if(window.__btKeep)return;window.__btKeep=1;
   var TABLE='keep_memos';
   var TERMS_KEY='bluetalk_keep_terms_v1';
@@ -1859,7 +1859,7 @@ async const KEEP_SHIM = `<script>(function(){
   }
   window.__btOpenKeep=openKeep;
 })();</script>`;
-function enhanceHtml(response) {
+async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = stripStaleInjection(await response.text());
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
