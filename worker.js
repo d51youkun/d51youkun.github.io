@@ -613,7 +613,7 @@ async function handleLineStickers(request, env, url, origin) {
   const m = url.pathname.match(/^\/api\/line-stickers\/(\d{4,12})$/);
   if (!m) return null;
   const pid = m[1];
-  const cacheKey = `bluetalk:linepack:v2:${pid}`;
+  const cacheKey = `bluetalk:linepack:v3:${pid}`;
   const cached = await env.BLUETALK_KV.get(cacheKey);
   if (cached) return json(JSON.parse(cached), 200, origin);
   const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36', 'Accept-Language': 'ja,en;q=0.8' };
@@ -649,9 +649,17 @@ async function handleLineStickers(request, env, url, origin) {
       animated = g.ok;
     }
   } catch (e) { animated = false; }
+  let sound = false;
+  try {
+    const soundUrl = `https://stickershop.line-scdn.net/stickershop/v1/sticker/${ids[0]}/iphone/sticker_sound.m4a?v=1`;
+    const sh = await fetch(soundUrl, { method: 'HEAD', headers });
+    if (sh.ok) sound = true;
+    else if (sh.status === 405 || sh.status === 501) { const g = await fetch(soundUrl, { headers }); sound = g.ok; }
+  } catch (e) { sound = false; }
   const variant = animated ? 'iphone/sticker_animation.png' : 'android/sticker.png';
   const stickers = ids.map((sid) => `https://stickershop.line-scdn.net/stickershop/v1/sticker/${sid}/${variant}?v=1`);
-  const payload = { ok: true, title, productId: pid, animated, stickers };
+  const sounds = sound ? ids.map((sid) => `https://stickershop.line-scdn.net/stickershop/v1/sticker/${sid}/iphone/sticker_sound.m4a?v=1`) : null;
+  const payload = { ok: true, title, productId: pid, animated, sound, stickers, sounds };
   await env.BLUETALK_KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: 86400 });
   return json(payload, 200, origin);
 }
@@ -1557,12 +1565,12 @@ const STICKER_SHIM = `<script>(function(){
       var dup=null;rows().forEach(function(x){if(x&&String(x.pack_id||'')===String(pid))dup=x});
       if(dup){
         if(!confirm('「'+(j.title||'LINEスタンプ')+'」はすでに取り込んでいます。\\n上書き（更新）しますか？')){toast('取り込みを中止しました');return}
-        await API.update('stickers',dup.id,{image_url:main,name:j.title||'LINEスタンプ',pack_stickers:j.stickers,animated:!!j.animated});
+        await API.update('stickers',dup.id,{image_url:main,name:j.title||'LINEスタンプ',pack_stickers:j.stickers,animated:!!j.animated,pack_sounds:j.sounds||null});
         await btRefreshStickers();
         toast((j.title||'スタンプ')+'（'+j.stickers.length+'枚）を更新しました');
         return;
       }
-      await API.create('stickers',{user_id:myId(),image_url:main,name:j.title||'LINEスタンプ',pack_id:String(pid),pack_stickers:j.stickers,animated:!!j.animated});
+      await API.create('stickers',{user_id:myId(),image_url:main,name:j.title||'LINEスタンプ',pack_id:String(pid),pack_stickers:j.stickers,animated:!!j.animated,pack_sounds:j.sounds||null});
       if(typeof refreshStickers==='function')await refreshStickers();
       var input=document.getElementById('stickerUrlInput');if(input)input.value='';
       toast((j.title||'スタンプ')+'（'+j.stickers.length+'枚）を取り込みました');
@@ -1618,7 +1626,7 @@ const STICKER_SHIM = `<script>(function(){
     if(!row)return;
     var old=document.getElementById('btPackModal');if(old)old.remove();
     var mo=document.createElement('div');mo.id='btPackModal';
-    var h='<div class="bt-pk-card"><div class="bt-pk-head"><b>'+esc(row.name||'LINEスタンプ')+'</b><small>'+(row.animated?'🎬動く・':'')+row.pack_stickers.length+'枚</small><button class="bt-pk-del" id="btPkDel">削除</button><button class="bt-pk-close" id="btPkClose">閉じる</button></div><div class="bt-pk-grid" id="btPkGrid">';
+    var h='<div class="bt-pk-card"><div class="bt-pk-head"><b>'+esc(row.name||'LINEスタンプ')+'</b><small>'+(row.sound?'🔊音付き・':'')+(row.animated?'🎬動く・':'')+row.pack_stickers.length+'枚</small><button class="bt-pk-del" id="btPkDel">削除</button><button class="bt-pk-close" id="btPkClose">閉じる</button></div><div class="bt-pk-grid" id="btPkGrid">';
     for(var i=0;i<row.pack_stickers.length;i++){h+='<img src="'+esc(row.pack_stickers[i])+'" data-btsticker="'+esc(row.pack_stickers[i])+'" alt="">'}
     h+='</div><p class="bt-pk-hint">スタンプをタップするとトークに送信されます</p></div>';
     mo.innerHTML=h;
@@ -1633,9 +1641,18 @@ const STICKER_SHIM = `<script>(function(){
     document.getElementById('btPkGrid').addEventListener('click',async function(e){
       var im=e.target.closest?e.target.closest('img[data-btsticker]'):null;if(!im)return;
       if(typeof activeConversationId==='undefined'||!activeConversationId||(typeof sendMessage!=='function')){toast('送信するにはトークを開いてください');return}
-      try{await sendMessage({type:'sticker',sticker_url:im.getAttribute('data-btsticker')});mo.remove();toast('スタンプを送りました')}catch(err){toast('送信に失敗しました')}
+      var sUrl=im.getAttribute('data-btsticker');
+      if(Array.isArray(row.pack_sounds)){var si=row.pack_stickers.indexOf(sUrl);if(si>=0&&row.pack_sounds[si]){try{var au=new Audio(row.pack_sounds[si]);au.play().catch(function(){})}catch(e){}}}
+      try{await sendMessage({type:'sticker',sticker_url:sUrl,sticker_sound:(Array.isArray(row.pack_sounds)&&row.pack_sounds[row.pack_stickers.indexOf(sUrl)])||null});mo.remove();toast('スタンプを送りました')}catch(err){toast('送信に失敗しました')}
     });
   }
+  function btSoundMap(url){try{var rs=rows();for(var i=0;i<rs.length;i++){var r=rs[i];if(!r||!Array.isArray(r.pack_sounds)||!Array.isArray(r.pack_stickers))continue;var ix=r.pack_stickers.indexOf(url);if(ix>=0&&r.pack_sounds[ix])return r.pack_sounds[ix]}}catch(e){}return null}
+  document.addEventListener('click',function(e){
+    var im=e.target&&e.target.closest?e.target.closest('img'):null;if(!im)return;
+    var src=im.getAttribute('src')||'';if(!src)return;
+    var su=btSoundMap(src);if(!su)return;
+    try{var a=new Audio(su);a.play().catch(function(){})}catch(err){}
+  },true);
   window.__btOpenPack=openPack;
   function enhance(){
     var map={};rows().forEach(function(r){if(r&&r.image_url)map[r.image_url]=r});
@@ -1643,7 +1660,7 @@ const STICKER_SHIM = `<script>(function(){
       var url=el.classList.contains('sticker-item')?(el.getAttribute('data-send')||''):(el.querySelector('img')?el.querySelector('img').src:'');
       var row=map[url];if(!row||el.__btPack)return;
       el.__btPack=1;el.classList.add(el.classList.contains('sticker-item')?'bt-sticker-item':'bt-sticker-card');
-      if(packOf(row)){var bd=document.createElement('span');bd.className='bt-pack-badge';bd.textContent=(row.animated?'🎬':'📦')+row.pack_stickers.length+'枚';el.appendChild(bd);
+      if(packOf(row)){var bd=document.createElement('span');bd.className='bt-pack-badge';bd.textContent=(row.sound?'🔊':(row.animated?'🎬':'📦'))+row.pack_stickers.length+'枚';el.appendChild(bd);
         el.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openPack(row)},true);}
       (function(r){
         var t=null;
@@ -1743,11 +1760,110 @@ function stripStaleInjection(html) {
   } catch (e) { return html; }
 }
 
-async function enhanceHtml(response) {
+async const KEEP_SHIM = `<script>(function(){
+  if(window.__btKeep)return;window.__btKeep=1;
+  var TABLE='keep_memos';
+  var TERMS_KEY='bluetalk_keep_terms_v1';
+  var TERMS=[
+    '本規約は、BlueTalk（以下「本サービス」）が提供する「Keepメモ」（以下「本機能」）の利用条件を定めるものです。',
+    '本機能は、利用者本人が自分用のメモやリンク、画像などを保存し、あとから取り出せる非公開の機能です。保存した内容は本人のアカウントに紐づき、他の利用者には表示されません。',
+    '保存できる内容は、テキストメモ、URL、および画像・動画・ファイルなどの添付です。添付の容量は本サービスのアップロード上限設定に従います。',
+    '次の内容を保存しないでください。法令に違反する内容、第三者の著作権・肖像権・プライバシー等の権利を侵害する内容、本サービスの運営を妨げる内容。本機能は非公開ですが、禁止内容が確認された場合は管理者が削除することがあります。',
+    '保存容量は本サービス全体の保存枠を共有します。上限に達すると新しく保存できなくなります。',
+    'メモは暗号化されずに保存されます。パスワードやカード番号などの機密情報の保存は推奨しません。',
+    '本機能に自動バックアップはありません。利用者が削除したメモ、およびアカウント削除に伴うメモは復元できません。',
+    '本機能の利用により生じた損害について、運営は故意または重大な過失がある場合を除き、責任を負いません。',
+    '運営は、本機能の内容を変更し、または提供を終了することがあります。重要な変更は本サービス上で告知します。',
+    '本規約に同意いただけない場合、本機能をご利用いただけません。'
+  ];
+  function q(id){return document.getElementById(id)}
+  function myid(){try{return (typeof myId==='function')?myId():''}catch(e){return ''}}
+  function esc2(v){var d=document.createElement('div');d.textContent=(v==null?'':String(v));return d.innerHTML}
+  function toast2(m){try{if(typeof toast==='function'){toast(m);return}}catch(e){}try{var t=q('toastMsg');if(t){t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2600)}}catch(e){}}
+  var css=document.createElement('style');
+  css.textContent='#btKeepRow .bt-keep-av{width:48px;height:48px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex:none}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepModal{position:fixed;inset:0;z-index:2147483000;background:rgba(3,6,12,.78);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepModal .bt-keep-card{background:#141b26;color:#fff;width:520px;max-width:96vw;max-height:86vh;border-radius:18px;padding:16px;display:flex;flex-direction:column;box-shadow:0 16px 60px rgba(0,0,0,.6)}#btKeepModal h3{margin:0 0 4px;font-size:17px}#btKeepModal .bt-keep-sub{color:#9fb2c9;font-size:12px;margin:0 0 12px}#btKeepModal textarea{width:100%;box-sizing:border-box;min-height:96px;background:#05070c;color:#fff;border:2px solid #42536a;border-radius:12px;padding:10px;font-size:14px;resize:vertical}#btKeepModal .bt-keep-actions{display:flex;gap:8px;margin:10px 0 4px}#btKeepModal .bt-keep-actions button{flex:1;border-radius:12px;padding:11px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepModal .bt-keep-save{background:#1877f2!important;border-color:#1877f2!important}#btKeepModal .bt-keep-close{background:#223047!important;border:none!important}#btKeepModal .bt-keep-list{overflow:auto;margin-top:12px}#btKeepModal .bt-keep-item{background:#101827;border:1px solid #2a3950;border-radius:12px;padding:10px;margin-bottom:8px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}#btKeepModal .bt-keep-meta{color:#9fb2c9;font-size:11px;margin-top:6px;display:flex;justify-content:space-between;align-items:center}#btKeepModal .bt-keep-del{background:#3a1f26;border:none;color:#ff9d9d;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}#btKeepTerms{position:fixed;inset:0;z-index:2147483001;background:rgba(3,6,12,.85);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepTerms .bt-keep-tcard{background:#141b26;color:#fff;width:560px;max-width:96vw;max-height:88vh;border-radius:18px;padding:18px;display:flex;flex-direction:column}#btKeepTerms h3{margin:0 0 8px;font-size:17px}#btKeepTerms ol{overflow:auto;padding-left:20px;margin:0 0 12px;font-size:13px;line-height:1.75;color:#dfe8f3}#btKeepTerms li{margin-bottom:8px}#btKeepTerms .bt-keep-tactions{display:flex;gap:8px}#btKeepTerms button{flex:1;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepTerms .bt-keep-agree{background:#1877f2!important;border-color:#1877f2!important}';
+  document.head.appendChild(css);
+  function ensureRow(){
+    var list=q('friend-list');if(!list)return false;
+    if(q('btKeepRow'))return true;
+    var item=document.createElement('div');item.className='list-item';item.id='btKeepRow';
+    item.innerHTML='<div class="bt-keep-av">📝</div><div class="list-info"><div class="list-name">Keepメモ<span class="bt-keep-badge">自分用</span></div><div class="list-preview">メモ・画像を自分だけに保存</div></div>';
+    item.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openKeep()},true);
+    list.insertBefore(item,list.firstChild);
+    return true;
+  }
+  var tries=0;
+  var iv=setInterval(function(){tries++;if(ensureRow()||tries>60)clearInterval(iv)},500);
+  try{new MutationObserver(function(){ensureRow()}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
+  function agreed(){try{return localStorage.getItem(TERMS_KEY)==='1'}catch(e){return false}}
+  function showTerms(cb){
+    var old=q('btKeepTerms');if(old)old.remove();
+    var mo=document.createElement('div');mo.id='btKeepTerms';
+    var ol='';for(var i=0;i<TERMS.length;i++){ol+='<li>'+esc2(TERMS[i])+'</li>'}
+    mo.innerHTML='<div class="bt-keep-tcard"><h3>Keepメモ 利用規約</h3><p class="bt-keep-sub">はじめてお使いになる前に、以下の内容をご確認ください。</p><ol>'+ol+'</ol><div class="bt-keep-tactions"><button class="bt-keep-agree" id="btKeepAgree">同意して始める</button><button id="btKeepDeny">同意しない</button></div></div>';
+    document.body.appendChild(mo);
+    q('btKeepAgree').addEventListener('click',function(){try{localStorage.setItem(TERMS_KEY,'1')}catch(e){}mo.remove();if(cb)cb()});
+    q('btKeepDeny').addEventListener('click',function(){mo.remove();toast2('利用規約に同意しないとKeepメモは利用できません')});
+  }
+  async function loadMemos(){
+    var uid=myid();var out=[];
+    try{
+      var r=await fetch('/tables/'+TABLE+'?limit=500',{cache:'no-store'});var j=await r.json();
+      var rows=(j&&j.data)?j.data:(Array.isArray(j)?j:[]);
+      for(var i=0;i<rows.length;i++){if(!uid||String(rows[i].user_id)===String(uid))out.push(rows[i])}
+    }catch(e){}
+    out.sort(function(a,b){return (Number(b.created_at)||0)-(Number(a.created_at)||0)});
+    return out;
+  }
+  async function saveMemo(text){
+    var r=await fetch('/tables/'+TABLE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:myid(),text:text,created_at:Date.now()})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return await r.json();
+  }
+  async function delMemo(id){
+    var r=await fetch('/tables/'+TABLE+'/'+encodeURIComponent(id),{method:'DELETE'});
+    if(!r.ok&&r.status!==204)throw new Error('HTTP '+r.status);
+  }
+  async function openKeep(){
+    if(!agreed()){showTerms(function(){openKeep()});return}
+    var old=q('btKeepModal');if(old)old.remove();
+    var mo=document.createElement('div');mo.id='btKeepModal';
+    mo.innerHTML='<div class="bt-keep-card"><h3>Keepメモ</h3><p class="bt-keep-sub">自分だけが見られるメモです。URLや画像のリンクも貼り付けられます。</p><textarea id="btKeepText" placeholder="メモを入力"></textarea><div class="bt-keep-actions"><button class="bt-keep-save" id="btKeepSave">保存</button><button class="bt-keep-close" id="btKeepClose">閉じる</button></div><div class="bt-keep-list" id="btKeepList">読み込み中...</div></div>';
+    mo.addEventListener('click',function(e){if(e.target===mo)mo.remove()});
+    document.body.appendChild(mo);
+    q('btKeepClose').addEventListener('click',function(){mo.remove()});
+    async function render(){
+      var listEl=q('btKeepList');if(!listEl)return;
+      var mrows=await loadMemos();
+      if(!mrows.length){listEl.innerHTML='<p class="bt-keep-sub">まだメモはありません。</p>';return}
+      listEl.innerHTML='';
+      for(var i=0;i<mrows.length;i++){
+        var m=mrows[i];var d=document.createElement('div');d.className='bt-keep-item';
+        var body=document.createElement('div');body.textContent=String(m.text||'');d.appendChild(body);
+        var meta=document.createElement('div');meta.className='bt-keep-meta';
+        var when=document.createElement('span');when.textContent=new Date(Number(m.created_at)||Date.now()).toLocaleString('ja-JP');
+        var b=document.createElement('button');b.className='bt-keep-del';b.textContent='削除';
+        meta.appendChild(when);meta.appendChild(b);d.appendChild(meta);listEl.appendChild(d);
+        (function(id,node){b.addEventListener('click',async function(){if(!confirm('このメモを削除しますか？'))return;try{await delMemo(id);node.remove();toast2('メモを削除しました')}catch(e){toast2('削除に失敗しました')}})})(m.id,d);
+      }
+    }
+    q('btKeepSave').addEventListener('click',async function(){
+      var ta=q('btKeepText');var v=ta?ta.value.trim():'';
+      if(!v){toast2('メモを入力してください');return}
+      var btn=q('btKeepSave');btn.disabled=true;btn.textContent='保存中...';
+      try{await saveMemo(v);if(ta)ta.value='';await render();toast2('メモを保存しました')}
+      catch(e){toast2('保存に失敗しました')}
+      btn.disabled=false;btn.textContent='保存';
+    });
+    await render();
+  }
+  window.__btOpenKeep=openKeep;
+})();</script>`;
+function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = stripStaleInjection(await response.text());
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + KEEP_SHIM + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
