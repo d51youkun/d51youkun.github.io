@@ -1846,7 +1846,7 @@ const KEEP_SHIM = `<script>(function(){
   }
   async function btUnfriend(uid){
     var nm='';try{var u=(allUsers||[]).filter(function(x){return String(x.id)===String(uid)})[0];nm=u?(u.display_name||u.username||''):''}catch(e){}
-    if(!confirm('「'+(nm||uid)+'」を友達から削除しますか？\nトーク履歴は残ります（トーク一覧から開けます）。'))return;
+    if(!confirm('「'+(nm||uid)+'」を友達から削除しますか？\\nトーク履歴は残ります（トーク一覧から開けます）。'))return;
     try{
       var my=meId();
       var rels=await API.listAll('friendships');
