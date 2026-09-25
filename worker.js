@@ -260,7 +260,13 @@ function bigRangeHeader(range, size) {
 async function handleBtBig(request, env, url, origin) {
   if (url.pathname === '/bt-big/config') {
     const cfg = await readSettings(env);
-    return json({ ok: true, enabled: bigMediaEnabled(env), partSize: BIG_PART_BYTES, minPartBytes: 5 * 1024 * 1024, maxBytes: BIG_MAX_BYTES, kvPartBytes: KV_PART_BYTES, kvStorageBytes: KV_FREE_STORAGE_BYTES, maxFileBytes: cfg.maxFileBytes, maxTransferBytes: cfg.maxTransferBytes, kvReadOnly: false }, 200, origin);
+    const base = { ok: true, enabled: bigMediaEnabled(env), partSize: BIG_PART_BYTES, minPartBytes: 5 * 1024 * 1024, maxBytes: BIG_MAX_BYTES, kvPartBytes: KV_PART_BYTES, kvStorageBytes: KV_FREE_STORAGE_BYTES, maxFileBytes: cfg.maxFileBytes, maxTransferBytes: cfg.maxTransferBytes, kvReadOnly: false };
+    if (url.searchParams.get('usage') === '1') {
+      const u = await mediaUsage(env);
+      const used = Number(u.bytes || 0);
+      return json(Object.assign(base, { usedBytes: used, remainingBytes: Math.max(0, KV_FREE_STORAGE_BYTES - used) }), 200, origin);
+    }
+    return json(base, 200, origin);
   }
   const m = /^\/bt-big\/([A-Za-z0-9-]{6,64})(?:\/(init|complete|abort)|\/part\/(\d+))?$/.exec(url.pathname);
   if (!m) return null;
@@ -766,7 +772,7 @@ const MEDIA_SHIM = `<script>(function(){
   var raw=window.fetch.bind(window);
   var MAX_CHUNK=150000,IMAGE_CAP=30*1024*1024,SLICE=1536*1024;
   var KV_PART=8*1024*1024,MAX_SEND=900*1024*1024;
-  var BIG={enabled:false,partSize:32*1024*1024,maxBytes:6*1024*1024*1024,kvPartBytes:KV_PART,maxFileBytes:MAX_SEND,maxTransferBytes:0,ready:null};
+  var BIG={enabled:false,partSize:32*1024*1024,maxBytes:6*1024*1024*1024,kvPartBytes:KV_PART,maxFileBytes:MAX_SEND,maxTransferBytes:0,kvStorageBytes:0,ready:null};
   window.__btBig=BIG;
   BIG.lastAt=0;
   BIG.sync=async function(){
@@ -780,6 +786,7 @@ const MEDIA_SHIM = `<script>(function(){
         if(Number(j.kvPartBytes)){BIG.kvPartBytes=Number(j.kvPartBytes);KV_PART=BIG.kvPartBytes}
         if(Number(j.maxFileBytes)){BIG.maxFileBytes=Number(j.maxFileBytes);MAX_SEND=BIG.maxFileBytes}
         BIG.maxTransferBytes=Number(j.maxTransferBytes)||0;
+        if(Number(j.kvStorageBytes))BIG.kvStorageBytes=Number(j.kvStorageBytes);
         BIG.lastAt=Date.now();
       }
     }catch(e){}
@@ -812,6 +819,7 @@ const MEDIA_SHIM = `<script>(function(){
     var id=(crypto.randomUUID?crypto.randomUUID():'v'+Date.now()+Math.random().toString(16).slice(2));
     var PART=KV_PART,mime=file.type||'application/octet-stream';
     var total=Math.max(1,Math.ceil(file.size/PART)),sent=0;
+    if(onprog)onprog(0);
     for(var i=1;i<=total;i++){
       var blob=file.slice((i-1)*PART,Math.min(i*PART,file.size));
       var ok=false,err=null;
@@ -819,7 +827,7 @@ const MEDIA_SHIM = `<script>(function(){
         try{
           var r=await raw('/bt-media/'+id+'/'+(i-1),{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:blob});
           if(r.ok){ok=true}
-          else{err=new Error('part '+i+' HTTP '+r.status);await new Promise(function(z){setTimeout(z,600*(a+1))})}
+          else{err=new Error('part '+i+' HTTP '+r.status);if(r.status===413||r.status===507||r.status===400||r.status===401||r.status===403){break}await new Promise(function(z){setTimeout(z,600*(a+1))})}
         }catch(e){err=e;await new Promise(function(z){setTimeout(z,600*(a+1))})}
       }
       if(!ok){btProgEnd();throw err||new Error('アップロードに失敗しました')}
@@ -1109,6 +1117,14 @@ const MEDIA_SHIM = `<script>(function(){
       var go=window.confirm('合計 '+fmtMB(file.size)+' は、このアカウントの保存枠（'+fmtMB(BIG.maxTransferBytes)+'）を超えます。\\n保存枠を超えるとアップロードが途中で失敗します。続けますか？');
       if(!go)return null;
     }
+    var kvRemain=0;
+    if(!BIG.enabled){
+      try{var ru=await raw('/bt-big/config?usage=1');var ju=await ru.json();if(ju&&ju.ok&&Number(ju.remainingBytes)>=0)kvRemain=Number(ju.remainingBytes)}catch(e){}
+      var cap=Number(BIG.kvStorageBytes)||0;
+      var free=kvRemain>0?kvRemain:cap;
+      if(free>0&&file.size>free*0.95){btProgEnd();toast('このファイルは分割しても保存できません（合計 '+fmtMB(file.size)+' ／ 保存できる残り約 '+fmtMB(free)+'）。圧縮して送るか、サーバー側でR2（大容量ストレージ）を有効にしてください');return null}
+    }
+    if(onp)onp(0,'送信の準備をしています...');
     var tid=xferId(),parts=[];
     for(var i=0;i<nparts;i++){
       var blob=file.slice(i*PART_MAX,Math.min((i+1)*PART_MAX,file.size));
