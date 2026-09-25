@@ -744,7 +744,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-N';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-O';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -1656,6 +1656,43 @@ const STICKER_SHIM = `<script>(function(){
     try{var a=new Audio(su);a.play().catch(function(){})}catch(err){}
   },true);
   window.__btOpenPack=openPack;
+  /* 動くスタンプ: 初回は自動で再生し、停止後はタップで再生 */
+  (function(){
+    var AUTO_MS=2600,REPLAY_MS=2600;
+    var SEL='#messagesArea .msg-sticker img[src*="sticker_animation"]';
+    function freeze(img){
+      if(!img||!img.parentNode||img.__btFrozen||img.tagName!=='IMG')return;
+      var w=img.clientWidth||0,h=img.clientHeight||0;
+      if(!w||!h){img.__btT=setTimeout(function(){freeze(img)},400);return}
+      try{
+        var c=document.createElement('canvas'),nw=img.naturalWidth||w,nh=img.naturalHeight||h;
+        c.width=nw;c.height=nh;c.getContext('2d').drawImage(img,0,0,nw,nh);
+        c.className=(img.className||'')+' bt-anim-canvas';
+        c.style.width=w+'px';c.style.height=h+'px';c.style.cursor='pointer';c.style.borderRadius='10px';
+        c.title='タップで再生';c.__btAnimUrl=img.getAttribute('src');
+        img.__btFrozen=1;clearTimeout(img.__btT);
+        img.parentNode.replaceChild(c,img);
+      }catch(e){}
+    }
+    function arm(img,ms){if(!img||img.__btArmed||img.__btFrozen)return;img.__btArmed=1;clearTimeout(img.__btT);img.__btT=setTimeout(function(){freeze(img)},ms||AUTO_MS)}
+    function scan(root){
+      var box=(root&&root.querySelectorAll)?root:document;
+      try{var ims=box.querySelectorAll(SEL);for(var i=0;i<ims.length;i++)arm(ims[i],AUTO_MS)}catch(e){}
+      try{if(box!==document&&box.matches&&box.matches(SEL))arm(box,AUTO_MS)}catch(e){}
+    }
+    document.addEventListener('click',function(e){
+      var t=e.target;if(!t||t.tagName!=='CANVAS'||!t.__btAnimUrl)return;
+      if(!t.closest||!t.closest('.msg-sticker'))return;
+      e.preventDefault();e.stopPropagation();
+      var img=document.createElement('img');
+      img.setAttribute('src',t.__btAnimUrl);img.setAttribute('alt','スタンプ');
+      img.className=String(t.className||'').replace('bt-anim-canvas','').replace(/\s+/g,' ').trim();
+      if(t.parentNode)t.parentNode.replaceChild(img,t);
+      arm(img,REPLAY_MS);
+    },true);
+    scan(document);
+    try{new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){var n=ms[i].target;if(n&&n.nodeType===1)scan(n);else if(n&&n.parentNode)scan(n.parentNode)}}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
+  })();
   function enhance(){
     var map={};rows().forEach(function(r){if(r&&r.image_url)map[r.image_url]=r});
     document.querySelectorAll('.sticker-card,.sticker-item').forEach(function(el){
@@ -1798,9 +1835,9 @@ const KEEP_SHIM = `<script>(function(){
     if(q('btKeepRow'))return true;
     var item=document.createElement('div');item.id='btKeepRow';
     var nat=(list.id==='friendList'||list.id==='friendsList'||!!list.querySelector('.friend-row'));
-    if(nat){item.className='friend-row';item.innerHTML='<div class="bt-keep-av">📝</div><div class="info"><div class="name">Keepメモ <span class="bt-keep-badge">自分用</span></div><div class="status">メモ・画像を自分だけに保存</div></div>'}
-    else{item.className='list-item';item.innerHTML='<div class="bt-keep-av">📝</div><div class="list-info"><div class="list-name">Keepメモ<span class="bt-keep-badge">自分用</span></div><div class="list-preview">メモ・画像を自分だけに保存</div></div>'}
-    item.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openKeep()},true);
+    if(nat){item.className='friend-row';item.innerHTML='<div class="bt-keep-av">📝</div><div class="info"><div class="name">Keepメモ <span class="bt-keep-badge">自分用</span></div><div class="status">通話以外の全機能が使えます（自分専用）</div></div>'}
+    else{item.className='list-item';item.innerHTML='<div class="bt-keep-av">📝</div><div class="list-info"><div class="list-name">Keepメモ<span class="bt-keep-badge">自分用</span></div><div class="list-preview">通話以外の全機能が使えます（自分専用）</div></div>'}
+    item.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();enterKeep()},true);
     list.insertBefore(item,list.firstChild);
     return true;
   }
@@ -1870,6 +1907,59 @@ const KEEP_SHIM = `<script>(function(){
     await render();
   }
   window.__btOpenKeep=openKeep;
+  /* ===== Keepメモ: 自分専用トーク（通話以外の全機能） ===== */
+  function isKeepConv(c){return !!c&&c.type==='self'}
+  function keepConvOf(list){try{return (list||[]).filter(function(c){return c&&c.type==='self'&&Array.isArray(c.member_ids)&&c.member_ids.length===1&&String(c.member_ids[0])===String(ME.id)})[0]||null}catch(e){return null}}
+  async function ensureKeepConv(){
+    var all=[];try{all=await API.listAll('conversations')}catch(e){}
+    var c=keepConvOf(all);if(c)return c;
+    return await API.create('conversations',{type:'self',name:'Keepメモ',member_ids:[ME.id],last_message:'',last_message_at:Date.now()});
+  }
+  function setCall(show){['voiceCallBtn','videoCallBtn'].forEach(function(id){var b=q(id);if(b)b.style.display=show?'':'none'})}
+  function keepHeader(){
+    var t=q('chatHeaderTitle'),a=q('chatHeaderAvatar');
+    if(t)t.textContent='Keepメモ';
+    if(a)a.src='https://api.dicebear.com/7.x/thumbs/svg?seed=keepmemo';
+    setCall(false);
+  }
+  function wrapApp(){
+    if(typeof window.openConversation==='function'&&!window.__btOpenConvWrap){
+      var orig=window.openConversation;
+      window.openConversation=async function(convId){
+        var r=await orig.apply(this,arguments);
+        var c=null;try{c=(conversations||[]).filter(function(x){return x.id===convId})[0]||null}catch(e){}
+        if(!c){try{c=await API.get('conversations',convId)}catch(e){}}
+        if(isKeepConv(c))keepHeader();else setCall(true);
+        return r;
+      };
+      window.__btOpenConvWrap=1;
+    }
+    if(typeof window.renderChatList==='function'&&!window.__btRenderListWrap){
+      var orl=window.renderChatList;
+      window.renderChatList=function(){
+        var saved=null;
+        try{saved=conversations;conversations=(conversations||[]).filter(function(c){return !isKeepConv(c)})}catch(e){}
+        var r=orl.apply(this,arguments);
+        try{if(saved)conversations=saved}catch(e){}
+        return r;
+      };
+      window.__btRenderListWrap=1;
+    }
+  }
+  wrapApp();
+  document.addEventListener('DOMContentLoaded',function(){wrapApp();setTimeout(wrapApp,600)});
+  async function openKeepChat(){
+    try{
+      if(typeof showView==='function')showView('chats');
+      var c=await ensureKeepConv();
+      if(typeof openConversation!=='function'){toast2('画面の準備中です。少し待ってからもう一度お試しください');return}
+      await openConversation(c.id);
+      keepHeader();
+      setInterval(function(){try{if(String(activeConversationId)===String(c.id))keepHeader()}catch(e){}},1200);
+    }catch(e){toast2('Keepメモを開けませんでした: '+(e&&e.message?e.message:''))}
+  }
+  function enterKeep(){if(!agreed()){showTerms(function(){openKeepChat()});return}openKeepChat()}
+  window.__btOpenKeep=enterKeep;window.__btEnterKeep=enterKeep;
 })();</script>`;
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
