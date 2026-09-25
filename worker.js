@@ -719,7 +719,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-L';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-M';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -1200,7 +1200,16 @@ const MEDIA_SHIM = `<script>(function(){
         input=input+(input.indexOf('?')>=0?'&':'?')+'bt_conv='+encodeURIComponent(activeConversationId);
       }
     }catch(e){console.warn('[bt] media upload failed',e)}
-    var res=await raw(input,init);
+    var res;
+    try{res=await raw(input,init)}
+    catch(netErr){
+      var isGet=!init||!init.method||String(init.method).toUpperCase()==='GET';
+      var su2=typeof input==='string'?input:'';
+      var alt='https://bluetalk.pages.dev';
+      if(isGet&&su2&&su2.charAt(0)==='/'&&location.host!==alt.replace('https://','')){
+        res=await raw(alt+su2,init);
+      }else{throw netErr}
+    }
     try{
       var su=typeof input==='string'?input:'';
       if(su.indexOf('/tables/messages')===0){var cl=res.clone();cl.json().then(xferIndex).catch(function(){})}
@@ -1640,9 +1649,22 @@ const BAN_SCRIPT = `<script>(function(){
 })();
 </script>`;
 
+// 上流（Genspark UI）のHTMLに古い世代の注入スクリプトが残っていると、
+// 二重注入や壊れたスクリプトの実行でアプリ全体がエラーになる。
+// 現行版を注入する前に、定義済みマーカーを持つ古い <script> を取り除く。
+const STALE_MARKERS = ['if(window.__btMediaShim)return', 'if(window.__btCall)return', 'if(window.__btGroup)return', 'if(window.__btStickerShim)return', 'if(window.__btBan)return', 'BT 0925-', 'BT 0926-'];
+function stripStaleInjection(html) {
+  try {
+    return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (block) => {
+      for (const m of STALE_MARKERS) if (block.indexOf(m) >= 0) return '';
+      return block;
+    });
+  } catch (e) { return html; }
+}
+
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
-  const text = await response.text();
+  const text = stripStaleInjection(await response.text());
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
   return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
