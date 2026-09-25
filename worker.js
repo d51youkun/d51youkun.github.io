@@ -942,7 +942,7 @@ const MEDIA_SHIM = `<script>(function(){
       try{
         var AC=window.AudioContext||window.webkitAudioContext;
         if(AC){
-          ac=new AC();
+          ac=new AC();try{ac.resume()}catch(e){};
           var srcNode=ac.createMediaElementSource(v);
           var dst=ac.createMediaStreamDestination();
           var g=ac.createGain();g.gain.value=0;
@@ -962,21 +962,36 @@ const MEDIA_SHIM = `<script>(function(){
       var chunks=[];rec.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data)};
       var stopped=new Promise(function(res){rec.onstop=res});
       var dur=v.duration||0;
+      if(!isFinite(dur)||dur<=0)throw new Error('動画の長さを取得できませんでした。この動画は圧縮できません');
       rec.start(2000);
-      try{await v.play()}catch(e){throw new Error('再生を開始できませんでした。もう一度お試しください')}
+      try{await v.play()}catch(e){
+        try{v.muted=true;await v.play()}catch(e2){throw new Error('再生を開始できませんでした。もう一度お試しください')}
+      }
+      var stall=null,lastT=-1,lastMove=Date.now();
+      if(onprog)onprog(1);
+      var wd=setInterval(function(){
+        var t=v.currentTime||0;
+        if(t>lastT+0.05){lastT=t;lastMove=Date.now();return}
+        var el=Date.now()-lastMove;
+        if(document.hidden&&el>15000)stall=new Error('アプリが背面になったため圧縮を継続できません。画面を開いたままお試しください');
+        else if(el>25000)stall=new Error('動画の再生が止まりました。この端末では圧縮を継続できません');
+      },1000);
       await new Promise(function(res){
-        if(v.onended===null){}
-        v.onended=function(){res()};
-        (function tick(){
+        var fin=false;
+        function done(){if(fin)return;fin=true;clearInterval(wd);clearInterval(iv);res()}
+        v.onended=done;
+        function draw(){
           try{ctx.drawImage(v,0,0,w,h)}catch(e){}
           if(onprog)onprog(Math.max(1,Math.min(99,Math.round(100*(v.currentTime||0)/Math.max(1,dur)))));
-          if(v.ended||(v.duration&&v.currentTime>=v.duration-0.03)){res();return}
-          requestAnimationFrame(tick);
-        })();
-        setTimeout(res,((dur||900)+90)*1000);
+        }
+        function tick(){draw();if(stall||v.ended)return done();requestAnimationFrame(tick)}
+        var iv=setInterval(function(){draw();if(stall)return done();if(v.ended||v.currentTime>=dur-0.03)return done()},200);
+        tick();
+        setTimeout(done,((dur||900)+120)*1000);
       });
+      if(stall)throw stall;
       try{rec.stop()}catch(e){}
-      await stopped;
+      await Promise.race([stopped,new Promise(function(r){setTimeout(r,15000)})]);
       if(!chunks.length)throw new Error('圧縮結果が空でした');
       var out=new Blob(chunks,{type:mime.indexOf('mp4')>=0?'video/mp4':'video/webm'});
       try{out.name=String(file.name||'video').replace(/\\.[^.]+$/,'')+(mime.indexOf('mp4')>=0?'.mp4':'.webm')}catch(e){}
@@ -995,7 +1010,7 @@ const MEDIA_SHIM = `<script>(function(){
       return null;
     }
     var dur=await btVideoDuration(file);
-    if(!dur||dur<=0){
+    if(!dur||dur<=0||!isFinite(dur)){
       toast(label+'が大きすぎます（'+fmtMB(file.size)+'／上限'+fmtMB(MAX_SEND)+'）');
       return null;
     }
