@@ -744,7 +744,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-O';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-P';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -1824,6 +1824,48 @@ const KEEP_SHIM = `<script>(function(){
   css.textContent='#btKeepRow .bt-keep-av{width:48px;height:48px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex:none}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepModal{position:fixed;inset:0;z-index:2147483000;background:rgba(3,6,12,.78);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepModal .bt-keep-card{background:#141b26;color:#fff;width:520px;max-width:96vw;max-height:86vh;border-radius:18px;padding:16px;display:flex;flex-direction:column;box-shadow:0 16px 60px rgba(0,0,0,.6)}#btKeepModal h3{margin:0 0 4px;font-size:17px}#btKeepModal .bt-keep-sub{color:#9fb2c9;font-size:12px;margin:0 0 12px}#btKeepModal textarea{width:100%;box-sizing:border-box;min-height:96px;background:#05070c;color:#fff;border:2px solid #42536a;border-radius:12px;padding:10px;font-size:14px;resize:vertical}#btKeepModal .bt-keep-actions{display:flex;gap:8px;margin:10px 0 4px}#btKeepModal .bt-keep-actions button{flex:1;border-radius:12px;padding:11px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepModal .bt-keep-save{background:#1877f2!important;border-color:#1877f2!important}#btKeepModal .bt-keep-close{background:#223047!important;border:none!important}#btKeepModal .bt-keep-list{overflow:auto;margin-top:12px}#btKeepModal .bt-keep-item{background:#101827;border:1px solid #2a3950;border-radius:12px;padding:10px;margin-bottom:8px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}#btKeepModal .bt-keep-meta{color:#9fb2c9;font-size:11px;margin-top:6px;display:flex;justify-content:space-between;align-items:center}#btKeepModal .bt-keep-del{background:#3a1f26;border:none;color:#ff9d9d;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}#btKeepTerms{position:fixed;inset:0;z-index:2147483001;background:rgba(3,6,12,.85);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepTerms .bt-keep-tcard{background:#141b26;color:#fff;width:560px;max-width:96vw;max-height:88vh;border-radius:18px;padding:18px;display:flex;flex-direction:column}#btKeepTerms h3{margin:0 0 8px;font-size:17px}#btKeepTerms ol{overflow:auto;padding-left:20px;margin:0 0 12px;font-size:13px;line-height:1.75;color:#dfe8f3}#btKeepTerms li{margin-bottom:8px}#btKeepTerms .bt-keep-tactions{display:flex;gap:8px}#btKeepTerms button{flex:1;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepTerms .bt-keep-agree{background:#1877f2!important;border-color:#1877f2!important}';
   document.head.appendChild(css);
   var css2=document.createElement('style');css2.textContent='#btKeepRow{cursor:pointer}#btKeepRow .bt-keep-av{width:44px;height:44px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex:none;margin-right:10px}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepRow .name,#btKeepRow .list-name{font-weight:600}';document.head.appendChild(css2);
+  /* ===== 友達リスト: 削除ボタン ===== */
+  function meId(){try{if(typeof ME==='object'&&ME&&ME.id)return ME.id}catch(e){}return myid()}
+  function decorate(){
+    try{
+      var list=listEl();if(!list)return;
+      var rs=list.querySelectorAll('.friend-row');
+      for(var i=0;i<rs.length;i++){
+        var row=rs[i];
+        if(row.id==='btKeepRow'||row.__btDel)continue;
+        var act=row.querySelector('.row-actions');if(!act)continue;
+        var btn=row.querySelector('[data-chat]');var uid=btn?btn.getAttribute('data-chat'):null;
+        if(!uid)continue;
+        row.__btDel=1;
+        var d=document.createElement('button');
+        d.className='mini-btn danger';d.title='友達を削除';d.setAttribute('data-btunfriend',uid);
+        d.innerHTML='<i class="fa-solid fa-user-minus"></i>';
+        act.appendChild(d);
+      }
+    }catch(e){}
+  }
+  async function btUnfriend(uid){
+    var nm='';try{var u=(allUsers||[]).filter(function(x){return String(x.id)===String(uid)})[0];nm=u?(u.display_name||u.username||''):''}catch(e){}
+    if(!confirm('「'+(nm||uid)+'」を友達から削除しますか？\nトーク履歴は残ります（トーク一覧から開けます）。'))return;
+    try{
+      var my=meId();
+      var rels=await API.listAll('friendships');
+      var tg=rels.filter(function(r){
+        return (String(r.user_id)===String(my)&&String(r.friend_id)===String(uid))||(String(r.user_id)===String(uid)&&String(r.friend_id)===String(my));
+      });
+      var n=0;
+      for(var i=0;i<tg.length;i++){try{if(await API.remove('friendships',tg[i].id))n++}catch(e){}}
+      toast2(n?'友達から削除しました':'削除できませんでした');
+      if(typeof refreshFriends==='function')await refreshFriends();
+      decorate();
+    }catch(e){toast2('削除に失敗しました')}
+  }
+  document.addEventListener('click',function(e){
+    var t=e.target&&e.target.closest?e.target.closest('[data-btunfriend]'):null;if(!t)return;
+    e.preventDefault();e.stopImmediatePropagation();
+    btUnfriend(t.getAttribute('data-btunfriend'));
+  },true);
+  window.__btUnfriend=btUnfriend;
   function listEl(){
     var ids=['friendList','friend-list','friendsList','friends-list','friend_list'];
     for(var i=0;i<ids.length;i++){var el=q(ids[i]);if(el)return el}
@@ -1842,8 +1884,8 @@ const KEEP_SHIM = `<script>(function(){
     return true;
   }
   var tries=0;
-  var iv=setInterval(function(){tries++;if(ensureRow()||tries>600)clearInterval(iv)},500);
-  try{new MutationObserver(function(){ensureRow()}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
+  var iv=setInterval(function(){tries++;try{ensureRow();decorate()}catch(e){}if(tries>600)clearInterval(iv)},500);
+  try{new MutationObserver(function(){try{ensureRow();decorate()}catch(e){}}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
   function agreed(){try{return localStorage.getItem(TERMS_KEY)==='1'}catch(e){return false}}
   function showTerms(cb){
     var old=q('btKeepTerms');if(old)old.remove();
@@ -1959,7 +2001,7 @@ const KEEP_SHIM = `<script>(function(){
     }catch(e){toast2('Keepメモを開けませんでした: '+(e&&e.message?e.message:''))}
   }
   function enterKeep(){if(!agreed()){showTerms(function(){openKeepChat()});return}openKeepChat()}
-  window.__btOpenKeep=enterKeep;window.__btEnterKeep=enterKeep;
+  window.__btOpenKeep=enterKeep;window.__btEnterKeep=enterKeep;try{decorate()}catch(e){}
 })();</script>`;
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
