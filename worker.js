@@ -744,7 +744,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-M';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-N';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -1648,6 +1648,8 @@ const STICKER_SHIM = `<script>(function(){
   }
   function btSoundMap(url){try{var rs=rows();for(var i=0;i<rs.length;i++){var r=rs[i];if(!r||!Array.isArray(r.pack_sounds)||!Array.isArray(r.pack_stickers))continue;var ix=r.pack_stickers.indexOf(url);if(ix>=0&&r.pack_sounds[ix])return r.pack_sounds[ix]}}catch(e){}return null}
   document.addEventListener('click',function(e){
+    var el2=e.target&&e.target.closest?e.target.closest('.sticker-item,.sticker-card'):null;
+    if(el2){try{var rs2=rows();var k2=el2.getAttribute('data-send')||((el2.querySelector('img')||{}).src||'');for(var i2=0;i2<rs2.length;i2++){var r2=rs2[i2];if(r2&&r2.image_url===k2&&Array.isArray(r2.pack_stickers)&&r2.pack_stickers.length){el2.setAttribute('data-send',r2.pack_stickers[0]);break}}}catch(e2){}}
     var im=e.target&&e.target.closest?e.target.closest('img'):null;if(!im)return;
     var src=im.getAttribute('src')||'';if(!src)return;
     var su=btSoundMap(src);if(!su)return;
@@ -1659,6 +1661,7 @@ const STICKER_SHIM = `<script>(function(){
     document.querySelectorAll('.sticker-card,.sticker-item').forEach(function(el){
       var url=el.classList.contains('sticker-item')?(el.getAttribute('data-send')||''):(el.querySelector('img')?el.querySelector('img').src:'');
       var row=map[url];if(!row||el.__btPack)return;
+      try{if(row.animated&&Array.isArray(row.pack_stickers)&&row.pack_stickers.length){var _u=el.getAttribute('data-send')||'';if(_u.indexOf('/product/')>=0){el.setAttribute('data-send',row.pack_stickers[0]);var _imq=el.querySelector('img');if(_imq)_imq.setAttribute('src',row.pack_stickers[0])}}}catch(e){}
       el.__btPack=1;el.classList.add(el.classList.contains('sticker-item')?'bt-sticker-item':'bt-sticker-card');
       if(packOf(row)){var bd=document.createElement('span');bd.className='bt-pack-badge';bd.textContent=(row.sound?'🔊':(row.animated?'🎬':'📦'))+row.pack_stickers.length+'枚';el.appendChild(bd);
         el.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openPack(row)},true);}
@@ -1750,7 +1753,7 @@ const BAN_SCRIPT = `<script>(function(){
 // 上流（Genspark UI）のHTMLに古い世代の注入スクリプトが残っていると、
 // 二重注入や壊れたスクリプトの実行でアプリ全体がエラーになる。
 // 現行版を注入する前に、定義済みマーカーを持つ古い <script> を取り除く。
-const STALE_MARKERS = ['if(window.__btMediaShim)return', 'if(window.__btCall)return', 'if(window.__btGroup)return', 'if(window.__btStickerShim)return', 'if(window.__btBan)return', 'BT 0925-', 'BT 0926-'];
+const STALE_MARKERS = ['if(window.__btKeep)return', 'if(window.__btMediaShim)return', 'if(window.__btCall)return', 'if(window.__btGroup)return', 'if(window.__btStickerShim)return', 'if(window.__btBan)return', 'BT 0925-', 'BT 0926-'];
 function stripStaleInjection(html) {
   try {
     return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (block) => {
@@ -1783,17 +1786,26 @@ const KEEP_SHIM = `<script>(function(){
   var css=document.createElement('style');
   css.textContent='#btKeepRow .bt-keep-av{width:48px;height:48px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex:none}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepModal{position:fixed;inset:0;z-index:2147483000;background:rgba(3,6,12,.78);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepModal .bt-keep-card{background:#141b26;color:#fff;width:520px;max-width:96vw;max-height:86vh;border-radius:18px;padding:16px;display:flex;flex-direction:column;box-shadow:0 16px 60px rgba(0,0,0,.6)}#btKeepModal h3{margin:0 0 4px;font-size:17px}#btKeepModal .bt-keep-sub{color:#9fb2c9;font-size:12px;margin:0 0 12px}#btKeepModal textarea{width:100%;box-sizing:border-box;min-height:96px;background:#05070c;color:#fff;border:2px solid #42536a;border-radius:12px;padding:10px;font-size:14px;resize:vertical}#btKeepModal .bt-keep-actions{display:flex;gap:8px;margin:10px 0 4px}#btKeepModal .bt-keep-actions button{flex:1;border-radius:12px;padding:11px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepModal .bt-keep-save{background:#1877f2!important;border-color:#1877f2!important}#btKeepModal .bt-keep-close{background:#223047!important;border:none!important}#btKeepModal .bt-keep-list{overflow:auto;margin-top:12px}#btKeepModal .bt-keep-item{background:#101827;border:1px solid #2a3950;border-radius:12px;padding:10px;margin-bottom:8px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}#btKeepModal .bt-keep-meta{color:#9fb2c9;font-size:11px;margin-top:6px;display:flex;justify-content:space-between;align-items:center}#btKeepModal .bt-keep-del{background:#3a1f26;border:none;color:#ff9d9d;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}#btKeepTerms{position:fixed;inset:0;z-index:2147483001;background:rgba(3,6,12,.85);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepTerms .bt-keep-tcard{background:#141b26;color:#fff;width:560px;max-width:96vw;max-height:88vh;border-radius:18px;padding:18px;display:flex;flex-direction:column}#btKeepTerms h3{margin:0 0 8px;font-size:17px}#btKeepTerms ol{overflow:auto;padding-left:20px;margin:0 0 12px;font-size:13px;line-height:1.75;color:#dfe8f3}#btKeepTerms li{margin-bottom:8px}#btKeepTerms .bt-keep-tactions{display:flex;gap:8px}#btKeepTerms button{flex:1;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepTerms .bt-keep-agree{background:#1877f2!important;border-color:#1877f2!important}';
   document.head.appendChild(css);
+  var css2=document.createElement('style');css2.textContent='#btKeepRow{cursor:pointer}#btKeepRow .bt-keep-av{width:44px;height:44px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex:none;margin-right:10px}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepRow .name,#btKeepRow .list-name{font-weight:600}';document.head.appendChild(css2);
+  function listEl(){
+    var ids=['friendList','friend-list','friendsList','friends-list','friend_list'];
+    for(var i=0;i<ids.length;i++){var el=q(ids[i]);if(el)return el}
+    var r=document.querySelector('.friend-row');if(r&&r.parentNode)return r.parentNode;
+    return null;
+  }
   function ensureRow(){
-    var list=q('friend-list');if(!list)return false;
+    var list=listEl();if(!list)return false;
     if(q('btKeepRow'))return true;
-    var item=document.createElement('div');item.className='list-item';item.id='btKeepRow';
-    item.innerHTML='<div class="bt-keep-av">📝</div><div class="list-info"><div class="list-name">Keepメモ<span class="bt-keep-badge">自分用</span></div><div class="list-preview">メモ・画像を自分だけに保存</div></div>';
+    var item=document.createElement('div');item.id='btKeepRow';
+    var nat=(list.id==='friendList'||list.id==='friendsList'||!!list.querySelector('.friend-row'));
+    if(nat){item.className='friend-row';item.innerHTML='<div class="bt-keep-av">📝</div><div class="info"><div class="name">Keepメモ <span class="bt-keep-badge">自分用</span></div><div class="status">メモ・画像を自分だけに保存</div></div>'}
+    else{item.className='list-item';item.innerHTML='<div class="bt-keep-av">📝</div><div class="list-info"><div class="list-name">Keepメモ<span class="bt-keep-badge">自分用</span></div><div class="list-preview">メモ・画像を自分だけに保存</div></div>'}
     item.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openKeep()},true);
     list.insertBefore(item,list.firstChild);
     return true;
   }
   var tries=0;
-  var iv=setInterval(function(){tries++;if(ensureRow()||tries>60)clearInterval(iv)},500);
+  var iv=setInterval(function(){tries++;if(ensureRow()||tries>600)clearInterval(iv)},500);
   try{new MutationObserver(function(){ensureRow()}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
   function agreed(){try{return localStorage.getItem(TERMS_KEY)==='1'}catch(e){return false}}
   function showTerms(cb){
