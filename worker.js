@@ -710,7 +710,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let keys='';let last=0;function adminTrigger(e){const now=Date.now();if(now-last>4000)keys='';last=now;keys+=(e.key||'');if(keys.length>40)keys=keys.slice(-40);if(keys.endsWith('d51-498go'))showAdminLogin()}
   function showAdminLogin(){location.href='/admin.html'}
-  function applyBadges(){if(typeof allUsers==='undefined'||!allUsers.length)return;const byName=Object.fromEntries(allUsers.map(u=>[u.display_name,u]));document.querySelectorAll('.name,#profileName').forEach(el=>{if(el.dataset.btBadge)return;const u=byName[el.textContent.trim()];if(!u||(!u.verified&&!u.title))return;el.dataset.btBadge='1';if(u.verified){const v=document.createElement('span');v.textContent='\u2713';v.title='BlueTalkPremium';v.style='display:inline-block;margin-left:5px;color:#d7a600;font-weight:900';el.appendChild(v)}if(u.title){const t=document.createElement('span');t.textContent=' '+u.title;t.style='margin-left:5px;color:#b8860b;font-weight:700';el.appendChild(t)}})}
+  function applyBadges(){if(typeof allUsers==='undefined'||!allUsers.length)return;const byName=Object.fromEntries(allUsers.map(u=>[u.display_name,u]));document.querySelectorAll('.name,#profileName').forEach(el=>{if(el.dataset.btBadge)return;const u=byName[el.textContent.trim()];if(!u||(!u.verified&&!u.title))return;el.dataset.btBadge='1';if(u.verified){const v=document.createElement('span');v.textContent='\\u2713';v.title='BlueTalkPremium';v.style='display:inline-block;margin-left:5px;color:#d7a600;font-weight:900';el.appendChild(v)}if(u.title){const t=document.createElement('span');t.textContent=' '+u.title;t.style='margin-left:5px;color:#b8860b;font-weight:700';el.appendChild(t)}})}
   function bindAdminName(){const n=document.querySelector('#profileName');if(!n||n.dataset.btAdminClick)return;n.dataset.btAdminClick='1';n.style.cursor='pointer';n.title='管理者メニュー';n.onclick=()=>{if(localStorage.getItem('bluetalk_admin_token'))location.href='/admin.html';else showAdminLogin()}}
   function repairImages(){document.querySelectorAll('img').forEach(img=>{if(img.dataset.btFallback)return;img.dataset.btFallback='1';img.addEventListener('error',()=>{if(img.dataset.btBroken)return;img.dataset.btBroken='1';img.src='https://api.dicebear.com/7.x/thumbs/svg?seed=bluetalk-fallback'})})}
   new MutationObserver(()=>{repairImages();applyBadges();bindAdminName()}).observe(document.documentElement,{childList:true,subtree:true});
@@ -786,8 +786,8 @@ const MEDIA_SHIM = `<script>(function(){
     return BIG;
   };
   BIG.ready=(async function(){await BIG.sync();return BIG})();
-  function isVideoFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('video/')===0)||/\.(mp4|mov|m4v|webm|mkv|avi|3gp|mts|m2ts)$/i.test(f.name||''))}
-  function isImageFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('image/')===0)||/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(f.name||''))}
+  function isVideoFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('video/')===0)||/\\.(mp4|mov|m4v|webm|mkv|avi|3gp|mts|m2ts)$/i.test(f.name||''))}
+  function isImageFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('image/')===0)||/\\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(f.name||''))}
   async function uploadKVDataUrl(d){
     await BIG.sync();
     if(d.length>4*1024*1024){
@@ -971,7 +971,7 @@ const MEDIA_SHIM = `<script>(function(){
       await stopped;
       if(!chunks.length)throw new Error('圧縮結果が空でした');
       var out=new Blob(chunks,{type:mime.indexOf('mp4')>=0?'video/mp4':'video/webm'});
-      try{out.name=String(file.name||'video').replace(/\.[^.]+$/,'')+(mime.indexOf('mp4')>=0?'.mp4':'.webm')}catch(e){}
+      try{out.name=String(file.name||'video').replace(/\\.[^.]+$/,'')+(mime.indexOf('mp4')>=0?'.mp4':'.webm')}catch(e){}
       return out;
     }finally{
       try{if(rec&&rec.state!=='inactive')rec.stop()}catch(e){}
@@ -994,7 +994,7 @@ const MEDIA_SHIM = `<script>(function(){
     var target=dur*6000000/8>MAX_SEND*0.9?720:1080;
     var est=dur*(target>=1080?6000000:3000000)/8;
     var mins=Math.ceil(dur/60);
-    var ok=window.confirm(label+'が大きすぎます（'+fmtMB(file.size)+'／上限'+fmtMB(MAX_SEND)+'）。\n\n端末内で'+target+'pに圧縮してから送信します。\n・推定サイズ: 約'+fmtMB(est)+'\n・所要時間: 動画と同じ長さ（約'+mins+'分）\n\nこのまま圧縮を開始しますか？\n（「キャンセル」で送信を中止します）');
+    var ok=window.confirm(label+'が大きすぎます（'+fmtMB(file.size)+'／上限'+fmtMB(MAX_SEND)+'）。\\n\\n端末内で'+target+'pに圧縮してから送信します。\\n・推定サイズ: 約'+fmtMB(est)+'\\n・所要時間: 動画と同じ長さ（約'+mins+'分）\\n\\nこのまま圧縮を開始しますか？\\n（「キャンセル」で送信を中止します）');
     if(!ok){toast('送信を中止しました');return null}
     btProg('圧縮中',0,'動画と同じ長さの時間がかかります（約'+mins+'分）・画面を開いたままお待ちください');
     var out=null;
@@ -1024,7 +1024,7 @@ const MEDIA_SHIM = `<script>(function(){
       if(!t||!t.tid||!t.parts||!t.parts.length)return null;
       if(XFER.list[t.tid])return XFER.list[t.tid];
       XFER.list[t.tid]=t;
-      t.parts.forEach(function(p){if(p&&p.u){var m=/^\/bt-media\/([A-Za-z0-9-]+)$/.exec(p.u);if(m)XFER.byPart[m[1]]=t}});
+      t.parts.forEach(function(p){if(p&&p.u){var m=/^\\/bt-media\\/([A-Za-z0-9-]+)$/.exec(p.u);if(m)XFER.byPart[m[1]]=t}});
       xferNotify(t);
       return t;
     }catch(e){return null}
@@ -1106,7 +1106,7 @@ const MEDIA_SHIM = `<script>(function(){
     var PART_MAX=Math.max(8*1024*1024,Math.floor(MAX_SEND*0.98));
     var nparts=Math.max(1,Math.ceil(file.size/PART_MAX));
     if(BIG.maxTransferBytes>0&&file.size>BIG.maxTransferBytes){
-      var go=window.confirm('合計 '+fmtMB(file.size)+' は、このアカウントの保存枠（'+fmtMB(BIG.maxTransferBytes)+'）を超えます。\n保存枠を超えるとアップロードが途中で失敗します。続けますか？');
+      var go=window.confirm('合計 '+fmtMB(file.size)+' は、このアカウントの保存枠（'+fmtMB(BIG.maxTransferBytes)+'）を超えます。\\n保存枠を超えるとアップロードが途中で失敗します。続けますか？');
       if(!go)return null;
     }
     var tid=xferId(),parts=[];
@@ -1173,7 +1173,7 @@ const MEDIA_SHIM = `<script>(function(){
     try{
       var a=(e.target&&e.target.closest)?e.target.closest('a[href]'):null;
       if(!a)return;
-      var m=/^\/bt-media\/([A-Za-z0-9-]+)$/.exec(a.getAttribute('href')||'');
+      var m=/^\\/bt-media\\/([A-Za-z0-9-]+)$/.exec(a.getAttribute('href')||'');
       if(!m)return;
       var t=XFER.byPart[m[1]];
       if(!t)return;
@@ -1237,7 +1237,7 @@ const MEDIA_SHIM = `<script>(function(){
       }else if(isVideoFile(file)){
         var vsend=file;
         if(file.size>MAX_SEND){
-          var how=await btChoice('動画が上限を超えています','サイズ: '+fmtMB(file.size)+' ／ 上限: '+fmtMB(MAX_SEND)+'\n送信方法を選んでください。',[
+          var how=await btChoice('動画が上限を超えています','サイズ: '+fmtMB(file.size)+' ／ 上限: '+fmtMB(MAX_SEND)+'\\n送信方法を選んでください。',[
             {label:'圧縮して送る（1080p・容量を大幅に削減）',value:'zip',primary:true},
             {label:'分割してそのまま送る（無劣化・'+Math.ceil(file.size/(MAX_SEND*0.98))+'分割）',value:'split'},
             {label:'キャンセル',value:null}
@@ -1271,7 +1271,7 @@ const MEDIA_SHIM = `<script>(function(){
         if(!fsend)return;
         file=fsend;
       }else{
-        var howg=await btChoice('ファイルが上限を超えています','サイズ: '+fmtMB(file.size)+' ／ 上限: '+fmtMB(MAX_SEND)+'\n分割して送信し、受信側で1つのファイルに自動結合できます。',[
+        var howg=await btChoice('ファイルが上限を超えています','サイズ: '+fmtMB(file.size)+' ／ 上限: '+fmtMB(MAX_SEND)+'\\n分割して送信し、受信側で1つのファイルに自動結合できます。',[
           {label:'分割して送る（'+Math.ceil(file.size/(MAX_SEND*0.98))+'分割・圧縮できる形式は自動で圧縮）',value:'split',primary:true},
           {label:'キャンセル',value:null}
         ]);
@@ -1502,8 +1502,8 @@ const STICKER_SHIM = `<script>(function(){
   if(window.__btStickerShim)return;window.__btStickerShim=1;
   function toast(s){try{if(typeof showToast==='function')showToast(s)}catch(e){}}
   function myId(){return(typeof ME!=='undefined'&&ME)?ME.id:''}
-  function lineProduct(v){var m=v.match(/store\.line\.me\/stickershop\/product\/(\d+)/)||v.match(/line\.me\/S?\/sticker\/(\d+)/)||v.match(/^\s*(\d{6,12})\s*$/);return m?m[1]:null}
-  function lineSingle(v){var m=v.match(/stickershop\.line-scdn\.net\/stickershop\/v1\/sticker\/(\d+)\//);return m?{url:v,name:'LINEスタンプ'}:null}
+  function lineProduct(v){var m=v.match(/store\\.line\\.me\\/stickershop\\/product\\/(\\d+)/)||v.match(/line\\.me\\/S?\\/sticker\\/(\\d+)/)||v.match(/^\\s*(\\d{6,12})\\s*$/);return m?m[1]:null}
+  function lineSingle(v){var m=v.match(/stickershop\\.line-scdn\\.net\\/stickershop\\/v1\\/sticker\\/(\\d+)\\//);return m?{url:v,name:'LINEスタンプ'}:null}
   function rows(){try{return(typeof myStickers!=='undefined'&&Array.isArray(myStickers))?myStickers:[]}catch(e){return[]}}
   function packOf(row){return row&&Array.isArray(row.pack_stickers)?row:null}
   async function importProduct(pid){
