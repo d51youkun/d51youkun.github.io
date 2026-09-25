@@ -613,7 +613,7 @@ async function handleLineStickers(request, env, url, origin) {
   const m = url.pathname.match(/^\/api\/line-stickers\/(\d{4,12})$/);
   if (!m) return null;
   const pid = m[1];
-  const cacheKey = `bluetalk:linepack:${pid}`;
+  const cacheKey = `bluetalk:linepack:v2:${pid}`;
   const cached = await env.BLUETALK_KV.get(cacheKey);
   if (cached) return json(JSON.parse(cached), 200, origin);
   const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36', 'Accept-Language': 'ja,en;q=0.8' };
@@ -639,8 +639,19 @@ async function handleLineStickers(request, env, url, origin) {
     if (ids.length >= 60) break;
   }
   if (!ids.length) return json({ ok: false, error: 'no stickers found' }, 404, origin);
-  const stickers = ids.map((sid) => `https://stickershop.line-scdn.net/stickershop/v1/sticker/${sid}/android/sticker.png?v=1`);
-  const payload = { ok: true, title, productId: pid, stickers };
+  let animated = false;
+  try {
+    const probeUrl = `https://stickershop.line-scdn.net/stickershop/v1/sticker/${ids[0]}/iphone/sticker_animation@2x.png?v=1`;
+    const head = await fetch(probeUrl, { method: 'HEAD', headers });
+    if (head.ok) animated = true;
+    else if (head.status === 405 || head.status === 501) {
+      const g = await fetch(probeUrl, { headers });
+      animated = g.ok;
+    }
+  } catch (e) { animated = false; }
+  const variant = animated ? 'iphone/sticker_animation.png' : 'android/sticker.png';
+  const stickers = ids.map((sid) => `https://stickershop.line-scdn.net/stickershop/v1/sticker/${sid}/${variant}?v=1`);
+  const payload = { ok: true, title, productId: pid, animated, stickers };
   await env.BLUETALK_KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: 86400 });
   return json(payload, 200, origin);
 }
@@ -1546,12 +1557,12 @@ const STICKER_SHIM = `<script>(function(){
       var dup=null;rows().forEach(function(x){if(x&&String(x.pack_id||'')===String(pid))dup=x});
       if(dup){
         if(!confirm('「'+(j.title||'LINEスタンプ')+'」はすでに取り込んでいます。\\n上書き（更新）しますか？')){toast('取り込みを中止しました');return}
-        await API.update('stickers',dup.id,{image_url:main,name:j.title||'LINEスタンプ',pack_stickers:j.stickers});
+        await API.update('stickers',dup.id,{image_url:main,name:j.title||'LINEスタンプ',pack_stickers:j.stickers,animated:!!j.animated});
         await btRefreshStickers();
         toast((j.title||'スタンプ')+'（'+j.stickers.length+'枚）を更新しました');
         return;
       }
-      await API.create('stickers',{user_id:myId(),image_url:main,name:j.title||'LINEスタンプ',pack_id:String(pid),pack_stickers:j.stickers});
+      await API.create('stickers',{user_id:myId(),image_url:main,name:j.title||'LINEスタンプ',pack_id:String(pid),pack_stickers:j.stickers,animated:!!j.animated});
       if(typeof refreshStickers==='function')await refreshStickers();
       var input=document.getElementById('stickerUrlInput');if(input)input.value='';
       toast((j.title||'スタンプ')+'（'+j.stickers.length+'枚）を取り込みました');
@@ -1607,7 +1618,7 @@ const STICKER_SHIM = `<script>(function(){
     if(!row)return;
     var old=document.getElementById('btPackModal');if(old)old.remove();
     var mo=document.createElement('div');mo.id='btPackModal';
-    var h='<div class="bt-pk-card"><div class="bt-pk-head"><b>'+esc(row.name||'LINEスタンプ')+'</b><small>'+row.pack_stickers.length+'枚</small><button class="bt-pk-del" id="btPkDel">削除</button><button class="bt-pk-close" id="btPkClose">閉じる</button></div><div class="bt-pk-grid" id="btPkGrid">';
+    var h='<div class="bt-pk-card"><div class="bt-pk-head"><b>'+esc(row.name||'LINEスタンプ')+'</b><small>'+(row.animated?'🎬動く・':'')+row.pack_stickers.length+'枚</small><button class="bt-pk-del" id="btPkDel">削除</button><button class="bt-pk-close" id="btPkClose">閉じる</button></div><div class="bt-pk-grid" id="btPkGrid">';
     for(var i=0;i<row.pack_stickers.length;i++){h+='<img src="'+esc(row.pack_stickers[i])+'" data-btsticker="'+esc(row.pack_stickers[i])+'" alt="">'}
     h+='</div><p class="bt-pk-hint">スタンプをタップするとトークに送信されます</p></div>';
     mo.innerHTML=h;
@@ -1632,7 +1643,7 @@ const STICKER_SHIM = `<script>(function(){
       var url=el.classList.contains('sticker-item')?(el.getAttribute('data-send')||''):(el.querySelector('img')?el.querySelector('img').src:'');
       var row=map[url];if(!row||el.__btPack)return;
       el.__btPack=1;el.classList.add(el.classList.contains('sticker-item')?'bt-sticker-item':'bt-sticker-card');
-      if(packOf(row)){var bd=document.createElement('span');bd.className='bt-pack-badge';bd.textContent='📦'+row.pack_stickers.length+'枚';el.appendChild(bd);
+      if(packOf(row)){var bd=document.createElement('span');bd.className='bt-pack-badge';bd.textContent=(row.animated?'🎬':'📦')+row.pack_stickers.length+'枚';el.appendChild(bd);
         el.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openPack(row)},true);}
       (function(r){
         var t=null;
