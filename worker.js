@@ -1543,6 +1543,14 @@ const STICKER_SHIM = `<script>(function(){
       var r=await fetch('/api/line-stickers/'+encodeURIComponent(pid));var j=await r.json();
       if(!r.ok||!j.ok||!j.stickers||!j.stickers.length){toast('スタンプを取得できませんでした（無料スタンプのURLをお試しください）');return}
       var main='https://stickershop.line-scdn.net/stickershop/v1/product/'+pid+'/LINEStorePC/main.png?v=1';
+      var dup=null;rows().forEach(function(x){if(x&&String(x.pack_id||'')===String(pid))dup=x});
+      if(dup){
+        if(!confirm('「'+(j.title||'LINEスタンプ')+'」はすでに取り込んでいます。\\n上書き（更新）しますか？')){toast('取り込みを中止しました');return}
+        await API.update('stickers',dup.id,{image_url:main,name:j.title||'LINEスタンプ',pack_stickers:j.stickers});
+        await btRefreshStickers();
+        toast((j.title||'スタンプ')+'（'+j.stickers.length+'枚）を更新しました');
+        return;
+      }
       await API.create('stickers',{user_id:myId(),image_url:main,name:j.title||'LINEスタンプ',pack_id:String(pid),pack_stickers:j.stickers});
       if(typeof refreshStickers==='function')await refreshStickers();
       var input=document.getElementById('stickerUrlInput');if(input)input.value='';
@@ -1550,7 +1558,14 @@ const STICKER_SHIM = `<script>(function(){
     }catch(e){toast('取り込みに失敗しました')}
   }
   async function importSingle(item){
-    try{await API.create('stickers',{user_id:myId(),image_url:item.url,name:item.name});if(typeof refreshStickers==='function')await refreshStickers();var input=document.getElementById('stickerUrlInput');if(input)input.value='';toast('スタンプを取り込みました')}catch(e){toast('取り込みに失敗しました')}
+    try{
+      var dupS=null;rows().forEach(function(x){if(x&&x.image_url===item.url)dupS=x});
+      if(dupS){toast('このスタンプはすでに取り込んでいます');return}
+      await API.create('stickers',{user_id:myId(),image_url:item.url,name:item.name});
+      if(typeof refreshStickers==='function')await refreshStickers();
+      var input=document.getElementById('stickerUrlInput');if(input)input.value='';
+      toast('スタンプを取り込みました')
+    }catch(e){toast('取り込みに失敗しました')}
   }
   function smart(){
     var input=document.getElementById('stickerUrlInput');var v=input?input.value.trim():'';
@@ -1573,19 +1588,37 @@ const STICKER_SHIM = `<script>(function(){
     smart();
   },true);
   var css=document.createElement('style');
-  css.textContent='.bt-pack-badge{position:absolute;bottom:4px;right:6px;background:rgba(0,0,0,.72);color:#fff;font-size:10px;padding:2px 6px;border-radius:8px;pointer-events:none}.bt-sticker-card,.bt-sticker-item{position:relative;cursor:pointer}#btPackModal{position:fixed;inset:0;z-index:10002;background:rgba(3,6,12,.78);display:flex;align-items:center;justify-content:center;padding:14px}#btPackModal .bt-pk-card{background:#141b26;color:#fff;width:min(430px,94vw);max-height:80vh;border-radius:18px;padding:14px;display:flex;flex-direction:column;box-shadow:0 16px 60px rgba(0,0,0,.6)}#btPackModal .bt-pk-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}#btPackModal .bt-pk-head b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#btPackModal .bt-pk-head small{color:#9fb2c9;flex:none}#btPackModal .bt-pk-close{background:#223047!important;border:none!important;color:#fff!important;border-radius:10px;padding:7px 12px;cursor:pointer;font-size:13px}#btPackModal .bt-pk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;overflow:auto;padding:4px}#btPackModal .bt-pk-grid img{width:100%;border-radius:10px;background:#0d121c;cursor:pointer;transition:transform .12s}#btPackModal .bt-pk-grid img:hover{transform:scale(1.06)}#btPackModal .bt-pk-hint{font-size:11px;color:#9fb2c9;margin:10px 4px 0}';
+  css.textContent='.bt-pack-badge{position:absolute;bottom:4px;right:6px;background:rgba(0,0,0,.72);color:#fff;font-size:10px;padding:2px 6px;border-radius:8px;pointer-events:none}.bt-sticker-card,.bt-sticker-item{position:relative;cursor:pointer}#btPackModal{position:fixed;inset:0;z-index:10002;background:rgba(3,6,12,.78);display:flex;align-items:center;justify-content:center;padding:14px}#btPackModal .bt-pk-card{background:#141b26;color:#fff;width:min(430px,94vw);max-height:80vh;border-radius:18px;padding:14px;display:flex;flex-direction:column;box-shadow:0 16px 60px rgba(0,0,0,.6)}#btPackModal .bt-pk-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}#btPackModal .bt-pk-head b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#btPackModal .bt-pk-head small{color:#9fb2c9;flex:none}#btPackModal .bt-pk-close{background:#223047!important;border:none!important;color:#fff!important;border-radius:10px;padding:7px 12px;cursor:pointer;font-size:13px}#btPackModal .bt-pk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px;overflow:auto;padding:4px}#btPackModal .bt-pk-grid img{width:100%;border-radius:10px;background:#0d121c;cursor:pointer;transition:transform .12s}#btPackModal .bt-pk-grid img:hover{transform:scale(1.06)}#btPackModal .bt-pk-hint{font-size:11px;color:#9fb2c9;margin:10px 4px 0}#btPackModal .bt-pk-del{background:#3a1f26!important;border:none!important;color:#ff9d9d!important;border-radius:10px;padding:7px 12px;cursor:pointer;font-size:13px;margin-right:6px}';
   document.head.appendChild(css);
+  async function btRefreshStickers(){
+    try{if(typeof refreshStickers==='function'){await refreshStickers();return true}}catch(e){}
+    try{if(typeof window.refreshStickers==='function'){await window.refreshStickers();return true}}catch(e){}
+    try{location.reload();return true}catch(e){}
+    return false
+  }
+  async function btDeleteSticker(row){
+    if(!row||!row.id)return;
+    var label=(row.name||'スタンプ')+(row.pack_stickers?('（'+row.pack_stickers.length+'枚）'):'');
+    if(!confirm('「'+label+'」を削除しますか？\\nこの端末のスタンプ一覧から消えます。'))return;
+    try{await API.remove('stickers',row.id);await btRefreshStickers();toast('スタンプを削除しました')}
+    catch(e){toast('削除に失敗しました: '+(e&&e.message?e.message:''))}
+  }
   function openPack(row){
     if(!row)return;
     var old=document.getElementById('btPackModal');if(old)old.remove();
     var mo=document.createElement('div');mo.id='btPackModal';
-    var h='<div class="bt-pk-card"><div class="bt-pk-head"><b>'+esc(row.name||'LINEスタンプ')+'</b><small>'+row.pack_stickers.length+'枚</small><button class="bt-pk-close" id="btPkClose">閉じる</button></div><div class="bt-pk-grid" id="btPkGrid">';
+    var h='<div class="bt-pk-card"><div class="bt-pk-head"><b>'+esc(row.name||'LINEスタンプ')+'</b><small>'+row.pack_stickers.length+'枚</small><button class="bt-pk-del" id="btPkDel">削除</button><button class="bt-pk-close" id="btPkClose">閉じる</button></div><div class="bt-pk-grid" id="btPkGrid">';
     for(var i=0;i<row.pack_stickers.length;i++){h+='<img src="'+esc(row.pack_stickers[i])+'" data-btsticker="'+esc(row.pack_stickers[i])+'" alt="">'}
     h+='</div><p class="bt-pk-hint">スタンプをタップするとトークに送信されます</p></div>';
     mo.innerHTML=h;
     mo.addEventListener('click',function(e){if(e.target===mo)mo.remove()});
     document.body.appendChild(mo);
     document.getElementById('btPkClose').addEventListener('click',function(){mo.remove()});
+    document.getElementById('btPkDel').addEventListener('click',async function(){
+      if(!confirm('「'+(row.name||'LINEスタンプ')+'」を削除しますか？\\nこのパック（'+row.pack_stickers.length+'枚）が一覧から消えます。'))return;
+      try{await API.remove('stickers',row.id);mo.remove();await btRefreshStickers();toast('スタンプを削除しました')}
+      catch(e){toast('削除に失敗しました')}
+    });
     document.getElementById('btPkGrid').addEventListener('click',async function(e){
       var im=e.target.closest?e.target.closest('img[data-btsticker]'):null;if(!im)return;
       if(typeof activeConversationId==='undefined'||!activeConversationId||(typeof sendMessage!=='function')){toast('送信するにはトークを開いてください');return}
@@ -1594,13 +1627,19 @@ const STICKER_SHIM = `<script>(function(){
   }
   window.__btOpenPack=openPack;
   function enhance(){
-    var packs={};rows().forEach(function(r){if(packOf(r))packs[r.image_url]=r});
+    var map={};rows().forEach(function(r){if(r&&r.image_url)map[r.image_url]=r});
     document.querySelectorAll('.sticker-card,.sticker-item').forEach(function(el){
       var url=el.classList.contains('sticker-item')?(el.getAttribute('data-send')||''):(el.querySelector('img')?el.querySelector('img').src:'');
-      var row=packs[url];if(!row||el.__btPack)return;
+      var row=map[url];if(!row||el.__btPack)return;
       el.__btPack=1;el.classList.add(el.classList.contains('sticker-item')?'bt-sticker-item':'bt-sticker-card');
-      var bd=document.createElement('span');bd.className='bt-pack-badge';bd.textContent='📦'+row.pack_stickers.length+'枚';el.appendChild(bd);
-      el.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openPack(row)},true);
+      if(packOf(row)){var bd=document.createElement('span');bd.className='bt-pack-badge';bd.textContent='📦'+row.pack_stickers.length+'枚';el.appendChild(bd);
+        el.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();openPack(row)},true);}
+      (function(r){
+        var t=null;
+        el.addEventListener('touchstart',function(){if(t)clearTimeout(t);t=setTimeout(function(){t=null;btDeleteSticker(r)},650)},{passive:true});
+        ['touchend','touchmove','touchcancel'].forEach(function(ev){el.addEventListener(ev,function(){if(t){clearTimeout(t);t=null}},{passive:true})});
+        el.addEventListener('contextmenu',function(e){e.preventDefault();btDeleteSticker(r)});
+      })(row);
     });
   }
   function ensureLineRow(){
