@@ -43,6 +43,11 @@ async function sha256(value) {
   return [...new Uint8Array(digest)].map((n) => n.toString(16).padStart(2, '0')).join('');
 }
 
+function adminTokenIdentity(request) {
+  const token = requestAdminToken(request) || '';
+  return token ? token.slice(0, 8) : '';
+}
+
 function requestAdminToken(request) {
   const auth = request.headers.get('Authorization') || '';
   return auth.startsWith('Bearer ') ? auth.slice(7) : request.headers.get('X-Admin-Token') || '';
@@ -82,8 +87,11 @@ async function handleBtMedia(request, env, url) {
     const mime = String(body.mimeType || 'application/octet-stream').slice(0, 120);
     const encoding = body.encoding === 'binary' ? 'binary' : 'base64';
     const sizeBytes = Number(body.sizeBytes || 0);
-    if (sizeBytes > maxFileBytes(env)) return json({ ok: false, error: 'too_large', maxFileBytes: maxFileBytes(env) }, 413, origin);
-    await env.BLUETALK_KV.put(`bluetalk:media:${id}:meta`, JSON.stringify({ totalChunks: total, mimeType: mime, sizeBytes, chunkBytes: Number(body.chunkBytes || 0) || (encoding === 'binary' ? KV_PART_BYTES : 0), encoding, created_at: Date.now() }));
+    const limitCfg = await readSettings(env);
+    if (sizeBytes > limitCfg.maxFileBytes) return json({ ok: false, error: 'too_large', maxFileBytes: limitCfg.maxFileBytes }, 413, origin);
+    const chunkBytes = Number(body.chunkBytes || 0) || (encoding === 'binary' ? KV_PART_BYTES : 0);
+    const metaObj = { totalChunks: total, mimeType: mime, sizeBytes, chunkBytes, encoding, created_at: Date.now() };
+    await env.BLUETALK_KV.put(`bluetalk:media:${id}:meta`, JSON.stringify(metaObj), { metadata: { sizeBytes, mimeType: mime.slice(0, 60), encoding } });
     return json({ ok: true, url: `/bt-media/${id}` }, 201, undefined);
   }
   if (request.method === 'GET' && !url.pathname.endsWith('/complete') && store[2] === undefined) {
@@ -174,17 +182,66 @@ const BIG_PART_BYTES = 32 * 1024 * 1024;
 const KV_PART_BYTES = 8 * 1024 * 1024;
 const KV_FREE_STORAGE_BYTES = 1024 * 1024 * 1024;
 
-// アカウントの KV 保存枠に合わせた「分割転送の総量」上限（0 = 無制限）。
-// Free は 1GB なので "1073741824" を設定しておくと親切。
-function maxTransferBytes(env) {
-  const raw = Number((env && env.BT_MAX_TRANSFER_BYTES) || 0);
-  return raw > 0 ? raw : 0;
+const SETTINGS_KEY = 'bluetalk:settings';
+const GIB = 1024 * 1024 * 1024;
+const MIN_FILE_BYTES = 8 * 1024 * 1024;
+const HARD_MAX_BYTES = 100 * GIB;
+
+// 上限は管理画面（/admin.html）から設定でき、KV に保存して即時反映する。
+// 未設定のときは Worker 変数（BT_MAX_FILE_BYTES / BT_MAX_TRANSFER_BYTES）、
+// それも無ければ既定値を使う。
+async function readSettings(env) {
+  let stored = {};
+  try {
+    const raw = await env.BLUETALK_KV.get(SETTINGS_KEY);
+    if (raw) stored = JSON.parse(raw) || {};
+  } catch (e) { stored = {}; }
+  const pick = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
+  const envFile = Number((env && env.BT_MAX_FILE_BYTES) || 0);
+  const envTransfer = Number((env && env.BT_MAX_TRANSFER_BYTES) || 0);
+  const fallbackFile = envFile > 0 ? envFile : (bigMediaEnabled(env) ? BIG_MAX_BYTES : 900 * 1024 * 1024);
+  const clamp = (n) => Math.max(MIN_FILE_BYTES, Math.min(HARD_MAX_BYTES, n));
+  const maxFileBytes = clamp(pick(stored.maxFileBytes, fallbackFile));
+  let maxTransferBytes = pick(stored.maxTransferBytes, 0);
+  if (Number(stored.maxTransferBytes) === 0) maxTransferBytes = 0;
+  if (envTransfer > 0 && !Number(stored.maxTransferBytes)) maxTransferBytes = envTransfer;
+  maxTransferBytes = Math.max(0, Math.min(HARD_MAX_BYTES, maxTransferBytes));
+  return {
+    maxFileBytes,
+    maxTransferBytes,
+    kvPartBytes: KV_PART_BYTES,
+    kvStorageBytes: KV_FREE_STORAGE_BYTES,
+    updated_at: Number(stored.updated_at || 0),
+    updated_by: String(stored.updated_by || '')
+  };
 }
 
-function maxFileBytes(env) {
-  const raw = Number((env && env.BT_MAX_FILE_BYTES) || 0);
-  if (raw > 0) return raw;
-  return bigMediaEnabled(env) ? BIG_MAX_BYTES : 900 * 1024 * 1024;
+// メディア使用量（KV list のメタデータ利用。旧データのみ値を読んで補完）
+async function mediaUsage(env) {
+  const out = { files: 0, bytes: 0, listing_capped: false, kvStorageBytes: KV_FREE_STORAGE_BYTES };
+  try {
+    let cursor;
+    let guard = 0;
+    const metaKeys = [];
+    do {
+      const page = await env.BLUETALK_KV.list({ prefix: 'bluetalk:media:', cursor });
+      for (const k of page.keys) if (k.name.endsWith(':meta')) metaKeys.push(k);
+      cursor = page.list_complete ? undefined : page.cursor;
+      guard++;
+    } while (cursor && guard < 5);
+    if (cursor) out.listing_capped = true;
+    let fallbackReads = 0;
+    for (const k of metaKeys) {
+      let size = Number((k.metadata && k.metadata.sizeBytes) || 0);
+      if (!size && fallbackReads < 200) {
+        fallbackReads++;
+        const raw = await env.BLUETALK_KV.get(k.name);
+        if (raw) { try { size = Number(JSON.parse(raw).sizeBytes || 0); } catch (e) { size = 0; } }
+      }
+      if (size > 0) { out.files++; out.bytes += size; }
+    }
+  } catch (e) { /* 集計できなくても管理画面は動かす */ }
+  return out;
 }
 
 function bigMediaEnabled(env) { return Boolean(env && env.BLUETALK_MEDIA); }
@@ -202,7 +259,8 @@ function bigRangeHeader(range, size) {
 
 async function handleBtBig(request, env, url, origin) {
   if (url.pathname === '/bt-big/config') {
-    return json({ ok: true, enabled: bigMediaEnabled(env), partSize: BIG_PART_BYTES, minPartBytes: 5 * 1024 * 1024, maxBytes: BIG_MAX_BYTES, kvPartBytes: KV_PART_BYTES, kvStorageBytes: KV_FREE_STORAGE_BYTES, maxFileBytes: maxFileBytes(env), maxTransferBytes: maxTransferBytes(env) }, 200, origin);
+    const cfg = await readSettings(env);
+    return json({ ok: true, enabled: bigMediaEnabled(env), partSize: BIG_PART_BYTES, minPartBytes: 5 * 1024 * 1024, maxBytes: BIG_MAX_BYTES, kvPartBytes: KV_PART_BYTES, kvStorageBytes: KV_FREE_STORAGE_BYTES, maxFileBytes: cfg.maxFileBytes, maxTransferBytes: cfg.maxTransferBytes, kvReadOnly: false }, 200, origin);
   }
   const m = /^\/bt-big\/([A-Za-z0-9-]{6,64})(?:\/(init|complete|abort)|\/part\/(\d+))?$/.exec(url.pathname);
   if (!m) return null;
@@ -395,6 +453,33 @@ async function handleAdmin(request, env, url, origin) {
     await writeTable(env, 'users', rows); return json({ ok: true, user: rows[index] }, 200, origin);
   }
   if (url.pathname === '/api/admin/appeals' && request.method === 'GET') return json({ ok: true, appeals: await readTable(env, 'appeals') }, 200, origin);
+  if (url.pathname === '/api/admin/settings' && request.method === 'GET') {
+    return json({ ok: true, settings: await readSettings(env), storage: await mediaUsage(env) }, 200, origin);
+  }
+  if (url.pathname === '/api/admin/settings' && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const cur = await readSettings(env);
+    const toBytes = (v) => Math.round(Number(v) * GIB);
+    const clamp = (n) => Math.max(MIN_FILE_BYTES, Math.min(HARD_MAX_BYTES, n));
+    let maxFileBytes = cur.maxFileBytes;
+    let maxTransferBytes = cur.maxTransferBytes;
+    if (body.maxFileBytesGb !== undefined && body.maxFileBytesGb !== '') {
+      const n = toBytes(body.maxFileBytesGb);
+      if (!Number.isFinite(n) || n <= 0) return json({ ok: false, error: 'invalid_max_file' }, 400, origin);
+      maxFileBytes = clamp(n);
+    }
+    if (body.maxTransferBytesGb !== undefined && body.maxTransferBytesGb !== '') {
+      const n = toBytes(body.maxTransferBytesGb);
+      if (!Number.isFinite(n) || n < 0) return json({ ok: false, error: 'invalid_max_transfer' }, 400, origin);
+      maxTransferBytes = n === 0 ? 0 : Math.min(HARD_MAX_BYTES, n);
+    }
+    const payload = { maxFileBytes, maxTransferBytes, updated_at: Date.now(), updated_by: adminTokenIdentity(request) };
+    await env.BLUETALK_KV.put(SETTINGS_KEY, JSON.stringify(payload));
+    return json({ ok: true, settings: await readSettings(env), storage: await mediaUsage(env) }, 200, origin);
+  }
+  if (url.pathname === '/api/admin/storage' && request.method === 'GET') {
+    return json({ ok: true, storage: await mediaUsage(env), settings: await readSettings(env) }, 200, origin);
+  }
   const appealMatch = url.pathname.match(/^\/api\/admin\/appeals\/([^/]+)$/);
   if (appealMatch && request.method === 'PATCH') {
     const rows = await readTable(env, 'appeals'); const index = rows.findIndex((item) => String(item.id) === appealMatch[1]);
@@ -580,7 +665,39 @@ function adminPage() {
   const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BlueTalk 管理画面</title><style>body{margin:0;background:#f2f6fb;color:#24344d;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:24px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 8px 28px #2341  }.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e5edf7;padding:12px 0}button{border:0;border-radius:10px;padding:9px 13px;background:#1877f2;color:#fff;font-weight:700;cursor:pointer}button.gray{background:#e8eef7;color:#24344d}input{padding:10px;border:1px solid #c7d9ee;border-radius:9px}small{color:#687b96}.danger{color:#a52828}#btConvModal{position:fixed;inset:0;z-index:9999;background:rgba(10,16,28,.72);display:flex;align-items:center;justify-content:center;padding:14px}.bt-cm-card{background:#fff;border-radius:16px;width:min(560px,96vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.45)}.bt-cm-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;background:#1877f2;color:#fff}.bt-cm-head button{background:#fff!important;color:#1877f2!important;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:700}.bt-cm-msgs{overflow:auto;padding:14px;background:#eef3fa;flex:1}.bt-cm-row{display:flex;gap:8px;margin-bottom:10px;align-items:flex-end}.bt-cm-row.bt-me{flex-direction:row-reverse}.bt-cm-ava{width:30px;height:30px;border-radius:50%;flex:none}.bt-cm-col{max-width:78%;display:flex;flex-direction:column;gap:2px}.bt-cm-row.bt-me .bt-cm-col{align-items:flex-end}.bt-cm-name{font-size:11px;color:#5b6b81}.bt-cm-bubble{background:#fff;color:#24344d;border-radius:12px;padding:8px 12px;font-size:13.5px;line-height:1.5;word-break:break-word;box-shadow:0 1px 2px rgba(0,0,0,.08)}.bt-cm-row.bt-me .bt-cm-bubble{background:#1877f2;color:#fff}.bt-cm-time{font-size:10px;color:#8296ad}.bt-cm-media{max-width:220px;max-height:200px;border-radius:8px;display:block}.bt-cm-empty{color:#5b6b81}</style></head><body><main class="wrap"><div id="root"></div></main><script>
   const root=document.getElementById('root'), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function login(){root.innerHTML='<section class="card"><h1>BlueTalk 管理画面</h1><p>管理者コードを入力してください。</p><input id="pw" type="password" placeholder="管理者コード"><button id="go">ログイン</button><p id="msg" class="danger"></p></section>';document.getElementById('go').onclick=async()=>{const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});const j=await r.json();if(!r.ok){document.getElementById('msg').textContent='認証に失敗しました';return}localStorage.setItem('bluetalk_admin_token',j.token);dashboard()}}
-  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr,ar]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h}),fetch('/api/admin/appeals',{headers:h}).catch(function(){return {ok:false}})]);if(!ur.ok||!cr.ok||!ar.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), ap=ar.ok?((await ar.json()).appeals||[]):[], names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section><section class="card"><h2>誤Ban申し立て（利用者から管理者へ）</h2><div id="appeals"></div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'<button data-act="pass" data-id="'+esc(x.id)+'">パスワード変更</button><button data-act="del" data-id="'+esc(x.id)+'">強制削除</button></div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else if(b.dataset.act==='pass'){const np=prompt('このアカウントの新しいパスワードを入力してください（パスワードを強制変更）','');if(!np||!np.trim())return;body={password:np}}else if(b.dataset.act==='del'){if(!confirm('このアカウントを強制削除しますか？利用者の全データ（会話・メッセージ等）が削除され、元に戻せません。'))return;await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE',headers:h});dashboard();return}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>{const ids=(x.member_ids||[]);const title=x.type==='group'?('👥 '+(x.name||'グループ')+'（'+ids.length+'名・'+ids.map(i=>names[i]||i).slice(0,6).join('、')+'）'):ids.map(i=>names[i]||i).join(' ⇔ ');const ms=(c.messages||[]).filter(m=>m.conversation_id===x.id).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const last=ms.length?ms[ms.length-1]:null;const when=last?new Date(last.sent_at||last.created_at||0).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';return '<div class="row"><b>'+esc(title)+'</b><small>'+ms.length+'件'+(when?'・最終 '+when:'')+'</small><button data-conv="'+esc(x.id)+'">トークを見る</button></div>'}).join('')||'会話はありません';window.__btMon={convs:c.conversations||[],msgs:c.messages||[],names:names,users:u};document.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>openConv(b.dataset.conv));document.getElementById('appeals').innerHTML=ap.slice().reverse().map(x=>'<div class="row"><b>'+esc(names[x.user_id]||x.user_id)+'</b><span style="display:block;width:100%">'+esc(x.message)+'</span>'+(x.status==='resolved'?'<small>対応済み</small>':'')+'<button data-ap="resolve" data-aid="'+esc(x.id)+'">対応済みにする</button><button data-ap="reply" data-uid="'+esc(x.user_id)+'">返信する</button></div>').join('')||'申し立てはありません';document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=async()=>{if(b.dataset.ap==='resolve'){await fetch('/api/admin/appeals/'+encodeURIComponent(b.dataset.aid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({status:'resolved'})})}else{const msg=prompt('返信内容（利用者の削除通知画面に表示されます）','');if(msg===null)return;await fetch('/api/admin/users/'+encodeURIComponent(b.dataset.uid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ban_appeal_message:msg,admin_override:true})})}dashboard()})}
+  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr,ar]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h}),fetch('/api/admin/appeals',{headers:h}).catch(function(){return {ok:false}})]);if(!ur.ok||!cr.ok||!ar.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), ap=ar.ok?((await ar.json()).appeals||[]):[], names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section><section class="card"><h2>誤Ban申し立て（利用者から管理者へ）</h2><div id="appeals"></div></section><section class="card"><h2>アップロード上限設定</h2><div id="limitsCard">読み込み中...</div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};limits();document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'<button data-act="pass" data-id="'+esc(x.id)+'">パスワード変更</button><button data-act="del" data-id="'+esc(x.id)+'">強制削除</button></div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else if(b.dataset.act==='pass'){const np=prompt('このアカウントの新しいパスワードを入力してください（パスワードを強制変更）','');if(!np||!np.trim())return;body={password:np}}else if(b.dataset.act==='del'){if(!confirm('このアカウントを強制削除しますか？利用者の全データ（会話・メッセージ等）が削除され、元に戻せません。'))return;await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE',headers:h});dashboard();return}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>{const ids=(x.member_ids||[]);const title=x.type==='group'?('👥 '+(x.name||'グループ')+'（'+ids.length+'名・'+ids.map(i=>names[i]||i).slice(0,6).join('、')+'）'):ids.map(i=>names[i]||i).join(' ⇔ ');const ms=(c.messages||[]).filter(m=>m.conversation_id===x.id).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const last=ms.length?ms[ms.length-1]:null;const when=last?new Date(last.sent_at||last.created_at||0).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';return '<div class="row"><b>'+esc(title)+'</b><small>'+ms.length+'件'+(when?'・最終 '+when:'')+'</small><button data-conv="'+esc(x.id)+'">トークを見る</button></div>'}).join('')||'会話はありません';window.__btMon={convs:c.conversations||[],msgs:c.messages||[],names:names,users:u};document.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>openConv(b.dataset.conv));document.getElementById('appeals').innerHTML=ap.slice().reverse().map(x=>'<div class="row"><b>'+esc(names[x.user_id]||x.user_id)+'</b><span style="display:block;width:100%">'+esc(x.message)+'</span>'+(x.status==='resolved'?'<small>対応済み</small>':'')+'<button data-ap="resolve" data-aid="'+esc(x.id)+'">対応済みにする</button><button data-ap="reply" data-uid="'+esc(x.user_id)+'">返信する</button></div>').join('')||'申し立てはありません';document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=async()=>{if(b.dataset.ap==='resolve'){await fetch('/api/admin/appeals/'+encodeURIComponent(b.dataset.aid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({status:'resolved'})})}else{const msg=prompt('返信内容（利用者の削除通知画面に表示されます）','');if(msg===null)return;await fetch('/api/admin/users/'+encodeURIComponent(b.dataset.uid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ban_appeal_message:msg,admin_override:true})})}dashboard()})}
+  async function limits(){
+    const t=localStorage.getItem('bluetalk_admin_token');const box=document.getElementById('limitsCard');if(!t||!box)return;
+    const h={Authorization:'Bearer '+t};
+    function fmt(n){const b=Number(n)||0;if(b>=1073741824)return (b/1073741824).toFixed(2)+'GB';if(b>=1048576)return (b/1048576).toFixed(1)+'MB';return b+'B'}
+    function gb(n){return ((Number(n)||0)/1073741824).toFixed(2)}
+    let s={},st={};
+    try{const r=await fetch('/api/admin/settings',{headers:h});if(!r.ok){box.innerHTML='<p class="danger">設定を取得できませんでした（ログインし直してください）</p>';return}const j=await r.json();s=j.settings||{};st=j.storage||{}}catch(e){box.innerHTML='<p class="danger">通信に失敗しました</p>';return}
+    const cap=Number(s.kvStorageBytes)||1073741824,the=Number(st.bytes)||0,pct=cap?Math.round(1000*the/cap)/10:0;
+    const warn=pct>=80?' style="color:#a52828"':'';
+    box.innerHTML='<p><small>ここで設定した上限は、保存するとすぐ全端末に反映されます（利用者が次に送信するときに適用）。</small></p>'+
+      '<div class="row"><b>1ファイルの上限</b><input id="maxFileGb" type="number" step="0.1" min="0.1" style="width:110px;padding:10px;border:1px solid #c7d9ee;border-radius:9px" value="'+gb(s.maxFileBytes)+'"> <span>GB</span> <small>現在 '+fmt(s.maxFileBytes)+'　（1回の送信で扱う1ファイルの最大サイズ）</small></div>'+
+      '<div class="row"><b>合計の上限</b><input id="maxTfGb" type="number" step="0.1" min="0" style="width:110px;padding:10px;border:1px solid #c7d9ee;border-radius:9px" value="'+gb(s.maxTransferBytes)+'"> <span>GB</span> <small>0 = 無制限　'+(Number(s.maxTransferBytes)?('現在 '+fmt(s.maxTransferBytes)):'現在 無制限')+'（分割して送る場合の総量の目安・超過時に警告）</small></div>'+
+      '<div class="row"><small>転送チャンク: '+fmt(s.kvPartBytes)+' 固定（Workers KV の値上限は 25MiB。チャンクを上げると書き込み回数が減り、APIトークン不足を避けられます）</small></div>'+
+      '<div class="row"><button id="saveLimits">上限を保存</button><small id="limMsg">'+(s.updated_at?('前回更新: '+new Date(s.updated_at).toLocaleString('ja-JP')):'未設定（既定値を使用中）')+'</small></div>'+
+      '<div class="row"><b>メディア使用量</b><small'+warn+'>'+Number(st.files||0)+' 件 ・ '+fmt(the)+' ／ プラン枠 '+fmt(cap)+'（'+pct+'%）'+(st.listing_capped?' ・ 一部のみ集計':'')+'</small></div>'+
+      '<p><small>目安: Workers Free の KV 保存枠は 1GB です。1ファイルの上限を大きくしても、合計がこの枠を超えると書き込みに失敗します。Workers Paid なら保存量は無制限（+$0.50/GB月）です。</small></p>';
+    document.getElementById('saveLimits').onclick=async()=>{
+      const a=Number(document.getElementById('maxFileGb').value||0),b=Number(document.getElementById('maxTfGb').value||0),m=document.getElementById('limMsg');
+      if(!(a>0)){m.textContent='1ファイルの上限は0より大きい値を入力してください';return}
+      if(b<0){m.textContent='合計の上限は0以上で入力してください';return}
+      if(a>100||b>100){m.textContent='100GB以下で入力してください';return}
+      if(!confirm('上限を変更します。\n1ファイル: '+a+'GB\n合計: '+(b>0?b+'GB':'無制限')+'\n\n保存しますか？'))return;
+      m.textContent='保存中...';
+      try{
+        const r=await fetch('/api/admin/settings',{method:'POST',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({maxFileBytesGb:a,maxTransferBytesGb:b})});
+        const j=await r.json().catch(function(){return {}});
+        if(!r.ok){m.textContent='保存に失敗しました: '+((j&&j.error)||r.status);return}
+        m.textContent='保存しました（1ファイル '+fmt(j.settings.maxFileBytes)+' ／ 合計 '+(Number(j.settings.maxTransferBytes)?fmt(j.settings.maxTransferBytes):'無制限')+'）';
+        limits();
+      }catch(e){m.textContent='通信に失敗しました'}
+    };
+  }
   function openConv(cid){const M=window.__btMon;if(!M)return;const cv=M.convs.filter(x=>x.id===cid)[0];if(!cv)return;const ids=cv.member_ids||[];const title=cv.type==='group'?('👥 '+(cv.name||'グループ')+'（'+ids.length+'名）'):ids.map(i=>M.names[i]||i).join(' ⇔ ');const ms=M.msgs.filter(m=>m.conversation_id===cid).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const ava=(uid)=>{const uu=(M.users||[]).filter(x=>x.id===uid)[0];return (uu&&uu.avatar_url)||'https://api.dicebear.com/7.x/thumbs/svg?seed='+encodeURIComponent(uid)};let h='<div class="bt-cm-head"><b>'+esc(title)+'</b><button id="btCmClose">閉じる</button></div><div class="bt-cm-msgs">';if(!ms.length)h+='<p class="bt-cm-empty">メッセージはまだありません</p>';ms.forEach(m=>{const left=cv.type==='group'||m.sender_id===ids[0];const name=M.names[m.sender_id]||m.sender_id;const t=(m.sent_at||m.created_at)?new Date(m.sent_at||m.created_at).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';let body='';if(m.type==='sticker'&&m.sticker_url)body='<img class="bt-cm-media" src="'+esc(m.sticker_url)+'">';else if(m.type==='image'&&m.media_data)body='<img class="bt-cm-media" src="'+esc(m.media_data)+'">';else if(m.type==='video'&&m.media_data)body='<video class="bt-cm-media" src="'+esc(m.media_data)+'" controls></video>';else if(m.type==='file'&&m.media_data)body='<a href="'+esc(m.media_data)+'" download="'+esc(m.file_name||'file')+'">📎 '+esc(m.file_name||'ファイル')+'</a>';else if(m.type==='call')body='<i>📞 通話</i>';else body=esc(m.content||'');if(!body&&m.media_data)body='<img class="bt-cm-media" src="'+esc(m.media_data)+'">';h+='<div class="bt-cm-row '+(left?'':'bt-me')+'">'+(left?'<img class="bt-cm-ava" src="'+esc(ava(m.sender_id))+'">':'')+'<div class="bt-cm-col"><span class="bt-cm-name">'+esc(name)+'</span><span class="bt-cm-bubble">'+body+'</span><span class="bt-cm-time">'+esc(t)+'</span></div></div>'});h+='</div>';let mo=document.getElementById('btConvModal');if(mo)mo.remove();mo=document.createElement('div');mo.id='btConvModal';mo.innerHTML='<div class="bt-cm-card">'+h+'</div>';mo.addEventListener('click',e=>{if(e.target===mo)mo.remove()});document.body.appendChild(mo);document.getElementById('btCmClose').onclick=()=>mo.remove()}
 if(localStorage.getItem('bluetalk_admin_token'))dashboard();else login();
   </script></body></html>`;
@@ -600,7 +717,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-J';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-K';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -649,7 +766,9 @@ const MEDIA_SHIM = `<script>(function(){
   var KV_PART=8*1024*1024,MAX_SEND=900*1024*1024;
   var BIG={enabled:false,partSize:32*1024*1024,maxBytes:6*1024*1024*1024,kvPartBytes:KV_PART,maxFileBytes:MAX_SEND,maxTransferBytes:0,ready:null};
   window.__btBig=BIG;
-  BIG.ready=(async function(){
+  BIG.lastAt=0;
+  BIG.sync=async function(){
+    if(BIG.lastAt&&Date.now()-BIG.lastAt<20000)return BIG;
     try{
       var r=await raw('/bt-big/config');var j=await r.json();
       if(j&&j.ok){
@@ -658,15 +777,17 @@ const MEDIA_SHIM = `<script>(function(){
         BIG.maxBytes=Number(j.maxBytes)||BIG.maxBytes;
         if(Number(j.kvPartBytes)){BIG.kvPartBytes=Number(j.kvPartBytes);KV_PART=BIG.kvPartBytes}
         if(Number(j.maxFileBytes)){BIG.maxFileBytes=Number(j.maxFileBytes);MAX_SEND=BIG.maxFileBytes}
-        BIG.maxTransferBytes=Number(j.maxTransferBytes)||0
+        BIG.maxTransferBytes=Number(j.maxTransferBytes)||0;
+        BIG.lastAt=Date.now();
       }
     }catch(e){}
     return BIG;
-  })();
+  };
+  BIG.ready=(async function(){await BIG.sync();return BIG})();
   function isVideoFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('video/')===0)||/\.(mp4|mov|m4v|webm|mkv|avi|3gp|mts|m2ts)$/i.test(f.name||''))}
   function isImageFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('image/')===0)||/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(f.name||''))}
   async function uploadKVDataUrl(d){
-    await BIG.ready;
+    await BIG.sync();
     if(d.length>4*1024*1024){
       var blb=await (await raw(d)).blob();
       if(!blb||!blb.size)throw new Error('メディアを読み込めませんでした');
@@ -764,12 +885,12 @@ const MEDIA_SHIM = `<script>(function(){
     return '/bt-big/'+id;
   }
   window.__btUploadFileSlices=async function(file,onprog){
-    await BIG.ready;
+    await BIG.sync();
     if(BIG.enabled&&file.size>24*1024*1024)return await btUploadBig(file,onprog);
     return await uploadKVFile(file,onprog);
   };
   window.__btUploadDataUrl=async function(d){
-    await BIG.ready;
+    await BIG.sync();
     if(BIG.enabled&&d.length>24*1024*1024){
       var blob=await (await raw(d)).blob();
       if(!blob||!blob.size)throw new Error('メディアを読み込めませんでした');
@@ -858,7 +979,7 @@ const MEDIA_SHIM = `<script>(function(){
     }
   }
   async function btCompressPrompt(file,label){
-    await BIG.ready;
+    await BIG.sync();
     if(!window.MediaRecorder||!HTMLCanvasElement.prototype.captureStream){
       toast(label+'が大きすぎます（'+fmtMB(file.size)+'／上限'+fmtMB(MAX_SEND)+'）。この端末では圧縮できません');
       return null;
@@ -974,12 +1095,12 @@ const MEDIA_SHIM = `<script>(function(){
     return 'ok';
   }
   async function btUploadObject(blob,onprog){
-    await BIG.ready;
+    await BIG.sync();
     if(BIG.enabled&&blob.size>24*1024*1024)return await btUploadBig(blob,onprog);
     return await uploadKVFile(blob,onprog);
   }
   async function btSendTransfer(file,onp){
-    await BIG.ready;
+    await BIG.sync();
     var PART_MAX=Math.max(8*1024*1024,Math.floor(MAX_SEND*0.98));
     var nparts=Math.max(1,Math.ceil(file.size/PART_MAX));
     if(BIG.maxTransferBytes>0&&file.size>BIG.maxTransferBytes){
@@ -1098,7 +1219,7 @@ const MEDIA_SHIM = `<script>(function(){
   async function sendMedia(file){
     if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
     try{
-      await BIG.ready;
+      await BIG.sync();
       if(isImageFile(file)){
         if(file.size>IMAGE_CAP){toast('画像が大きすぎます（30MBまで）');return}
         var d=await compressImage(file,2560,0.9);await sendMessage({type:'image',media_data:d});
@@ -1132,7 +1253,7 @@ const MEDIA_SHIM = `<script>(function(){
   }
   async function sendGeneric(file){
     if((typeof activeConversationId==='undefined')||!activeConversationId){toast('トークを開いてください');return}
-    await BIG.ready;
+    await BIG.sync();
     if(file.size>MAX_SEND){
       if(isVideoFile(file)){
         var fsend=await btCompressPrompt(file,'動画');
