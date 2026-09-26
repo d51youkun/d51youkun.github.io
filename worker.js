@@ -532,13 +532,25 @@ async function handleAccountStatus(request, env, url, origin) {
 
 async function handleTurnCredentials(request, env, url, origin) {
   if (url.pathname !== '/api/turn-credentials' || request.method !== 'GET') return null;
-  const turnUrls = String(env.TURN_URLS || "").trim();
-  if (turnUrls) {
-    const tu = String(env.TURN_USERNAME || "").trim();
-    const tc = String(env.TURN_CREDENTIAL || "").trim();
-    const out = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
-    for (const u of turnUrls.split(",").map((x) => x.trim()).filter(Boolean)) out.push(tu ? { urls: u, username: tu, credential: tc } : { urls: u });
-    return json({ ok: true, configured: true, shared: false, source: "env", iceServers: out }, 200, origin2);
+  const btTurnUrls = String((env && env.TURN_URLS) || "").trim();
+  if (btTurnUrls) {
+    try {
+      const btUser = String((env && env.TURN_USERNAME) || "").trim();
+      const btPass = String((env && env.TURN_CREDENTIAL) || "").trim();
+      const btOut = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
+      btTurnUrls.split(",").map((x) => x.trim()).filter(Boolean).forEach((u) => {
+        btOut.push(btUser ? { urls: u, username: btUser, credential: btPass } : { urls: u });
+      });
+      return new Response(JSON.stringify({ ok: true, configured: true, shared: false, source: "env", iceServers: btOut }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": (request.headers.get("Origin") || "*") }
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: true, configured: false, shared: true, source: "env_error", message: String(e).slice(0, 120), iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": (request.headers.get("Origin") || "*") }
+      });
+    }
   }
   const endpoint = String(env.METERED_TURN_ENDPOINT || '').trim();
   const apiKey = String(env.METERED_TURN_API_KEY || '').trim();
@@ -759,7 +771,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-C';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-D';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
