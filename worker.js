@@ -384,6 +384,16 @@ async function handleTables(request, env, url, origin) {
     if (btConv) base = rows.filter((item) => String(item.conversation_id) === btConv);
     const btCall = table === 'call_signals' ? url.searchParams.get('bt_call') : null;
     if (btCall) base = rows.filter((item) => String(item.call_id) === btCall);
+    if (table === 'calls') {
+      const btFor = url.searchParams.get('bt_for');
+      if (btFor) base = base.filter((item) => String(item.callee_id) === btFor);
+      const btSince = Number(url.searchParams.get('bt_since') || 0);
+      if (btSince > 0) { const lim2 = Date.now() - btSince; base = base.filter((item) => ((item.created_at || item.started_at || 0) >= lim2)); }
+    }
+    if (table === 'conversations') {
+      const btMine = url.searchParams.get('bt_mine');
+      if (btMine) base = base.filter((item) => Array.isArray(item.member_ids) && item.member_ids.map(String).indexOf(String(btMine)) >= 0);
+    }
     const visibleRows = table === 'users' ? base.filter((item) => !item.banned) : base;
     let __tail = 0;
     if (table === 'messages') { const v = Number(url.searchParams.get('bt_tail') || 0); if (v > 0) __tail = Math.min(v, 500); }
@@ -775,7 +785,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-G';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-J';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -845,6 +855,8 @@ const MESSAGE_SHIM = `<script>(function(){
         API.listAll=function(table,params){
           var p=params||{};
           if(table==='messages'){var c=cid();if(c){var q={};for(var k in params){q[k]=params[k]}q.bt_conv=c;q.bt_light='1';q.bt_tail='120';return o.call(this,table,q)}}
+          if(table==='calls'){var meid=(typeof ME!=='undefined'&&ME)?ME.id:'';if(meid){var q2={};for(var k2 in params){q2[k2]=params[k2]}q2.bt_for=meid;q2.bt_since='600000';return o.call(this,table,q2)}}
+          if(table==='conversations'){var mid=(typeof ME!=='undefined'&&ME)?ME.id:'';if(mid){var q3={};for(var k3 in params){q3[k3]=params[k3]}q3.bt_mine=mid;return o.call(this,table,q3)}}
           return o.call(this,table,p);
         };
         API.__btW=1;
@@ -1499,7 +1511,12 @@ const CALL_SCRIPT = `<script>(function(){
     setTimeout(function(){if(callRow&&!answered){toastMsg(diag.recv?'相手が応答しませんでした（診断A2）':'相手に呼び出しが届いていません（診断A）');sig('bye');cleanupUi()}},45000)}
   async function checkIncoming(){if(callRow||!ME||typeof API==='undefined'||!q('callOverlay'))return;var calls;try{calls=await API.listAll('calls')}catch(e){return}var now=Date.now();var c=(calls||[]).filter(function(x){return x&&x.callee_id===ME.id&&x.caller_id!==ME.id&&(!x.status||x.status==='ringing')&&!processed[x.id]&&now-(x.created_at||x.started_at||0)<120000}).sort(function(a,b){return (b.created_at||0)-(a.created_at||0)})[0];if(!c)return;
     var list;try{list=await fetchSignals(c)}catch(e){return}var offer=list.filter(function(x){return (x.type||'')==='offer'})[0];if(!offer)return;processed[c.id]=1;seenSig[offer.id||'off']=1;
-    callRow=c;peer=await userOf(c.caller_id);window.__btPendingOffer=offer.sdp!==undefined?offer.sdp:offer.payload;var u=peer||{};var t=q('incomingCallToast');if(t){q('incomingCallAvatar').src=u.avatar_url||'';q('incomingCallName').textContent=u.display_name||u.username||'';q('incomingCallSub').textContent=c.call_type==='video'?'ビデオ通話の着信':'音声通話の着信';t.style.display='flex'}startRing();try{if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&!window.__btPre){var pm=c.call_type==='video'?{video:true,audio:true}:{audio:true};navigator.mediaDevices.getUserMedia(pm).then(function(st){if(callRow&&callRow.id===c.id){window.__btPre=st}else{try{st.getTracks().forEach(function(tr){tr.stop()})}catch(e){}}}).catch(function(){})}}catch(e){}}
+    callRow=c;peer=await userOf(c.caller_id);window.__btPendingOffer=offer.sdp!==undefined?offer.sdp:offer.payload;var u=peer||{};var t=q('incomingCallToast');if(t){q('incomingCallAvatar').src=u.avatar_url||'';q('incomingCallName').textContent=u.display_name||u.username||'';q('incomingCallSub').textContent=c.call_type==='video'?'ビデオ通話の着信':'音声通話の着信';t.style.display='flex'}startRing();(function(){var cid2=c.id,cam=c.call_type==='video';var pm=cam?{video:true,audio:true}:{audio:true};
+    function ok(){try{return !!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&!window.__btPre)}catch(e){return false}}
+    function pre(){if(!ok())return;try{navigator.mediaDevices.getUserMedia(pm).then(function(st){if(callRow&&callRow.id===cid2){window.__btPre=st}else{try{st.getTracks().forEach(function(tr){tr.stop()})}catch(e){}}}).catch(function(){})}catch(e){}}
+    try{var names=cam?['camera','microphone']:['microphone'];
+      if(navigator.permissions&&navigator.permissions.query){Promise.all(names.map(function(n){return navigator.permissions.query({name:n}).then(function(x){return x.state},function(){return 'unknown'})})).then(function(sts){var all=true;sts.forEach(function(x){if(x!=='granted')all=false});if(all)pre()}).catch(function(){});return} }catch(e){}
+    pre()})()}
   async function acceptCall(){if(!callRow||!window.__btPendingOffer)return;var t=q('incomingCallToast');if(t)t.style.display='none';stopRing();var pre=window.__btPre;window.__btPre=null;try{localStream=(pre&&pre.getAudioTracks&&pre.getAudioTracks().length)?pre:await navigator.mediaDevices.getUserMedia(callRow.call_type==='video'?{video:true,audio:true}:{audio:true})}catch(e){toastMsg('マイク・カメラへのアクセスが必要です');sig('decline');cleanupUi();return}
     ICE=ICE.length?ICE:await loadIce();pc=newPC();localStream.getTracks().forEach(function(tr){try{pc.addTrack(tr,localStream)}catch(e){}});
     if(callRow.call_type==='video'){var lv=q('localVideo');if(lv){lv.srcObject=localStream;lv.style.display='block'}var rv=q('remoteVideo');if(rv)rv.style.display='block'}
@@ -1508,7 +1525,7 @@ const CALL_SCRIPT = `<script>(function(){
   async function declineCall(){if(callRow){try{API.update('calls',callRow.id,{status:'rejected'}).catch(function(){})}catch(e){}await sig('reject')}cleanupUi()}
   async function hangup(){if(callRow){try{API.update('calls',callRow.id,{status:'ended',ended_at:Date.now()}).catch(function(){})}catch(e){}await sig('hangup')}cleanupUi()}
   function bind(){var _ids=['voiceCallBtn','videoCallBtn','acceptCallBtn','rejectCallBtn','endCallBtn','toggleMuteBtn','toggleVideoBtn'],_m={};
-    _ids.forEach(function(id){var el=q(id);if(!el)return;if(!el.__bt2){var c=el.cloneNode(true);c.__bt2=1;el.parentNode.replaceChild(c,el);_m[id]=c}else _m[id]=el});
+    _ids.forEach(function(id){var el=q(id);if(!el)return;var c=el.cloneNode(true);c.__bt2=1;el.parentNode.replaceChild(c,el);_m[id]=c});
     var v=_m.voiceCallBtn,d=_m.videoCallBtn,a=_m.acceptCallBtn,r=_m.rejectCallBtn,e=_m.endCallBtn,m=_m.toggleMuteBtn,t=_m.toggleVideoBtn;
     if(v&&!v.__bt)v.__bt=1,v.onclick=function(){startCall('voice')};
     if(d&&!d.__bt)d.__bt=1,d.onclick=function(){startCall('video')};
@@ -1517,7 +1534,9 @@ const CALL_SCRIPT = `<script>(function(){
     if(e&&!e.__bt)e.__bt=1,e.onclick=hangup;
     if(m&&!m.__bt)m.__bt=1,m.onclick=function(){if(!localStream)return;var tr=localStream.getAudioTracks()[0];if(!tr)return;tr.enabled=!tr.enabled;m.innerHTML=tr.enabled?'<i class="fa-solid fa-microphone"></i>':'<i class="fa-solid fa-microphone-slash"></i>';m.style.color=tr.enabled?'':'#e05252'};
     if(t&&!t.__bt)t.__bt=1,t.onclick=function(){if(!localStream)return;var tr=localStream.getVideoTracks()[0];if(!tr)return toastMsg('この通話にはビデオがありません');tr.enabled=!tr.enabled;t.innerHTML=tr.enabled?'<i class="fa-solid fa-video"></i>':'<i class="fa-solid fa-video-slash"></i>';t.style.color=tr.enabled?'':'#e05252'}}
-  function boot(){window.__btCallDiag=diag;bind();setInterval(checkIncoming,800);setInterval(bind,4000)}
+  function neutralize(){var ns=['bindCallButtons','startCallPolling','checkIncomingCalls','startOutgoingCall','acceptIncomingCall','endCall','rejectIncomingCall','toggleMute','toggleVideo','startSignalPolling','startCallStatusWatch'];
+    for(var i=0;i<ns.length;i++){try{window[ns[i]]=function(){}}catch(e){}}}
+  function boot(){window.__btCallDiag=diag;neutralize();bind();[0,250,800,2000,4000].forEach(function(t){setTimeout(function(){neutralize();bind()},t)});setInterval(checkIncoming,800)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
 </script>`;
