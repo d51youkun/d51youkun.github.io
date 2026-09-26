@@ -373,6 +373,13 @@ async function handleTables(request, env, url, origin) {
   const id = parts[1] || '';
   if (!validTable(table)) return json({ error: 'invalid table' }, 400, origin);
   const rows = await readTable(env, table);
+    if (table === 'messages') {
+      let __light = false;
+      try { __light = (url.searchParams.get('bt_light') === '1'); } catch (e) {}
+      if (__light) { for (let __i = 0; __i < rows.length; __i++) { const __r = rows[__i];
+        if (__r && __r.media_data) { __r.bt_media_len = String(__r.media_data).length; __r.bt_pending = 1; __r.media_data = ''; } } }
+    }
+
   if (request.method === 'GET' && !id) {
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 100), 1), 1000);
     const page = Math.max(Number(url.searchParams.get('page') || 1), 1);
@@ -744,7 +751,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0925-P';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-A';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -786,6 +793,60 @@ html[data-bt-theme="dark"] ::-webkit-scrollbar{width:8px;height:8px}
 html[data-bt-theme="dark"] ::-webkit-scrollbar-thumb{background:#42536a;border-radius:8px}
 html[data-bt-theme="dark"] ::-webkit-scrollbar-track{background:transparent}
 </style>`;
+const MESSAGE_SHIM = `<script>(function(){
+  if(window.__btMsg)return;window.__btMsg=1;
+  var CACHE={};
+  function cid(){try{return window.activeConversationId||null}catch(e){return null}}
+  function esc(v){try{return escapeHtml(v)}catch(e){return String(v==null?'':v)}}
+  function render(node,m){
+    if(!node||!node.isConnected||!m)return;
+    var d=m.media_data||'',t=m.type||'';node.innerHTML='';
+    if(t==='image'){var i=document.createElement('img');i.src=d;i.alt='画像';i.addEventListener('click',function(){try{openMediaViewer('image',d)}catch(e){}});node.appendChild(i)}
+    else if(t==='video'){var v=document.createElement('video');v.src=d;v.controls=true;v.setAttribute('playsinline','');v.style.maxWidth='240px';node.appendChild(v)}
+    else if(t==='file'){var a=document.createElement('a');a.href=d;a.setAttribute('download',m.file_name||'file');a.textContent='📎 '+(m.file_name||'ファイル');node.appendChild(a)}
+    else if(t==='sticker'){var g=document.createElement('img');g.src=m.sticker_url||'';g.alt='スタンプ';g.style.width='120px';node.appendChild(g)}
+  }
+  function fill(){
+    var ns=document.querySelectorAll('[data-btmedia]');
+    for(var i=0;i<ns.length;i++){
+      var n=ns[i],id=n.getAttribute('data-btmedia');if(!id)continue;n.removeAttribute('data-btmedia');
+      if(CACHE[id]){render(n,CACHE[id]);continue}
+      (function(node,mid){fetch('/tables/messages/'+encodeURIComponent(mid),{cache:'no-store'}).then(function(r){return r.json()}).then(function(m){CACHE[mid]=m;render(node,m)}).catch(function(){})})(n,id);
+    }
+  }
+  function install(){
+    try{
+      if(typeof API==='object'&&API.listAll&&!API.__btW){
+        var o=API.listAll;
+        API.listAll=function(table,params){
+          var p=params||{};
+          if(table==='messages'){var c=cid();if(c){var q={};for(var k in params){q[k]=params[k]}q.bt_conv=c;q.bt_light='1';return o.call(this,table,q)}}
+          return o.call(this,table,p);
+        };
+        API.__btW=1;
+      }
+      if(typeof renderMessageHtml==='function'&&!window.__btR){
+        var r=renderMessageHtml;
+        window.renderMessageHtml=function(m){
+          if(m&&m.bt_pending&&(m.type==='image'||m.type==='video'||m.type==='file')){
+            var me=false;try{me=(ME&&m.sender_id===ME.id)}catch(e){}
+            var sd=null;try{sd=userById(m.sender_id)}catch(e){}
+            var av='';try{av=avatarFor(sd)}catch(e){}
+            var tm=m.sent_at?new Date(m.sent_at).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}):'';
+            return '<div class="msg-row '+(me?'me':'')+'"><img class="avatar" src="'+esc(av)+'" alt=""><div class="msg-media bt-lazy" data-btmedia="'+esc(m.id)+'"></div><div class="msg-meta"><span class="msg-time">'+esc(tm)+'</span></div></div>';
+          }
+          return r.apply(this,arguments);
+        };
+        window.__btR=1;
+      }
+    }catch(e){}
+    return !!(window.__btR);
+  }
+  var n=0,iv=setInterval(function(){n++;if(install()||n>40)clearInterval(iv)},300);install();
+  try{new MutationObserver(function(){fill()}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
+  setInterval(fill,1200);
+})();</script>`;
+
 const MEDIA_SHIM = `<script>(function(){
   if(window.__btMediaShim)return;window.__btMediaShim=1;
   var raw=window.fetch.bind(window);
@@ -1790,7 +1851,7 @@ const BAN_SCRIPT = `<script>(function(){
 // 上流（Genspark UI）のHTMLに古い世代の注入スクリプトが残っていると、
 // 二重注入や壊れたスクリプトの実行でアプリ全体がエラーになる。
 // 現行版を注入する前に、定義済みマーカーを持つ古い <script> を取り除く。
-const STALE_MARKERS = ['if(window.__btKeep)return', 'if(window.__btMediaShim)return', 'if(window.__btCall)return', 'if(window.__btGroup)return', 'if(window.__btStickerShim)return', 'if(window.__btBan)return', 'BT 0925-', 'BT 0926-'];
+const STALE_MARKERS = ['if(window.__btMsg)return', 'if(window.__btKeep)return', 'if(window.__btMediaShim)return', 'if(window.__btCall)return', 'if(window.__btGroup)return', 'if(window.__btStickerShim)return', 'if(window.__btBan)return', 'BT 0925-', 'BT 0926-'];
 function stripStaleInjection(html) {
   try {
     return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (block) => {
@@ -2007,7 +2068,7 @@ async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = stripStaleInjection(await response.text());
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + KEEP_SHIM + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', DARK_CSS + APP_ENHANCEMENTS + KEEP_SHIM + MESSAGE_SHIM + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
