@@ -1469,7 +1469,7 @@ const CALL_SCRIPT = `<script>(function(){
   function startSigPoll(){if(sigTimer){clearTimeout(sigTimer);sigTimer=null}pollSignals()}
   async function fetchSignals(c){return await getAll(c,'/api/call/signals/'+encodeURIComponent(ME.id)+'?call_id='+encodeURIComponent(c.id))}
   async function pollSignals(){if(!callRow||!pc)return;var list=[];try{list=(await fetchSignals(callRow))||[]}catch(e){list=[]}diag.recv+=list.length;for(const x of list){var id=x.id||((x.from||'')+'_'+(x.type||'')+'_'+String(JSON.stringify(x.sdp||'')).slice(0,40));if(seenSig[id])continue;seenSig[id]=1;try{await handleSignal(x)}catch(e){}}var cn=false;try{cn=!!(pc&&(pc.connectionState==='connected'||pc.iceConnectionState==='connected'||pc.iceConnectionState==='completed'))}catch(e){}if(callRow&&pc){sigTimer=setTimeout(pollSignals,cn?1500:350)}}
-var type=x.type||x.signal_type,data=x.sdp!==undefined?x.sdp:x.payload;
+  async function handleSignal(x){var type=x.type||x.signal_type,data=x.sdp!==undefined?x.sdp:x.payload;
     if(type==='answer'){answered=true;q('callOverlayStatus').textContent='接続中…';if(pc&&data){await pc.setRemoteDescription(data);remoteSet=true;flushIce()}}
     else if(type==='candidate'){if(pc&&data){if(!remoteSet){iceWait.push(data)}else{try{await pc.addIceCandidate(data)}catch(e){iceWait.push(data)}}}}
     else if(type==='decline'){toastMsg('呼び出しを拒否されました');cleanupUi()}
