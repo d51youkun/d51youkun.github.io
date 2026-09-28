@@ -190,6 +190,14 @@ const HARD_MAX_BYTES = 100 * GIB;
 // 上限は管理画面（/admin.html）から設定でき、KV に保存して即時反映する。
 // 未設定のときは Worker 変数（BT_MAX_FILE_BYTES / BT_MAX_TRANSFER_BYTES）、
 // それも無ければ既定値を使う。
+let BT_SETTINGS_CACHE = { at: 0, value: null };
+async function readSettingsCached(env) {
+  const now = Date.now();
+  if (BT_SETTINGS_CACHE.value && now - BT_SETTINGS_CACHE.at < 15000) return BT_SETTINGS_CACHE.value;
+  const value = await readSettings(env);
+  BT_SETTINGS_CACHE = { at: now, value };
+  return value;
+}
 async function readSettings(env) {
   let stored = {};
   try {
@@ -211,6 +219,7 @@ async function readSettings(env) {
     maxTransferBytes,
     kvPartBytes: KV_PART_BYTES,
     kvStorageBytes: KV_FREE_STORAGE_BYTES,
+    adsEnabled: stored.adsEnabled === true,
     updated_at: Number(stored.updated_at || 0),
     updated_by: String(stored.updated_by || '')
   };
@@ -416,6 +425,9 @@ async function handleTables(request, env, url, origin) {
     const index = rows.findIndex((item) => String(item.id) === id);
     if (index < 0) return json({ error: 'not found' }, 404, origin);
     const body = await request.json().catch(() => ({}));
+    if (table === 'users' && !body.admin_override) {
+      ['ads_off', 'adsEnabled', 'verified', 'banned', 'title', 'ban_reason', 'ban_message', 'ban_appeal_message'].forEach((k) => { delete body[k]; });
+    }
     if (table === 'users' && !body.admin_override && (Object.prototype.hasOwnProperty.call(body, 'display_name') || Object.prototype.hasOwnProperty.call(body, 'username'))) {
       const last = Number(rows[index].profile_changed_at || 0);
       if (last && Date.now() - last < 30 * 24 * 60 * 60 * 1000) {
@@ -447,6 +459,10 @@ async function handleTables(request, env, url, origin) {
 }
 
 async function handleAdmin(request, env, url, origin) {
+  if (url.pathname === '/api/public-settings' && request.method === 'GET') {
+    const pub = await readSettingsCached(env);
+    return json({ ok: true, adsEnabled: pub.adsEnabled === true }, 200, origin);
+  }
   if (url.pathname === '/api/admin/login' && request.method === 'POST') {
     const body = await request.json().catch(() => ({}));
     if ((await sha256(String(body.password || ''))) !== ADMIN_PASSWORD_SHA256) return json({ ok: false, error: 'invalid credentials' }, 401, origin);
@@ -488,8 +504,11 @@ async function handleAdmin(request, env, url, origin) {
       if (!Number.isFinite(n) || n < 0) return json({ ok: false, error: 'invalid_max_transfer' }, 400, origin);
       maxTransferBytes = n === 0 ? 0 : Math.min(HARD_MAX_BYTES, n);
     }
-    const payload = { maxFileBytes, maxTransferBytes, updated_at: Date.now(), updated_by: adminTokenIdentity(request) };
+    let adsEnabled = cur.adsEnabled === true;
+    if (body.adsEnabled !== undefined) adsEnabled = (body.adsEnabled === true || body.adsEnabled === 'true' || body.adsEnabled === 1);
+    const payload = { maxFileBytes, maxTransferBytes, adsEnabled, updated_at: Date.now(), updated_by: adminTokenIdentity(request) };
     await env.BLUETALK_KV.put(SETTINGS_KEY, JSON.stringify(payload));
+    BT_SETTINGS_CACHE = { at: 0, value: null };
     return json({ ok: true, settings: await readSettings(env), storage: await mediaUsage(env) }, 200, origin);
   }
   if (url.pathname === '/api/admin/storage' && request.method === 'GET') {
@@ -723,7 +742,7 @@ function adminPage() {
   const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BlueTalk 管理画面</title><style>body{margin:0;background:#f2f6fb;color:#24344d;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:24px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 8px 28px #2341  }.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e5edf7;padding:12px 0}button{border:0;border-radius:10px;padding:9px 13px;background:#1877f2;color:#fff;font-weight:700;cursor:pointer}button.gray{background:#e8eef7;color:#24344d}input{padding:10px;border:1px solid #c7d9ee;border-radius:9px}small{color:#687b96}.danger{color:#a52828}#btConvModal{position:fixed;inset:0;z-index:9999;background:rgba(10,16,28,.72);display:flex;align-items:center;justify-content:center;padding:14px}.bt-cm-card{background:#fff;border-radius:16px;width:min(560px,96vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.45)}.bt-cm-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;background:#1877f2;color:#fff}.bt-cm-head button{background:#fff!important;color:#1877f2!important;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:700}.bt-cm-msgs{overflow:auto;padding:14px;background:#eef3fa;flex:1}.bt-cm-row{display:flex;gap:8px;margin-bottom:10px;align-items:flex-end}.bt-cm-row.bt-me{flex-direction:row-reverse}.bt-cm-ava{width:30px;height:30px;border-radius:50%;flex:none}.bt-cm-col{max-width:78%;display:flex;flex-direction:column;gap:2px}.bt-cm-row.bt-me .bt-cm-col{align-items:flex-end}.bt-cm-name{font-size:11px;color:#5b6b81}.bt-cm-bubble{background:#fff;color:#24344d;border-radius:12px;padding:8px 12px;font-size:13.5px;line-height:1.5;word-break:break-word;box-shadow:0 1px 2px rgba(0,0,0,.08)}.bt-cm-row.bt-me .bt-cm-bubble{background:#1877f2;color:#fff}.bt-cm-time{font-size:10px;color:#8296ad}.bt-cm-media{max-width:220px;max-height:200px;border-radius:8px;display:block}.bt-cm-empty{color:#5b6b81}</style></head><body><main class="wrap"><div id="root"></div></main><script>
   const root=document.getElementById('root'), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function login(){root.innerHTML='<section class="card"><h1>BlueTalk 管理画面</h1><p>管理者コードを入力してください。</p><input id="pw" type="password" placeholder="管理者コード"><button id="go">ログイン</button><p id="msg" class="danger"></p></section>';document.getElementById('go').onclick=async()=>{const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});const j=await r.json();if(!r.ok){document.getElementById('msg').textContent='認証に失敗しました';return}localStorage.setItem('bluetalk_admin_token',j.token);dashboard()}}
-  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr,ar]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h}),fetch('/api/admin/appeals',{headers:h}).catch(function(){return {ok:false}})]);if(!ur.ok||!cr.ok||!ar.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), ap=ar.ok?((await ar.json()).appeals||[]):[], names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section><section class="card"><h2>誤Ban申し立て（利用者から管理者へ）</h2><div id="appeals"></div></section><section class="card"><h2>アップロード上限設定</h2><div id="limitsCard">読み込み中...</div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};limits();document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'<button data-act="pass" data-id="'+esc(x.id)+'">パスワード変更</button><button data-act="del" data-id="'+esc(x.id)+'">強制削除</button></div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else if(b.dataset.act==='pass'){const np=prompt('このアカウントの新しいパスワードを入力してください（パスワードを強制変更）','');if(!np||!np.trim())return;body={password:np}}else if(b.dataset.act==='del'){if(!confirm('このアカウントを強制削除しますか？利用者の全データ（会話・メッセージ等）が削除され、元に戻せません。'))return;await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE',headers:h});dashboard();return}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>{const ids=(x.member_ids||[]);const title=x.type==='group'?('👥 '+(x.name||'グループ')+'（'+ids.length+'名・'+ids.map(i=>names[i]||i).slice(0,6).join('、')+'）'):ids.map(i=>names[i]||i).join(' ⇔ ');const ms=(c.messages||[]).filter(m=>m.conversation_id===x.id).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const last=ms.length?ms[ms.length-1]:null;const when=last?new Date(last.sent_at||last.created_at||0).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';return '<div class="row"><b>'+esc(title)+'</b><small>'+ms.length+'件'+(when?'・最終 '+when:'')+'</small><button data-conv="'+esc(x.id)+'">トークを見る</button></div>'}).join('')||'会話はありません';window.__btMon={convs:c.conversations||[],msgs:c.messages||[],names:names,users:u};document.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>openConv(b.dataset.conv));document.getElementById('appeals').innerHTML=ap.slice().reverse().map(x=>'<div class="row"><b>'+esc(names[x.user_id]||x.user_id)+'</b><span style="display:block;width:100%">'+esc(x.message)+'</span>'+(x.status==='resolved'?'<small>対応済み</small>':'')+'<button data-ap="resolve" data-aid="'+esc(x.id)+'">対応済みにする</button><button data-ap="reply" data-uid="'+esc(x.user_id)+'">返信する</button></div>').join('')||'申し立てはありません';document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=async()=>{if(b.dataset.ap==='resolve'){await fetch('/api/admin/appeals/'+encodeURIComponent(b.dataset.aid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({status:'resolved'})})}else{const msg=prompt('返信内容（利用者の削除通知画面に表示されます）','');if(msg===null)return;await fetch('/api/admin/users/'+encodeURIComponent(b.dataset.uid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ban_appeal_message:msg,admin_override:true})})}dashboard()})}
+  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr,ar]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h}),fetch('/api/admin/appeals',{headers:h}).catch(function(){return {ok:false}})]);if(!ur.ok||!cr.ok||!ar.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), ap=ar.ok?((await ar.json()).appeals||[]):[], names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section><section class="card"><h2>誤Ban申し立て（利用者から管理者へ）</h2><div id="appeals"></div></section><section class="card"><h2>アップロード上限設定</h2><div id="limitsCard">読み込み中...</div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};limits();document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'<button data-act="ads" data-id="'+esc(x.id)+'">'+(x.ads_off?'広告を出す':'この人には広告を出さない')+'</button>'+'<button data-act="pass" data-id="'+esc(x.id)+'">パスワード変更</button><button data-act="del" data-id="'+esc(x.id)+'">強制削除</button></div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else if(b.dataset.act==='ads'){body={ads_off:!one.ads_off,admin_override:true}}else if(b.dataset.act==='pass'){const np=prompt('このアカウントの新しいパスワードを入力してください（パスワードを強制変更）','');if(!np||!np.trim())return;body={password:np}}else if(b.dataset.act==='del'){if(!confirm('このアカウントを強制削除しますか？利用者の全データ（会話・メッセージ等）が削除され、元に戻せません。'))return;await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE',headers:h});dashboard();return}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>{const ids=(x.member_ids||[]);const title=x.type==='group'?('👥 '+(x.name||'グループ')+'（'+ids.length+'名・'+ids.map(i=>names[i]||i).slice(0,6).join('、')+'）'):ids.map(i=>names[i]||i).join(' ⇔ ');const ms=(c.messages||[]).filter(m=>m.conversation_id===x.id).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const last=ms.length?ms[ms.length-1]:null;const when=last?new Date(last.sent_at||last.created_at||0).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';return '<div class="row"><b>'+esc(title)+'</b><small>'+ms.length+'件'+(when?'・最終 '+when:'')+'</small><button data-conv="'+esc(x.id)+'">トークを見る</button></div>'}).join('')||'会話はありません';window.__btMon={convs:c.conversations||[],msgs:c.messages||[],names:names,users:u};document.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>openConv(b.dataset.conv));document.getElementById('appeals').innerHTML=ap.slice().reverse().map(x=>'<div class="row"><b>'+esc(names[x.user_id]||x.user_id)+'</b><span style="display:block;width:100%">'+esc(x.message)+'</span>'+(x.status==='resolved'?'<small>対応済み</small>':'')+'<button data-ap="resolve" data-aid="'+esc(x.id)+'">対応済みにする</button><button data-ap="reply" data-uid="'+esc(x.user_id)+'">返信する</button></div>').join('')||'申し立てはありません';document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=async()=>{if(b.dataset.ap==='resolve'){await fetch('/api/admin/appeals/'+encodeURIComponent(b.dataset.aid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({status:'resolved'})})}else{const msg=prompt('返信内容（利用者の削除通知画面に表示されます）','');if(msg===null)return;await fetch('/api/admin/users/'+encodeURIComponent(b.dataset.uid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ban_appeal_message:msg,admin_override:true})})}dashboard()})}
   async function limits(){
     var t=localStorage.getItem('bluetalk_admin_token'),box=document.getElementById('limitsCard');
     if(!t||!box)return;
@@ -742,6 +761,9 @@ function adminPage() {
       +'<div class="row"><button id="saveLimits">上限を保存</button><small id="limMsg">'+(s.updated_at?('前回更新: '+new Date(s.updated_at).toLocaleString('ja-JP')):'未設定（既定値を使用中）')+'</small></div>'
       +'<div class="row"><b>メディア使用量</b><small'+warn+'>'+Number(st.files||0)+' 件 ・ '+fmt(the)+' ／ プラン枠 '+fmt(cap)+'（'+pct+'%）'+(st.listing_capped?' ・ 一部のみ集計':'')+'</small></div>'
       +'<p><small>目安: Workers Free の KV 保存枠は 1GB です。1ファイルの上限を大きくしても、合計がこの枠を超えると書き込みに失敗します。Workers Paid なら保存量は無制限（+$0.50/GB月）です。</small></p>';
+    var _adRow=document.createElement('div');_adRow.className='row';
+    _adRow.innerHTML='<b>広告</b><label style="display:flex;align-items:center;gap:8px"><input id="adsOn" type="checkbox"'+(s.adsEnabled?' checked':'')+'> 全利用者に広告を表示する（全画面10秒スキップ＋追従バナー＋ポップアップ）</label><small>既定はオフ。オフのときは誰にも広告が出ません。特定の人だけ止めたいときは、上の一覧で「この人には広告を出さない」を押します（保存すると反映）。</small>';
+    box.appendChild(_adRow);
     document.getElementById('saveLimits').onclick=async()=>{
       var a=Number(document.getElementById('maxFileGb').value||0),b=Number(document.getElementById('maxTfGb').value||0),m=document.getElementById('limMsg'),NL=String.fromCharCode(10);
       if(!(a>0)){m.textContent='1ファイルの上限は0より大きい値を入力してください';return}
@@ -750,7 +772,7 @@ function adminPage() {
       if(!confirm('上限を変更します。'+NL+'1ファイル: '+a+'GB'+NL+'合計: '+(b>0?b+'GB':'無制限')+NL+NL+'保存しますか？'))return;
       m.textContent='保存中...';
       try{
-        var r2=await fetch('/api/admin/settings',{method:'POST',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({maxFileBytesGb:a,maxTransferBytesGb:b})});
+        var r2=await fetch('/api/admin/settings',{method:'POST',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({maxFileBytesGb:a,maxTransferBytesGb:b,adsEnabled:document.getElementById('adsOn').checked})});
         var j2=await r2.json().catch(function(){return {}});
         if(!r2.ok){m.textContent='保存に失敗しました: '+((j2&&j2.error)||r2.status);return}
         m.textContent='保存しました（1ファイル '+fmt(j2.settings.maxFileBytes)+' ／ 合計 '+(Number(j2.settings.maxTransferBytes)?fmt(j2.settings.maxTransferBytes):'無制限')+'）';
@@ -777,7 +799,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-N';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-O';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -1963,6 +1985,143 @@ function stripStaleInjection(html) {
   } catch (e) { return html; }
 }
 
+const ADS_SHIM = `<script>(function(){
+if(window.__btAds)return;window.__btAds=1;
+var SKIP=10;
+var ADS=[
+{l:'広告',t:'毎日3分で話せる英会話',d:'「SpeakNow」初月無料・今だけ50%OFF',c1:'#1b6ef3',c2:'#7db4ff',cta:'無料で試す',e:'💬'},
+{l:'PR',t:'ゲーミングPC 爆速セール',d:'最新GPU搭載モデルが最大40%OFF・送料無料',c1:'#7a2ff0',c2:'#c39bff',cta:'セール会場へ',e:'🎮'},
+{l:'広告',t:'スマホだけで月5万円',d:'登録3分・無料の副業セミナー動画を配布中',c1:'#0f9d58',c2:'#9ee7b4',cta:'動画を見る',e:'📈'},
+{l:'PR',t:'人気マンガ 3巻まで無料',d:'アプリ限定・いま読める作品をチェック',c1:'#e0532f',c2:'#ffb38a',cta:'読んでみる',e:'📚'},
+{l:'広告',t:'脱毛サロン 初回1000円',d:'全身脱毛・全国500店舗・予約は1分',c1:'#d6337a',c2:'#ffa8cf',cta:'空き枠を見る',e:'✨'},
+{l:'PR',t:'マンションの査定は無料',d:'売却相場が60秒でわかる・しつこい営業なし',c1:'#0b7285',c2:'#8fd6e3',cta:'査定を申し込む',e:'🏠'},
+{l:'広告',t:'1日5分の視力トレーニング',d:'寝ながらできる簡単ケア・今なら送料無料',c1:'#1f5fae',c2:'#9fc6ff',cta:'詳細を見る',e:'👀'},
+{l:'PR',t:'毎日まわして無料ガチャ',d:'1日1回・当選者は翌日に発表',c1:'#b58500',c2:'#ffe08a',cta:'ガチャを回す',e:'🎯'}
+];
+var i=0,paintBar=null,sent=0,wasCall=false;
+function nxt(){var a=ADS[i%ADS.length];i++;return a}
+function el(tag,css,html){var d=document.createElement(tag);if(css)d.style.cssText=css;if(html!==undefined)d.innerHTML=html;return d}
+function vis(id){var n=document.getElementById(id);if(!n)return false;var r=n.getBoundingClientRect();if(r.width<2||r.height<2)return false;var s=getComputedStyle(n);return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0.05}
+function incall(){return vis('callOverlay')||vis('incomingCallToast')}
+function toast(msg){var t=el('div','position:fixed;left:50%;transform:translateX(-50%);bottom:92px;z-index:2147483646;background:rgba(10,16,28,.95);color:#e8f0fb;border:1px solid #2a3d5c;padding:10px 16px;border-radius:12px;font:600 13px system-ui,sans-serif;max-width:88vw;text-align:center');t.textContent=msg;document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove()},2800)}
+function purge(){['btAdFull','btAdBar','btAdPop','btAdUp'].forEach(function(k){var n=document.getElementById(k);if(n)n.remove()})}
+function demo(){toast('デモ広告です。リンク先には移動しません')}
+function head(){
+var st=document.createElement('style');
+st.textContent='@keyframes btAdIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}@keyframes btAdPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}.btAdIn{animation:btAdIn .35s ease-out}.btAdPulse{animation:btAdPulse 1.5s infinite}';
+document.head.appendChild(st);
+}
+function interstitial(after){
+if(document.getElementById('btAdFull')){if(after)after();return}
+if(incall()){if(after)after();return}
+var c=nxt();
+var w=el('div','position:fixed;inset:0;z-index:2147483600;background:rgba(2,6,14,.88);display:flex;align-items:center;justify-content:center;padding:14px;font-family:system-ui,sans-serif');
+w.id='btAdFull';
+var card=el('div','position:relative;width:100%;max-width:420px;border-radius:18px;overflow:hidden;background:#fff;color:#12161f;box-shadow:0 30px 90px rgba(0,0,0,.6)');
+card.className='btAdIn';
+card.innerHTML='<div style="position:relative;height:168px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center"><span style="font-size:54px">'+c.e+'</span><span style="position:absolute;top:9px;left:9px;font-size:10px;letter-spacing:.14em;color:#fff;background:rgba(0,0,0,.42);padding:3px 8px;border-radius:20px">'+c.l+'</span><span style="position:absolute;bottom:8px;right:10px;font-size:10px;color:rgba(255,255,255,.9)">AD</span></div><div style="padding:16px 16px 14px"><b style="font-size:18px;display:block;line-height:1.35">'+c.t+'</b><p style="margin:6px 0 14px;font-size:13px;color:#59636f;line-height:1.6">'+c.d+'</p><button id="btAdCta" style="width:100%;padding:13px;border:0;border-radius:9999px;font:700 15px system-ui;color:#fff;background:linear-gradient(135deg,'+c.c1+','+c.c2+');cursor:pointer">'+c.cta+'</button><p style="margin:10px 0 0;font-size:10.5px;color:#9aa3af;text-align:center;line-height:1.6">デモ用の架空の広告です。実際の商品・サービスではありません。</p></div>';
+var skipCss='position:absolute;top:10px;right:10px;border:0;border-radius:9999px;padding:9px 14px;font:700 12px system-ui;background:rgba(0,0,0,.5);color:#fff;cursor:default;z-index:6;transition:all .3s';
+var skip=el('button',skipCss);
+skip.textContent='広告を閉じるまで '+SKIP;
+var POS=['top:10px;right:10px','top:52%;left:14px','bottom:78px;right:16px','top:64px;left:16px'];
+var t=SKIP,k=0;
+var iv=setInterval(function(){
+t--;
+if(t<=0){clearInterval(iv);skip.style.cssText='position:absolute;top:10px;right:10px;border:0;border-radius:9999px;padding:9px 14px;font:700 12px system-ui;background:#12161f;color:#fff;cursor:pointer;z-index:7';skip.textContent='広告を閉じる ✕';return}
+skip.textContent='広告を閉じるまで '+t;
+k++;skip.style.cssText='position:absolute;'+POS[k%POS.length]+';border:0;border-radius:9999px;padding:9px 14px;font:700 12px system-ui;background:rgba(0,0,0,.5);color:#fff;cursor:default;z-index:6;transition:all .3s';
+},1000);
+skip.onclick=function(){if(t>0){toast('この広告はあと '+t+' 秒で閉じられます');return}w.remove();if(after)after()};
+card.appendChild(skip);
+w.appendChild(card);
+document.body.appendChild(w);
+document.getElementById('btAdCta').onclick=demo;
+}
+function banner(){
+if(document.getElementById('btAdBar'))return;
+if(incall())return;
+var b=el('div','position:fixed;left:0;right:0;bottom:0;z-index:2147483000;background:#0b1220;border-top:1px solid #24334d;padding:9px 12px;display:flex;align-items:center;gap:10px;font-family:system-ui,sans-serif;box-shadow:0 -10px 30px rgba(0,0,0,.45)');
+b.id='btAdBar';
+paintBar=function(){
+if(!document.getElementById('btAdBar'))return;
+var c=nxt();
+b.innerHTML='';
+var ic=el('span','font-size:22px;flex:0 0 auto');
+ic.textContent=c.e;
+var tx=el('div','flex:1;min-width:0');
+tx.innerHTML='<div style="font:700 13px system-ui;color:#eaf2ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.t+'</div><div style="font:11px system-ui;color:#93a6c2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.d+'</div>';
+var ct=el('button','flex:0 0 auto;border:0;border-radius:9999px;padding:7px 12px;font:700 11px system-ui;color:#fff;background:linear-gradient(135deg,'+c.c1+','+c.c2+');cursor:pointer');
+ct.textContent=c.cta;ct.className='btAdPulse';
+var x=el('button','flex:0 0 auto;border:0;background:transparent;color:#5b6b85;font-size:13px;line-height:1;padding:2px;cursor:pointer');
+x.textContent='✕';
+var lab=el('span','position:absolute;left:5px;top:2px;font:9px system-ui;color:#42536e');
+lab.textContent='広告';
+x.onclick=function(){b.remove();setTimeout(banner,9000)};
+ct.onclick=demo;
+b.appendChild(ic);b.appendChild(tx);b.appendChild(ct);b.appendChild(x);b.appendChild(lab);
+};
+paintBar();
+document.body.appendChild(b);
+}
+function popup(){
+if(document.getElementById('btAdPop'))return;
+if(incall())return;
+var c=nxt();
+var p=el('div','position:fixed;right:10px;bottom:70px;z-index:2147483100;width:248px;background:#fff;color:#141a24;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5);font-family:system-ui,sans-serif');
+p.id='btAdPop';p.className='btAdIn';
+p.innerHTML='<div style="height:56px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center;font-size:26px">'+c.e+'</div><div style="padding:9px 10px 11px"><b style="font-size:12.5px;display:block;line-height:1.4">'+c.t+'</b><p style="margin:4px 0 8px;font-size:11px;color:#5d6b80;line-height:1.5">'+c.d+'</p><button id="btAdPopCta" style="width:100%;border:0;border-radius:9999px;padding:8px;font:700 11.5px system-ui;color:#fff;background:linear-gradient(135deg,'+c.c1+','+c.c2+');cursor:pointer">'+c.cta+'</button></div><button id="btAdPopX" style="position:absolute;top:4px;right:4px;width:19px;height:19px;border:0;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:10px;line-height:1;padding:0;cursor:pointer">✕</button>';
+document.body.appendChild(p);
+document.getElementById('btAdPopX').onclick=function(){p.remove();setTimeout(popup,12000)};
+document.getElementById('btAdPopCta').onclick=demo;
+}
+function upsell(){
+if(document.getElementById('btAdUp'))return;
+if(incall())return;
+var w=el('div','position:fixed;inset:0;z-index:2147483500;background:rgba(2,6,14,.78);display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif');
+w.id='btAdUp';
+var card=el('div','position:relative;width:100%;max-width:360px;background:#0e1728;border:1px solid #24344f;border-radius:18px;padding:20px;color:#e7eefb;text-align:center');
+card.className='btAdIn';
+card.innerHTML='<div style="font-size:34px">🙅</div><b style="display:block;font-size:17px;margin:8px 0 6px">広告がうるさいですか？</b><p style="margin:0 0 14px;font-size:12.5px;color:#9fb1cb;line-height:1.7">「BlueTalk Pro（準備中）」なら広告が消えます。管理者に相談してみてください。</p><button id="btAdUpClose" style="width:100%;border:0;border-radius:9999px;padding:12px;font:700 13px system-ui;color:#04101f;background:linear-gradient(135deg,#7db4ff,#4fa3ff);cursor:pointer">広告なしで使う</button><p style="margin:10px 0 0;font-size:10.5px;color:#68798f">※デモ表示です。実際の課金はありません。</p>';
+w.appendChild(card);
+document.body.appendChild(w);
+document.getElementById('btAdUpClose').onclick=function(){w.remove()};
+}
+function start(){
+head();
+setTimeout(interstitial,1500);
+banner();
+setTimeout(popup,18000);
+setTimeout(upsell,60000);
+setInterval(function(){if(paintBar)paintBar()},6500);
+setInterval(function(){interstitial()},150000);
+setInterval(function(){
+var c=incall();
+if(c&&!wasCall){wasCall=true;purge()}
+else if(!c&&wasCall){wasCall=false;banner()}
+},2000);
+document.addEventListener('click',function(e){
+var t=e.target;
+if(t&&t.closest&&t.closest('#sendMessageBtn')){sent++;if(sent%5===0)setTimeout(function(){interstitial()},900)}
+},true);
+}
+function boot(){
+try{
+fetch('/api/public-settings',{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(j){
+if(!j||j.adsEnabled!==true)return;
+var me=null;try{me=JSON.parse(localStorage.getItem('bt_current_user')||'null')}catch(e){}
+if(me&&me.ads_off)return;
+if(me&&me.id){
+fetch('/tables/users/'+encodeURIComponent(me.id),{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(u){
+var row=Array.isArray(u)?u[0]:u;
+if(row&&row.ads_off)return;
+start();
+}).catch(function(){start()});
+}else{start()}
+}).catch(function(){});
+}catch(e){}
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+})();</script>`;
 const KEEP_SHIM = `<script>(function(){
   if(window.__btKeep)return;window.__btKeep=1;
   var TABLE='keep_memos';
@@ -2170,7 +2329,7 @@ async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = stripStaleInjection(await response.text());
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://stickershop.line-scdn.net" crossorigin><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + GLASS_CSS + APP_ENHANCEMENTS + KEEP_SHIM + MESSAGE_SHIM + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', DARK_CSS + GLASS_CSS + APP_ENHANCEMENTS + KEEP_SHIM + MESSAGE_SHIM + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + ADS_SHIM + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
