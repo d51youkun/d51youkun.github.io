@@ -2056,8 +2056,8 @@ x.onclick=function(){b.remove();setTimeout(banner,9000)};
 ct.onclick=demo;
 b.appendChild(ic);b.appendChild(tx);b.appendChild(ct);b.appendChild(x);b.appendChild(lab);
 };
-paintBar();
 document.body.appendChild(b);
+paintBar();
 }
 function popup(){
 if(document.getElementById('btAdPop'))return;
