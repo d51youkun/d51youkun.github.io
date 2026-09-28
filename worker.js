@@ -1999,33 +1999,33 @@ function nxt(){var a=ADS[i%ADS.length];i++;return a}
 function el(tag,css,html){var d=document.createElement(tag);if(css)d.style.cssText=css;if(html!==undefined)d.innerHTML=html;return d}
 function vis(id){var n=document.getElementById(id);if(!n)return false;var r=n.getBoundingClientRect();if(r.width<2||r.height<2)return false;var s=getComputedStyle(n);return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0.05}
 function incall(){return vis('callOverlay')||vis('incomingCallToast')}
-function toast(msg){var t=el('div','position:fixed;left:50%;transform:translateX(-50%);bottom:92px;z-index:2147483646;background:rgba(10,16,28,.95);color:#e8f0fb;border:1px solid #2a3d5c;padding:10px 16px;border-radius:12px;font:600 13px system-ui,sans-serif;max-width:88vw;text-align:center');t.textContent=msg;document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove()},2800)}
+function toast(msg){var t=el('div','position:fixed !important;left:50%;transform:translateX(-50%);bottom:92px;z-index:2147483646;background:rgba(10,16,28,.95) !important;color:#e8f0fb !important;border:1px solid #2a3d5c;padding:10px 16px;border-radius:12px;font:600 13px system-ui,sans-serif;max-width:88vw;text-align:center');t.textContent=msg;document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove()},2800)}
 function purge(){['btAdFull','btAdBar','btAdPop','btAdUp'].forEach(function(k){var n=document.getElementById(k);if(n)n.remove()})}
 function demo(){toast('デモ広告です。リンク先には移動しません')}
 function head(){
 var st=document.createElement('style');
-st.textContent='@keyframes btAdIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}@keyframes btAdPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}.btAdIn{animation:btAdIn .35s ease-out}.btAdPulse{animation:btAdPulse 1.5s infinite}';
+st.textContent='@keyframes btAdIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}@keyframes btAdPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}.btAdIn{animation:btAdIn .35s ease-out}.btAdPulse{animation:btAdPulse 1.5s infinite}#btAdFull button,#btAdBar button,#btAdPop button,#btAdUp button,#btAdCta{-webkit-appearance:none !important;appearance:none !important;text-shadow:none !important;font-family:system-ui,sans-serif !important}';
 document.head.appendChild(st);
 }
 function interstitial(after){
 if(document.getElementById('btAdFull')){if(after)after();return}
 if(incall()){if(after)after();return}
 var c=nxt();
-var w=el('div','position:fixed;inset:0;z-index:2147483600;background:rgba(2,6,14,.88);display:flex;align-items:center;justify-content:center;padding:14px;font-family:system-ui,sans-serif');
+var w=el('div','position:fixed !important;inset:0;z-index:2147483600;background:rgba(2,6,14,.88) !important;display:flex;align-items:center;justify-content:center;padding:14px;font-family:system-ui,sans-serif');
 w.id='btAdFull';
-var card=el('div','position:relative;width:100%;max-width:420px;border-radius:18px;overflow:hidden;background:#fff;color:#12161f;box-shadow:0 30px 90px rgba(0,0,0,.6)');
+var card=el('div','position:relative;width:100%;max-width:420px;border-radius:18px;overflow:hidden;background:#fff !important;color:#12161f !important;box-shadow:0 30px 90px rgba(0,0,0,.6)');
 card.className='btAdIn';
-card.innerHTML='<div style="position:relative;height:168px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center"><span style="font-size:54px">'+c.e+'</span><span style="position:absolute;top:9px;left:9px;font-size:10px;letter-spacing:.14em;color:#fff;background:rgba(0,0,0,.42);padding:3px 8px;border-radius:20px">'+c.l+'</span><span style="position:absolute;bottom:8px;right:10px;font-size:10px;color:rgba(255,255,255,.9)">AD</span></div><div style="padding:16px 16px 14px"><b style="font-size:18px;display:block;line-height:1.35">'+c.t+'</b><p style="margin:6px 0 14px;font-size:13px;color:#59636f;line-height:1.6">'+c.d+'</p><button id="btAdCta" style="width:100%;padding:13px;border:0;border-radius:9999px;font:700 15px system-ui;color:#fff;background:linear-gradient(135deg,'+c.c1+','+c.c2+');cursor:pointer">'+c.cta+'</button><p style="margin:10px 0 0;font-size:10.5px;color:#9aa3af;text-align:center;line-height:1.6">デモ用の架空の広告です。実際の商品・サービスではありません。</p></div>';
-var skipCss='position:absolute;top:10px;right:10px;border:0;border-radius:9999px;padding:9px 14px;font:700 12px system-ui;background:rgba(0,0,0,.5);color:#fff;cursor:default;z-index:6;transition:all .3s';
+card.innerHTML='<div style="position:relative;height:168px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center"><span style="font-size:54px">'+c.e+'</span><span style="position:absolute;top:9px;left:9px;font-size:10px;letter-spacing:.14em;color:#fff;background:rgba(0,0,0,.42);padding:3px 8px;border-radius:20px">'+c.l+'</span><span style="position:absolute;bottom:8px;right:10px;font-size:10px;color:rgba(255,255,255,.9)">AD</span></div><div style="padding:16px 16px 14px"><b style="font-size:18px;display:block;line-height:1.35;color:#12161f">'+c.t+'</b><p style="margin:6px 0 14px;font-size:13px;color:#59636f;line-height:1.6">'+c.d+'</p><button id="btAdCta" style="width:100% !important;padding:13px !important;border:0 !important;border-radius:9999px !important;font:700 15px system-ui !important;color:#fff !important;background:linear-gradient(135deg,'+c.c1+','+c.c2+') !important;cursor:pointer">'+c.cta+'</button><p style="margin:10px 0 0;font-size:10.5px;color:#9aa3af;text-align:center;line-height:1.6">デモ用の架空の広告です。実際の商品・サービスではありません。</p></div>';
+var skipCss='position:absolute;top:10px;right:10px;border:0 !important;border-radius:9999px !important;padding:9px 14px !important;font:700 12px system-ui !important;background:rgba(0,0,0,.5) !important;color:#fff !important;cursor:default;z-index:6;transition:all .3s';
 var skip=el('button',skipCss);
 skip.textContent='広告を閉じるまで '+SKIP;
 var POS=['top:10px;right:10px','top:52%;left:14px','bottom:78px;right:16px','top:64px;left:16px'];
 var t=SKIP,k=0;
 var iv=setInterval(function(){
 t--;
-if(t<=0){clearInterval(iv);skip.style.cssText='position:absolute;top:10px;right:10px;border:0;border-radius:9999px;padding:9px 14px;font:700 12px system-ui;background:#12161f;color:#fff;cursor:pointer;z-index:7';skip.textContent='広告を閉じる ✕';return}
+if(t<=0){clearInterval(iv);skip.style.cssText='position:absolute;top:10px;right:10px;border:0 !important;border-radius:9999px !important;padding:9px 14px !important;font:700 12px system-ui !important;background:#12161f !important;color:#fff !important;cursor:pointer;z-index:7';skip.textContent='広告を閉じる ✕';return}
 skip.textContent='広告を閉じるまで '+t;
-k++;skip.style.cssText='position:absolute;'+POS[k%POS.length]+';border:0;border-radius:9999px;padding:9px 14px;font:700 12px system-ui;background:rgba(0,0,0,.5);color:#fff;cursor:default;z-index:6;transition:all .3s';
+k++;skip.style.cssText='position:absolute;'+POS[k%POS.length]+';border:0 !important;border-radius:9999px !important;padding:9px 14px !important;font:700 12px system-ui !important;background:rgba(0,0,0,.5) !important;color:#fff !important;cursor:default;z-index:6;transition:all .3s';
 },1000);
 skip.onclick=function(){if(t>0){toast('この広告はあと '+t+' 秒で閉じられます');return}w.remove();if(after)after()};
 card.appendChild(skip);
@@ -2036,7 +2036,7 @@ document.getElementById('btAdCta').onclick=demo;
 function banner(){
 if(document.getElementById('btAdBar'))return;
 if(incall())return;
-var b=el('div','position:fixed;left:0;right:0;bottom:0;z-index:2147483000;background:#0b1220;border-top:1px solid #24334d;padding:9px 12px;display:flex;align-items:center;gap:10px;font-family:system-ui,sans-serif;box-shadow:0 -10px 30px rgba(0,0,0,.45)');
+var b=el('div','position:fixed !important;left:0 !important;right:0 !important;bottom:0 !important;top:auto !important;z-index:2147483000 !important;background:#0b1220 !important;border-top:1px solid #24334d;padding:9px 12px;display:flex !important;align-items:center;gap:10px;font-family:system-ui,sans-serif;box-shadow:0 -10px 30px rgba(0,0,0,.45)');
 b.id='btAdBar';
 paintBar=function(){
 if(!document.getElementById('btAdBar'))return;
@@ -2046,9 +2046,9 @@ var ic=el('span','font-size:22px;flex:0 0 auto');
 ic.textContent=c.e;
 var tx=el('div','flex:1;min-width:0');
 tx.innerHTML='<div style="font:700 13px system-ui;color:#eaf2ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.t+'</div><div style="font:11px system-ui;color:#93a6c2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.d+'</div>';
-var ct=el('button','flex:0 0 auto;border:0;border-radius:9999px;padding:7px 12px;font:700 11px system-ui;color:#fff;background:linear-gradient(135deg,'+c.c1+','+c.c2+');cursor:pointer');
+var ct=el('button','flex:0 0 auto;border:0 !important;border-radius:9999px !important;padding:7px 12px !important;font:700 11px system-ui !important;color:#fff !important;background:linear-gradient(135deg,'+c.c1+','+c.c2+') !important;cursor:pointer');
 ct.textContent=c.cta;ct.className='btAdPulse';
-var x=el('button','flex:0 0 auto;border:0;background:transparent;color:#5b6b85;font-size:13px;line-height:1;padding:2px;cursor:pointer');
+var x=el('button','flex:0 0 auto;border:0 !important;background:transparent !important;color:#5b6b85 !important;font-size:13px !important;line-height:1 !important;padding:2px !important;cursor:pointer');
 x.textContent='✕';
 var lab=el('span','position:absolute;left:5px;top:2px;font:9px system-ui;color:#42536e');
 lab.textContent='広告';
@@ -2063,9 +2063,9 @@ function popup(){
 if(document.getElementById('btAdPop'))return;
 if(incall())return;
 var c=nxt();
-var p=el('div','position:fixed;right:10px;bottom:70px;z-index:2147483100;width:248px;background:#fff;color:#141a24;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5);font-family:system-ui,sans-serif');
+var p=el('div','position:fixed !important;right:10px !important;bottom:70px !important;left:auto !important;top:auto !important;z-index:2147483100;width:248px;background:#fff !important;color:#141a24 !important;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5);font-family:system-ui,sans-serif');
 p.id='btAdPop';p.className='btAdIn';
-p.innerHTML='<div style="height:56px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center;font-size:26px">'+c.e+'</div><div style="padding:9px 10px 11px"><b style="font-size:12.5px;display:block;line-height:1.4">'+c.t+'</b><p style="margin:4px 0 8px;font-size:11px;color:#5d6b80;line-height:1.5">'+c.d+'</p><button id="btAdPopCta" style="width:100%;border:0;border-radius:9999px;padding:8px;font:700 11.5px system-ui;color:#fff;background:linear-gradient(135deg,'+c.c1+','+c.c2+');cursor:pointer">'+c.cta+'</button></div><button id="btAdPopX" style="position:absolute;top:4px;right:4px;width:19px;height:19px;border:0;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:10px;line-height:1;padding:0;cursor:pointer">✕</button>';
+p.innerHTML='<div style="height:56px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center;font-size:26px">'+c.e+'</div><div style="padding:9px 10px 11px"><b style="font-size:12.5px;display:block;line-height:1.4;color:#141a24">'+c.t+'</b><p style="margin:4px 0 8px;font-size:11px;color:#5d6b80;line-height:1.5">'+c.d+'</p><button id="btAdPopCta" style="width:100% !important;border:0 !important;border-radius:9999px !important;padding:8px !important;font:700 11.5px system-ui !important;color:#fff !important;background:linear-gradient(135deg,'+c.c1+','+c.c2+') !important;cursor:pointer">'+c.cta+'</button></div><button id="btAdPopX" style="position:absolute;top:4px;right:4px;width:19px;height:19px;border:0 !important;border-radius:50% !important;background:rgba(0,0,0,.55) !important;color:#fff !important;font-size:10px !important;line-height:1 !important;padding:0 !important;cursor:pointer">✕</button>';
 document.body.appendChild(p);
 document.getElementById('btAdPopX').onclick=function(){p.remove();setTimeout(popup,12000)};
 document.getElementById('btAdPopCta').onclick=demo;
@@ -2073,11 +2073,11 @@ document.getElementById('btAdPopCta').onclick=demo;
 function upsell(){
 if(document.getElementById('btAdUp'))return;
 if(incall())return;
-var w=el('div','position:fixed;inset:0;z-index:2147483500;background:rgba(2,6,14,.78);display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif');
+var w=el('div','position:fixed !important;inset:0;z-index:2147483500;background:rgba(2,6,14,.78) !important;display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif');
 w.id='btAdUp';
-var card=el('div','position:relative;width:100%;max-width:360px;background:#0e1728;border:1px solid #24344f;border-radius:18px;padding:20px;color:#e7eefb;text-align:center');
+var card=el('div','position:relative;width:100%;max-width:360px;background:#0e1728 !important;border:1px solid #24344f;border-radius:18px;padding:20px;color:#e7eefb !important;text-align:center');
 card.className='btAdIn';
-card.innerHTML='<div style="font-size:34px">🙅</div><b style="display:block;font-size:17px;margin:8px 0 6px">広告がうるさいですか？</b><p style="margin:0 0 14px;font-size:12.5px;color:#9fb1cb;line-height:1.7">「BlueTalk Pro（準備中）」なら広告が消えます。管理者に相談してみてください。</p><button id="btAdUpClose" style="width:100%;border:0;border-radius:9999px;padding:12px;font:700 13px system-ui;color:#04101f;background:linear-gradient(135deg,#7db4ff,#4fa3ff);cursor:pointer">広告なしで使う</button><p style="margin:10px 0 0;font-size:10.5px;color:#68798f">※デモ表示です。実際の課金はありません。</p>';
+card.innerHTML='<div style="font-size:34px">🙅</div><b style="display:block;font-size:17px;margin:8px 0 6px">広告がうるさいですか？</b><p style="margin:0 0 14px;font-size:12.5px;color:#9fb1cb;line-height:1.7">「BlueTalk Pro（準備中）」なら広告が消えます。管理者に相談してみてください。</p><button id="btAdUpClose" style="width:100% !important;border:0 !important;border-radius:9999px !important;padding:12px !important;font:700 13px system-ui !important;color:#04101f !important;background:linear-gradient(135deg,#7db4ff,#4fa3ff) !important;cursor:pointer">広告なしで使う</button><p style="margin:10px 0 0;font-size:10.5px;color:#68798f">※デモ表示です。実際の課金はありません。</p>';
 w.appendChild(card);
 document.body.appendChild(w);
 document.getElementById('btAdUpClose').onclick=function(){w.remove()};
@@ -2086,6 +2086,7 @@ function start(){
 head();
 setTimeout(interstitial,1500);
 banner();
+setTimeout(function(){if(!document.getElementById('btAdBar'))banner()},3200);
 setTimeout(popup,18000);
 setTimeout(upsell,60000);
 setInterval(function(){if(paintBar)paintBar()},6500);
