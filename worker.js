@@ -657,7 +657,7 @@ async function handleLineStickers(request, env, url, origin) {
       if (r.ok) html = await r.text();
     } catch {}
   }
-  if (!html) return json({ ok: false, error: 'sticker pack not found' }, 404, origin);
+  if (!html) return json({ ok: false, error: 'page_unreachable' }, 502, origin);
   const t = html.match(/<title>([^<]*?)\s*[-|]\s*LINE/);
   const title = t ? t[1].replace(/&amp;/g, '&').slice(0, 60) : 'LINEスタンプ';
   const ids = []; const seen = new Set();
@@ -667,7 +667,11 @@ async function handleLineStickers(request, env, url, origin) {
     if (!seen.has(mm[1])) { seen.add(mm[1]); ids.push(mm[1]); }
     if (ids.length >= 60) break;
   }
-  if (!ids.length) return json({ ok: false, error: 'no stickers found' }, 404, origin);
+  if (!ids.length) {
+    let coverOk = false;
+    try { const c = await fetch(`https://stickershop.line-scdn.net/stickershop/v1/product/${pid}/LINEStorePC/main.png?v=1`, { method: 'HEAD', headers }); coverOk = c.ok; } catch (e) {}
+    return json({ ok: false, error: coverOk ? 'pack_no_list' : 'sticker_pack_not_found' }, 404, origin);
+  }
   let animated = false;
   try {
     const probeUrl = `https://stickershop.line-scdn.net/stickershop/v1/sticker/${ids[0]}/iphone/sticker_animation@2x.png?v=1`;
@@ -773,7 +777,7 @@ const APP_ENHANCEMENTS = `<script>(function(){
 })();
 </script>`;
 
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-L';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
+const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-M';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
 const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
 const DARK_CSS = `<style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
@@ -1664,7 +1668,13 @@ const STICKER_SHIM = `<script>(function(){
     toast('LINEスタンプを取得中...');
     try{
       var r=await fetch('/api/line-stickers/'+encodeURIComponent(pid));var j=await r.json();
-      if(!r.ok||!j.ok||!j.stickers||!j.stickers.length){toast('スタンプを取得できませんでした（無料スタンプのURLをお試しください）');return}
+      if(!r.ok||!j.ok||!j.stickers||!j.stickers.length){
+        var er=(j&&j.error)||'';
+        if(er==='pack_no_list'){toast('このスタンプは有料・配信終了・地域制限のいずれかのため取り込めません。無料スタンプのURLをお試しください');}
+        else if(er==='sticker_pack_not_found'){toast('スタンプが見つかりません。URLを確認してください');}
+        else if(er==='page_unreachable'){toast('LINEへの通信に失敗しました。少し待って再試行してください');}
+        else{toast('スタンプを取得できませんでした');}
+        return}
       var main='https://stickershop.line-scdn.net/stickershop/v1/product/'+pid+'/LINEStorePC/main.png?v=1';
       var dup=null;rows().forEach(function(x){if(x&&String(x.pack_id||'')===String(pid))dup=x});
       if(dup){
