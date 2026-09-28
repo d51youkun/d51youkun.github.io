@@ -770,7 +770,7 @@ function adminPage() {
       +'<div class="row"><b>メディア使用量</b><small'+warn+'>'+Number(st.files||0)+' 件 ・ '+fmt(the)+' ／ プラン枠 '+fmt(cap)+'（'+pct+'%）'+(st.listing_capped?' ・ 一部のみ集計':'')+'</small></div>'
       +'<p><small>目安: Workers Free の KV 保存枠は 1GB です。1ファイルの上限を大きくしても、合計がこの枠を超えると書き込みに失敗します。Workers Paid なら保存量は無制限（+$0.50/GB月）です。</small></p>';
     var _adRow=document.createElement('div');_adRow.className='row';
-    _adRow.innerHTML='<b>広告</b><div class="bt-swrow"><span class="bt-sw'+(s.adsEnabled?' bt-sw-on':'')+'" id="adsSwitch" title="押すと切り替え"><span class="bt-sw-k" id="adsKnob"></span></span><input id="adsOn" type="checkbox"'+(s.adsEnabled?' checked':'')+'><span id="adsState">'+(s.adsEnabled?'オン':'オフ')+'</span><small>全利用者に広告を表示する（全画面10秒スキップ＋追従バナー＋ポップアップ）</small></div><small>既定はオフ。オフのときは誰にも広告が出ません。特定の人だけ止めたいときは、上の一覧のスイッチで切り替えます（保存すると反映）。</small>';
+    _adRow.innerHTML='<b>広告</b><div class="bt-swrow"><span class="bt-sw'+(s.adsEnabled?' bt-sw-on':'')+'" id="adsSwitch" title="押すと切り替え"><span class="bt-sw-k" id="adsKnob"></span></span><input id="adsOn" type="checkbox"'+(s.adsEnabled?' checked':'')+'><span id="adsState">'+(s.adsEnabled?'オン':'オフ')+'</span><small>全利用者に広告を表示する（5秒ごとに1つ／全画面は10秒スキップ）</small></div><small>既定はオフ。オフのときは誰にも広告が出ません。特定の人だけ止めたいときは、上の一覧のスイッチで切り替えます（保存すると反映）。</small>';
     box.appendChild(_adRow);
     var _sw=document.getElementById('adsSwitch'),_cb=document.getElementById('adsOn'),_st=document.getElementById('adsState');
     _sw.onclick=function(){_cb.checked=!_cb.checked;_sw.className='bt-sw'+(_cb.checked?' bt-sw-on':'');_st.textContent=_cb.checked?'オン':'オフ';_st.style.color=_cb.checked?'#1a9e46':'#7b8794'};
@@ -2008,13 +2008,17 @@ var ADS=[
 {l:'広告',t:'1日5分の視力トレーニング',d:'寝ながらできる簡単ケア・今なら送料無料',c1:'#1f5fae',c2:'#9fc6ff',cta:'詳細を見る',e:'👀'},
 {l:'PR',t:'毎日まわして無料ガチャ',d:'1日1回・当選者は翌日に発表',c1:'#b58500',c2:'#ffe08a',cta:'ガチャを回す',e:'🎯'}
 ];
-var i=0,paintBar=null,sent=0,wasCall=false;
+var i=0,paintBar=null,sent=0,wasCall=false,popN=0,POSN=0;
+var PPOS=['right:10px;bottom:70px','left:10px;bottom:70px','right:10px;top:78px','left:10px;top:78px','right:10px;bottom:262px'];
 function nxt(){var a=ADS[i%ADS.length];i++;return a}
 function el(tag,css,html){var d=document.createElement(tag);if(css)d.style.cssText=css;if(html!==undefined)d.innerHTML=html;return d}
 function vis(id){var n=document.getElementById(id);if(!n)return false;var r=n.getBoundingClientRect();if(r.width<2||r.height<2)return false;var s=getComputedStyle(n);return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0.05}
 function incall(){return vis('callOverlay')||vis('incomingCallToast')}
 function toast(msg){var t=el('div','position:fixed !important;left:50%;transform:translateX(-50%);bottom:92px;z-index:2147483646;background:rgba(10,16,28,.95) !important;color:#e8f0fb !important;border:1px solid #2a3d5c;padding:10px 16px;border-radius:12px;font:600 13px system-ui,sans-serif;max-width:88vw;text-align:center');t.textContent=msg;document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove()},2800)}
-function purge(){['btAdFull','btAdBar','btAdPop','btAdUp'].forEach(function(k){var n=document.getElementById(k);if(n)n.remove()})}
+function purge(){
+['btAdFull','btAdBar','btAdUp'].forEach(function(k){var n=document.getElementById(k);if(n)n.remove()});
+var ps=document.querySelectorAll('.btAdPopW');for(var i=0;i<ps.length;i++)if(ps[i].parentNode)ps[i].parentNode.removeChild(ps[i]);
+}
 function demo(){toast('デモ広告です。リンク先には移動しません')}
 function head(){
 var st=document.createElement('style');
@@ -2074,15 +2078,18 @@ document.body.appendChild(b);
 paintBar();
 }
 function popup(){
-if(document.getElementById('btAdPop'))return;
 if(incall())return;
 var c=nxt();
-var p=el('div','position:fixed !important;right:10px !important;bottom:70px !important;left:auto !important;top:auto !important;z-index:2147483100;width:248px;background:#fff !important;color:#141a24 !important;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5);font-family:system-ui,sans-serif');
-p.id='btAdPop';p.className='btAdIn';
-p.innerHTML='<div style="height:56px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center;font-size:26px">'+c.e+'</div><div style="padding:9px 10px 11px"><b style="font-size:12.5px;display:block;line-height:1.4;color:#141a24">'+c.t+'</b><p style="margin:4px 0 8px;font-size:11px;color:#5d6b80;line-height:1.5">'+c.d+'</p><button id="btAdPopCta" style="width:100% !important;border:0 !important;border-radius:9999px !important;padding:8px !important;font:700 11.5px system-ui !important;color:#fff !important;background:linear-gradient(135deg,'+c.c1+','+c.c2+') !important;cursor:pointer">'+c.cta+'</button></div><button id="btAdPopX" style="position:absolute;top:4px;right:4px;width:19px;height:19px;border:0 !important;border-radius:50% !important;background:rgba(0,0,0,.55) !important;color:#fff !important;font-size:10px !important;line-height:1 !important;padding:0 !important;cursor:pointer">✕</button>';
+var n=document.querySelectorAll('.btAdPopW');
+if(n.length>=5&&n[0].parentNode)n[0].parentNode.removeChild(n[0]);
+var base='position:fixed;z-index:2147483100;width:248px;max-width:calc(100vw - 20px);background:#fff !important;color:#141a24 !important;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5);font-family:system-ui,sans-serif';
+var p=el('div',base+';'+PPOS[POSN%PPOS.length]);
+POSN++;
+p.className='btAdPopW btAdIn';
+p.innerHTML='<div style="height:56px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center;font-size:26px">'+c.e+'</div><div style="padding:9px 10px 11px"><b style="font-size:12.5px;display:block;line-height:1.4;color:#141a24">'+c.t+'</b><p style="margin:4px 0 8px;font-size:11px;color:#5d6b80;line-height:1.5">'+c.d+'</p><button class="btAdPopCta" style="width:100% !important;border:0 !important;border-radius:9999px !important;padding:8px !important;font:700 11.5px system-ui !important;color:#fff !important;background:linear-gradient(135deg,'+c.c1+','+c.c2+') !important;cursor:pointer">'+c.cta+'</button></div><button class="btAdPopX" style="position:absolute;top:4px;right:4px;width:19px;height:19px;border:0 !important;border-radius:50% !important;background:rgba(0,0,0,.55) !important;color:#fff !important;font-size:10px !important;line-height:1 !important;padding:0 !important;cursor:pointer">✕</button>';
 document.body.appendChild(p);
-document.getElementById('btAdPopX').onclick=function(){p.remove();setTimeout(popup,12000)};
-document.getElementById('btAdPopCta').onclick=demo;
+p.querySelector('.btAdPopX').onclick=function(){p.remove()};
+p.querySelector('.btAdPopCta').onclick=demo;
 }
 function upsell(){
 if(document.getElementById('btAdUp'))return;
@@ -2100,11 +2107,15 @@ function start(){
 head();
 setTimeout(interstitial,1500);
 banner();
-setInterval(function(){if(!document.getElementById('btAdBar'))banner()},5000);
-setTimeout(popup,18000);
+var tick=0;
+setInterval(function(){
+if(paintBar)paintBar();
+popup();
+tick++;
+if(tick%6===0)interstitial();
+},5000);
 setTimeout(upsell,60000);
-setInterval(function(){if(paintBar)paintBar()},6500);
-setInterval(function(){interstitial()},150000);
+setInterval(function(){if(!document.getElementById('btAdBar'))banner()},5000);
 setInterval(function(){
 var c=incall();
 if(c&&!wasCall){wasCall=true;purge()}
