@@ -459,10 +459,6 @@ async function handleTables(request, env, url, origin) {
 }
 
 async function handleAdmin(request, env, url, origin) {
-  if (url.pathname === '/api/public-settings' && request.method === 'GET') {
-    const pub = await readSettingsCached(env);
-    return json({ ok: true, adsEnabled: pub.adsEnabled === true }, 200, origin);
-  }
   if (url.pathname === '/api/admin/login' && request.method === 'POST') {
     const body = await request.json().catch(() => ({}));
     if ((await sha256(String(body.password || ''))) !== ADMIN_PASSWORD_SHA256) return json({ ok: false, error: 'invalid credentials' }, 401, origin);
@@ -2106,8 +2102,7 @@ if(t&&t.closest&&t.closest('#sendMessageBtn')){sent++;if(sent%5===0)setTimeout(f
 }
 function boot(){
 try{
-fetch('/api/public-settings',{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(j){
-if(!j||j.adsEnabled!==true)return;
+if(window.__btAdOn!==true)return;
 var me=null;try{me=JSON.parse(localStorage.getItem('bt_current_user')||'null')}catch(e){}
 if(me&&me.ads_off)return;
 if(me&&me.id){
@@ -2117,7 +2112,6 @@ if(row&&row.ads_off)return;
 start();
 }).catch(function(){start()});
 }else{start()}
-}).catch(function(){});
 }catch(e){}
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
@@ -2328,8 +2322,10 @@ const KEEP_SHIM = `<script>(function(){
 async function enhanceHtml(response) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = stripStaleInjection(await response.text());
+  let adOn = false;
+  try { adOn = (await readSettingsCached(env)).adsEnabled === true; } catch (e) {}
   const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://stickershop.line-scdn.net" crossorigin><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', DARK_CSS + GLASS_CSS + APP_ENHANCEMENTS + KEEP_SHIM + MESSAGE_SHIM + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + ADS_SHIM + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
+  return new Response(withManifest.replace('</body>', '<scr' + 'ipt>window.__btAdOn=' + (adOn ? 'true' : 'false') + ';</scr' + 'ipt>' + DARK_CSS + GLASS_CSS + APP_ENHANCEMENTS + KEEP_SHIM + MESSAGE_SHIM + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + ADS_SHIM + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
 }
 
 export default { async fetch(request, env) {
