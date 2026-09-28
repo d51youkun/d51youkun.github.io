@@ -2086,7 +2086,7 @@ function start(){
 head();
 setTimeout(interstitial,1500);
 banner();
-setTimeout(function(){if(!document.getElementById('btAdBar'))banner()},3200);
+setInterval(function(){if(!document.getElementById('btAdBar'))banner()},5000);
 setTimeout(popup,18000);
 setTimeout(upsell,60000);
 setInterval(function(){if(paintBar)paintBar()},6500);
