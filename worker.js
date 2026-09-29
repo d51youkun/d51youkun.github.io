@@ -2136,14 +2136,16 @@ if(t&&t.closest&&t.closest('#sendMessageBtn')){sent++;if(sent%5===0)setTimeout(f
 function boot(){
 try{
 if(window.__btAdOn!==true)return;
-var me=null;try{me=JSON.parse(localStorage.getItem('bt_current_user')||'null')}catch(e){}
-if(me&&me.ads_off)return;
-if(me&&me.id){
-fetch('/tables/users/'+encodeURIComponent(me.id),{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(u){
+var me=null;try{var __raw=localStorage.getItem('bt_current_user');me=__raw?JSON.parse(__raw):null}catch(e){me=null}
+if(me&&(me.ads_off||me.pro))return;
+var __id=(me&&me.id)||null;
+try{var __rid=localStorage.getItem('bt_current_user');if(!__id&&__rid&&__rid.charAt(0)!=='{'&&__rid.charAt(0)!=='[')__id=__rid}catch(e){}
+if(__id){
+fetch('/tables/users/'+encodeURIComponent(__id),{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(u){
 var row=Array.isArray(u)?u[0]:u;
-if(row&&row.ads_off)return;
+if(row&&(row.ads_off||row.pro))return;
 start();
-}).catch(function(){start()});
+}).catch(function(){return});
 }else{start()}
 }catch(e){}
 }
