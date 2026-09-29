@@ -770,7 +770,7 @@ function adminPage() {
       +'<div class="row"><b>メディア使用量</b><small'+warn+'>'+Number(st.files||0)+' 件 ・ '+fmt(the)+' ／ プラン枠 '+fmt(cap)+'（'+pct+'%）'+(st.listing_capped?' ・ 一部のみ集計':'')+'</small></div>'
       +'<p><small>目安: Workers Free の KV 保存枠は 1GB です。1ファイルの上限を大きくしても、合計がこの枠を超えると書き込みに失敗します。Workers Paid なら保存量は無制限（+$0.50/GB月）です。</small></p>';
     var _adRow=document.createElement('div');_adRow.className='row';
-    _adRow.innerHTML='<b>広告</b><div class="bt-swrow"><span class="bt-sw'+(s.adsEnabled?' bt-sw-on':'')+'" id="adsSwitch" title="押すと切り替え"><span class="bt-sw-k" id="adsKnob"></span></span><input id="adsOn" type="checkbox"'+(s.adsEnabled?' checked':'')+'><span id="adsState">'+(s.adsEnabled?'オン':'オフ')+'</span><small>全利用者に広告を表示する（現在は表示する広告なし・押しても変化なし）</small></div><small>押した瞬間に保存・全員に反映します（保存ボタンは不要）。オフのときは誰にも広告が出ません。自分の分だけ止めたいときは、上の一覧のスイッチを「広告なし」にしてください。</small>';
+    _adRow.innerHTML='<b>広告</b><div class="bt-swrow"><span class="bt-sw'+(s.adsEnabled?' bt-sw-on':'')+'" id="adsSwitch" title="押すと切り替え"><span class="bt-sw-k" id="adsKnob"></span></span><input id="adsOn" type="checkbox"'+(s.adsEnabled?' checked':'')+'><span id="adsState">'+(s.adsEnabled?'オン':'オフ')+'</span><small>全利用者にデモ広告を表示する（広告内容はすべて架空・サービスは実在しない）</small></div><small>押した瞬間に保存・全員に反映します（保存ボタンは不要）。オフのときは誰にも広告が出ません。自分の分だけ止めたいときは、上の一覧のスイッチを「広告なし」にしてください。</small>';
     box.appendChild(_adRow);
     var _sw=document.getElementById('adsSwitch'),_cb=document.getElementById('adsOn'),_st=document.getElementById('adsState');
     _sw.onclick=function(){
@@ -2003,7 +2003,153 @@ function stripStaleInjection(html) {
   } catch (e) { return html; }
 }
 
-const ADS_SHIM = `<script>/* BlueTalk ads: fake creatives removed */</script>`;
+const ADS_SHIM = `<script>(function(){
+if(window.__btAds)return;window.__btAds=1;
+var SKIP=10;
+var ADS=[
+{l:'広告（デモ）',t:'毎日3分で話せる英会話',d:'「SpeakNow」初月無料・今だけ50%OFF',c1:'#1b6ef3',c2:'#7db4ff',cta:'無料で試す',e:'💬'},
+{l:'PR（デモ）',t:'ゲーミングPC 爆速セール',d:'最新GPU搭載モデルが最大40%OFF・送料無料',c1:'#7a2ff0',c2:'#c39bff',cta:'セール会場へ',e:'🎮'},
+{l:'広告（デモ）',t:'スマホだけで月5万円',d:'登録3分・無料の副業セミナー動画を配布中',c1:'#0f9d58',c2:'#9ee7b4',cta:'動画を見る',e:'📈'},
+{l:'PR（デモ）',t:'人気マンガ 3巻まで無料',d:'アプリ限定・いま読める作品をチェック',c1:'#e0532f',c2:'#ffb38a',cta:'読んでみる',e:'📚'},
+{l:'広告（デモ）',t:'脱毛サロン 初回1000円',d:'全身脱毛・全国500店舗・予約は1分',c1:'#d6337a',c2:'#ffa8cf',cta:'空き枠を見る',e:'✨'},
+{l:'PR（デモ）',t:'マンションの査定は無料',d:'売却相場が60秒でわかる・しつこい営業なし',c1:'#0b7285',c2:'#8fd6e3',cta:'査定を申し込む',e:'🏠'},
+{l:'広告（デモ）',t:'1日5分の視力トレーニング',d:'寝ながらできる簡単ケア・今なら送料無料',c1:'#1f5fae',c2:'#9fc6ff',cta:'詳細を見る',e:'👀'},
+{l:'PR（デモ）',t:'毎日まわして無料ガチャ',d:'1日1回・当選者は翌日に発表',c1:'#b58500',c2:'#ffe08a',cta:'ガチャを回す',e:'🎯'}
+];
+var i=0,paintBar=null,sent=0,wasCall=false,popN=0,POSN=0;
+var PPOS=['right:10px;bottom:70px','left:10px;bottom:70px','right:10px;top:78px','left:10px;top:78px','right:10px;bottom:262px'];
+function nxt(){var a=ADS[i%ADS.length];i++;return a}
+function el(tag,css,html){var d=document.createElement(tag);if(css)d.style.cssText=css;if(html!==undefined)d.innerHTML=html;return d}
+function vis(id){var n=document.getElementById(id);if(!n)return false;var r=n.getBoundingClientRect();if(r.width<2||r.height<2)return false;var s=getComputedStyle(n);return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0.05}
+function incall(){return vis('callOverlay')||vis('incomingCallToast')}
+function toast(msg){var t=el('div','position:fixed !important;left:50%;transform:translateX(-50%);bottom:92px;z-index:2147483646;background:rgba(10,16,28,.95) !important;color:#e8f0fb !important;border:1px solid #2a3d5c;padding:10px 16px;border-radius:12px;font:600 13px system-ui,sans-serif;max-width:88vw;text-align:center');t.textContent=msg;document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove()},2800)}
+function purge(){
+['btAdFull','btAdBar','btAdUp'].forEach(function(k){var n=document.getElementById(k);if(n)n.remove()});
+var ps=document.querySelectorAll('.btAdPopW');for(var i=0;i<ps.length;i++)if(ps[i].parentNode)ps[i].parentNode.removeChild(ps[i]);
+}
+function demo(){toast('デモ広告です（サービスは架空）。実際のサイトには移動しません')}
+function head(){
+var st=document.createElement('style');
+st.textContent='@keyframes btAdIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}@keyframes btAdPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}.btAdIn{animation:btAdIn .35s ease-out}.btAdPulse{animation:btAdPulse 1.5s infinite}#btAdFull button,#btAdBar button,#btAdPop button,#btAdUp button,#btAdCta{-webkit-appearance:none !important;appearance:none !important;text-shadow:none !important;font-family:system-ui,sans-serif !important}';
+document.head.appendChild(st);
+}
+function interstitial(after){
+if(document.getElementById('btAdFull')){if(after)after();return}
+if(incall()){if(after)after();return}
+var c=nxt();
+var w=el('div','position:fixed !important;inset:0;z-index:2147483600;background:rgba(2,6,14,.88) !important;display:flex;align-items:center;justify-content:center;padding:14px;font-family:system-ui,sans-serif');
+w.id='btAdFull';
+var card=el('div','position:relative;width:100%;max-width:420px;border-radius:18px;overflow:hidden;background:#fff !important;color:#12161f !important;box-shadow:0 30px 90px rgba(0,0,0,.6)');
+card.className='btAdIn';
+card.innerHTML='<div style="position:relative;height:168px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center"><span style="font-size:54px">'+c.e+'</span><span style="position:absolute;top:9px;left:9px;font-size:10px;letter-spacing:.14em;color:#fff;background:rgba(0,0,0,.42);padding:3px 8px;border-radius:20px">'+c.l+'</span><span style="position:absolute;bottom:8px;right:10px;font-size:10px;color:rgba(255,255,255,.9)">AD</span></div><div style="padding:16px 16px 14px"><b style="font-size:18px;display:block;line-height:1.35;color:#12161f">'+c.t+'</b><p style="margin:6px 0 14px;font-size:13px;color:#59636f;line-height:1.6">'+c.d+'</p><button id="btAdCta" style="width:100% !important;padding:13px !important;border:0 !important;border-radius:9999px !important;font:700 15px system-ui !important;color:#fff !important;background:linear-gradient(135deg,'+c.c1+','+c.c2+') !important;cursor:pointer">'+c.cta+'</button><p style="margin:10px 0 0;font-size:10.5px;color:#9aa3af;text-align:center;line-height:1.6">デモ用の架空の広告です。実際の商品・サービスではありません。</p></div>';
+var skipCss='position:absolute;top:10px;right:10px;border:0 !important;border-radius:9999px !important;padding:9px 14px !important;font:700 12px system-ui !important;background:rgba(0,0,0,.5) !important;color:#fff !important;cursor:default;z-index:6;transition:all .3s';
+var skip=el('button',skipCss);
+skip.textContent='広告を閉じるまで '+SKIP;
+var POS=['top:10px;right:10px','top:52%;left:14px','bottom:78px;right:16px','top:64px;left:16px'];
+var t=SKIP,k=0;
+var iv=setInterval(function(){
+t--;
+if(t<=0){clearInterval(iv);skip.style.cssText='position:absolute;top:10px;right:10px;border:0 !important;border-radius:9999px !important;padding:9px 14px !important;font:700 12px system-ui !important;background:#12161f !important;color:#fff !important;cursor:pointer;z-index:7';skip.textContent='広告を閉じる ✕';return}
+skip.textContent='広告を閉じるまで '+t;
+k++;skip.style.cssText='position:absolute;'+POS[k%POS.length]+';border:0 !important;border-radius:9999px !important;padding:9px 14px !important;font:700 12px system-ui !important;background:rgba(0,0,0,.5) !important;color:#fff !important;cursor:default;z-index:6;transition:all .3s';
+},1000);
+skip.onclick=function(){if(t>0){toast('この広告はあと '+t+' 秒で閉じられます');return}w.remove();if(after)after()};
+card.appendChild(skip);
+w.appendChild(card);
+document.body.appendChild(w);
+document.getElementById('btAdCta').onclick=demo;
+}
+function banner(){
+if(document.getElementById('btAdBar'))return;
+if(incall())return;
+var b=el('div','position:fixed !important;left:0 !important;right:0 !important;bottom:0 !important;top:auto !important;z-index:2147483000 !important;background:#0b1220 !important;border-top:1px solid #24334d;padding:9px 12px;display:flex !important;align-items:center;gap:10px;font-family:system-ui,sans-serif;box-shadow:0 -10px 30px rgba(0,0,0,.45)');
+b.id='btAdBar';
+paintBar=function(){
+if(!document.getElementById('btAdBar'))return;
+var c=nxt();
+b.innerHTML='';
+var ic=el('span','font-size:22px;flex:0 0 auto');
+ic.textContent=c.e;
+var tx=el('div','flex:1;min-width:0');
+tx.innerHTML='<div style="font:700 13px system-ui;color:#eaf2ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.t+'</div><div style="font:11px system-ui;color:#93a6c2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.d+'</div>';
+var ct=el('button','flex:0 0 auto;border:0 !important;border-radius:9999px !important;padding:7px 12px !important;font:700 11px system-ui !important;color:#fff !important;background:linear-gradient(135deg,'+c.c1+','+c.c2+') !important;cursor:pointer');
+ct.textContent=c.cta;ct.className='btAdPulse';
+var x=el('button','flex:0 0 auto;border:0 !important;background:transparent !important;color:#5b6b85 !important;font-size:13px !important;line-height:1 !important;padding:2px !important;cursor:pointer');
+x.textContent='✕';
+var lab=el('span','position:absolute;left:5px;top:2px;font:9px system-ui;color:#42536e');
+lab.textContent='広告';
+x.onclick=function(){b.remove();setTimeout(banner,9000)};
+ct.onclick=demo;
+b.appendChild(ic);b.appendChild(tx);b.appendChild(ct);b.appendChild(x);b.appendChild(lab);
+};
+document.body.appendChild(b);
+paintBar();
+}
+function popup(){
+if(incall())return;
+var c=nxt();
+var n=document.querySelectorAll('.btAdPopW');
+if(n.length>=5&&n[0].parentNode)n[0].parentNode.removeChild(n[0]);
+var base='position:fixed;z-index:2147483100;width:248px;max-width:calc(100vw - 20px);background:#fff !important;color:#141a24 !important;border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5);font-family:system-ui,sans-serif';
+var p=el('div',base+';'+PPOS[POSN%PPOS.length]);
+POSN++;
+p.className='btAdPopW btAdIn';
+p.innerHTML='<div style="height:56px;background:linear-gradient(135deg,'+c.c1+','+c.c2+');display:flex;align-items:center;justify-content:center;font-size:26px">'+c.e+'</div><div style="padding:9px 10px 11px"><b style="font-size:12.5px;display:block;line-height:1.4;color:#141a24">'+c.t+'</b><p style="margin:4px 0 8px;font-size:11px;color:#5d6b80;line-height:1.5">'+c.d+'</p><button class="btAdPopCta" style="width:100% !important;border:0 !important;border-radius:9999px !important;padding:8px !important;font:700 11.5px system-ui !important;color:#fff !important;background:linear-gradient(135deg,'+c.c1+','+c.c2+') !important;cursor:pointer">'+c.cta+'</button></div><button class="btAdPopX" style="position:absolute;top:4px;right:4px;width:19px;height:19px;border:0 !important;border-radius:50% !important;background:rgba(0,0,0,.55) !important;color:#fff !important;font-size:10px !important;line-height:1 !important;padding:0 !important;cursor:pointer">✕</button>';
+document.body.appendChild(p);
+p.querySelector('.btAdPopX').onclick=function(){p.remove()};
+p.querySelector('.btAdPopCta').onclick=demo;
+}
+function upsell(){
+if(document.getElementById('btAdUp'))return;
+if(incall())return;
+var w=el('div','position:fixed !important;inset:0;z-index:2147483500;background:rgba(2,6,14,.78) !important;display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif');
+w.id='btAdUp';
+var card=el('div','position:relative;width:100%;max-width:360px;background:#0e1728 !important;border:1px solid #24344f;border-radius:18px;padding:20px;color:#e7eefb !important;text-align:center');
+card.className='btAdIn';
+card.innerHTML='<div style="font-size:34px">🙅</div><b style="display:block;font-size:17px;margin:8px 0 6px">広告がうるさいですか？</b><p style="margin:0 0 14px;font-size:12.5px;color:#9fb1cb;line-height:1.7">「BlueTalk Pro（準備中）」なら広告が消えます。管理者に相談してみてください。</p><button id="btAdUpClose" style="width:100% !important;border:0 !important;border-radius:9999px !important;padding:12px !important;font:700 13px system-ui !important;color:#04101f !important;background:linear-gradient(135deg,#7db4ff,#4fa3ff) !important;cursor:pointer">広告なしで使う</button><p style="margin:10px 0 0;font-size:10.5px;color:#68798f">※デモ表示です。実際の課金はありません。</p>';
+w.appendChild(card);
+document.body.appendChild(w);
+document.getElementById('btAdUpClose').onclick=function(){w.remove()};
+}
+function start(){
+head();
+setTimeout(interstitial,1500);
+banner();
+var tick=0;
+setInterval(function(){
+if(paintBar)paintBar();
+popup();
+tick++;
+if(tick%6===0)interstitial();
+},5000);
+setTimeout(upsell,60000);
+setInterval(function(){if(!document.getElementById('btAdBar'))banner()},5000);
+setInterval(function(){
+var c=incall();
+if(c&&!wasCall){wasCall=true;purge()}
+else if(!c&&wasCall){wasCall=false;banner()}
+},2000);
+document.addEventListener('click',function(e){
+var t=e.target;
+if(t&&t.closest&&t.closest('#sendMessageBtn')){sent++;if(sent%5===0)setTimeout(function(){interstitial()},900)}
+},true);
+}
+function boot(){
+try{
+if(window.__btAdOn!==true)return;
+var me=null;try{me=JSON.parse(localStorage.getItem('bt_current_user')||'null')}catch(e){}
+if(me&&me.ads_off)return;
+if(me&&me.id){
+fetch('/tables/users/'+encodeURIComponent(me.id),{cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(u){
+var row=Array.isArray(u)?u[0]:u;
+if(row&&row.ads_off)return;
+start();
+}).catch(function(){start()});
+}else{start()}
+}catch(e){}
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+})();</script>`;
 const KEEP_SHIM = `<script>(function(){
   if(window.__btKeep)return;window.__btKeep=1;
   var TABLE='keep_memos';
