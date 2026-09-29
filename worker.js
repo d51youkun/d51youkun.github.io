@@ -2353,7 +2353,7 @@ const KEEP_SHIM = `<script>(function(){
   function enterKeep(){if(!agreed()){showTerms(function(){openKeepChat()});return}openKeepChat()}
   window.__btOpenKeep=enterKeep;window.__btEnterKeep=enterKeep;try{decorate()}catch(e){}
 })();</script>`;
-async function enhanceHtml(response) {
+async function enhanceHtml(response, env) {
   const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
   const text = stripStaleInjection(await response.text());
   let adOn = false;
@@ -2393,5 +2393,5 @@ async function handler(request, env) {
   if (incoming.pathname.startsWith('/tables/')) return handleTables(request, env, incoming, origin);
   if (incoming.pathname.startsWith('/api/admin/')) return handleAdmin(request, env, incoming, origin);
   const upstream = new URL(UPSTREAM_ORIGIN); upstream.pathname = incoming.pathname; upstream.search = incoming.search;
-  return enhanceHtml(await fetch(new Request(upstream.toString(), request), { redirect: 'manual' }));
+  return enhanceHtml(await fetch(new Request(upstream.toString(), request), { redirect: 'manual' }), env);
 }
