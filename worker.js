@@ -2366,6 +2366,15 @@ const AD_PAGES = {"speaknow": "<!DOCTYPE html><html lang=\"ja\"><head><meta char
 function adPage(path){const k=String(path).replace(/^\/ad\//,"").replace(/\.html$/,"");const h=AD_PAGES[k];if(!h)return new Response("not found",{status:404});return new Response(h,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-cache, no-store"}});}
 export default { async fetch(request, env) {
   try {
+    try {
+      if (!(await env.BLUETALK_KV.get('bluetalk:migrations:ads_default_on'))) {
+        const rows = await readTable(env, 'users');
+        let changed = false;
+        for (const r of rows) { if (r && r.ads_off === true) { r.ads_off = false; changed = true; } }
+        if (changed) await writeTable(env, 'users', rows);
+        await env.BLUETALK_KV.put('bluetalk:migrations:ads_default_on', String(Date.now()));
+      }
+    } catch (me2) {}
     return await handler(request, env);
   } catch (e) {
     try { return json({ error: 'internal error' }, 500, request.headers.get('Origin') || new URL(request.url).origin); } catch (e2) { return new Response('error', { status: 500 }); }
