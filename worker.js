@@ -770,10 +770,18 @@ function adminPage() {
       +'<div class="row"><b>メディア使用量</b><small'+warn+'>'+Number(st.files||0)+' 件 ・ '+fmt(the)+' ／ プラン枠 '+fmt(cap)+'（'+pct+'%）'+(st.listing_capped?' ・ 一部のみ集計':'')+'</small></div>'
       +'<p><small>目安: Workers Free の KV 保存枠は 1GB です。1ファイルの上限を大きくしても、合計がこの枠を超えると書き込みに失敗します。Workers Paid なら保存量は無制限（+$0.50/GB月）です。</small></p>';
     var _adRow=document.createElement('div');_adRow.className='row';
-    _adRow.innerHTML='<b>広告</b><div class="bt-swrow"><span class="bt-sw'+(s.adsEnabled?' bt-sw-on':'')+'" id="adsSwitch" title="押すと切り替え"><span class="bt-sw-k" id="adsKnob"></span></span><input id="adsOn" type="checkbox"'+(s.adsEnabled?' checked':'')+'><span id="adsState">'+(s.adsEnabled?'オン':'オフ')+'</span><small>全利用者に広告を表示する（5秒ごとに1つ／全画面は10秒スキップ）</small></div><small>既定はオフ。オフのときは誰にも広告が出ません。特定の人だけ止めたいときは、上の一覧のスイッチで切り替えます（保存すると反映）。</small>';
+    _adRow.innerHTML='<b>広告</b><div class="bt-swrow"><span class="bt-sw'+(s.adsEnabled?' bt-sw-on':'')+'" id="adsSwitch" title="押すと切り替え"><span class="bt-sw-k" id="adsKnob"></span></span><input id="adsOn" type="checkbox"'+(s.adsEnabled?' checked':'')+'><span id="adsState">'+(s.adsEnabled?'オン':'オフ')+'</span><small>全利用者に広告を表示する（5秒ごとに1つ／全画面は10秒スキップ）</small></div><small>押した瞬間に保存・全員に反映します（保存ボタンは不要）。オフのときは誰にも広告が出ません。自分の分だけ止めたいときは、上の一覧のスイッチを「広告なし」にしてください。</small>';
     box.appendChild(_adRow);
     var _sw=document.getElementById('adsSwitch'),_cb=document.getElementById('adsOn'),_st=document.getElementById('adsState');
-    _sw.onclick=function(){_cb.checked=!_cb.checked;_sw.className='bt-sw'+(_cb.checked?' bt-sw-on':'');_st.textContent=_cb.checked?'オン':'オフ';_st.style.color=_cb.checked?'#1a9e46':'#7b8794'};
+    _sw.onclick=function(){
+      _cb.checked=!_cb.checked;_sw.className='bt-sw'+(_cb.checked?' bt-sw-on':'');_st.textContent=_cb.checked?'オン':'オフ';_st.style.color=_cb.checked?'#1a9e46':'#7b8794';_st.textContent='保存中...';
+      fetch('/api/admin/settings',{method:'POST',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({adsEnabled:_cb.checked})}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){
+        if(!j||!j.ok){_st.textContent='保存失敗';_st.style.color='#c0392b';return}
+        _st.textContent=_cb.checked?'オン':'オフ';_st.style.color=_cb.checked?'#1a9e46':'#7b8794';
+        var t=document.createElement('div');t.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:99999;background:#0e1728;color:#e7eefb;border:1px solid #2a3d5c;padding:10px 18px;border-radius:12px;font:600 13px system-ui,sans-serif';
+        t.textContent='広告を'+(_cb.checked?'オン':'オフ')+'にしました（全員に反映・アプリ開き直しで出ます）';document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove()},2600);
+      }).catch(function(){_st.textContent='保存失敗';_st.style.color='#c0392b'})
+    };
     document.getElementById('saveLimits').onclick=async()=>{
       var a=Number(document.getElementById('maxFileGb').value||0),b=Number(document.getElementById('maxTfGb').value||0),m=document.getElementById('limMsg'),NL=String.fromCharCode(10);
       if(!(a>0)){m.textContent='1ファイルの上限は0より大きい値を入力してください';return}
