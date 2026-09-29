@@ -1,825 +1,221 @@
-const UPSTREAM_ORIGIN = 'https://nfieyeke.gensparkspace.com';
-const MEDIA_ORIGIN = 'https://bluechat-sync.by-youhei.workers.dev';
-const CALL_SERVERS = [1, 2, 3].map((i) => `https://bluechat-call-${i}.by-youhei.workers.dev`);
-const VIDEO_SERVERS = ['https://bluechat-video-1.by-youhei.workers.dev'];
-const ADMIN_PASSWORD_SHA256 = '627841443a7a334c0bbafb4ad0d02e0f69f2e040bae6af9e45cc8d5683aa4dd9';
-const TABLE_PREFIX = 'bluetalk:table:';
-const SESSION_PREFIX = 'bluetalk:admin-session:';
-const ADMIN_SESSION_TTL = 60 * 60 * 8;
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BlueTalk</title>
+<link rel="icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script><link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://stickershop.line-scdn.net" crossorigin><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>
+<body>
+<div class="app-shell" id="appShell">
 
-function corsHeaders(origin) {
-  const allowed = origin && (origin.endsWith('.workers.dev') || origin.endsWith('.pages.dev'))
-    ? origin : 'https://bluetalk.by-youhei.workers.dev';
-  return {
-    'Access-Control-Allow-Origin': allowed,
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Token',
-    'Access-Control-Max-Age': '86400',
-  };
-}
+  <!-- ============ Left navigation rail ============ -->
+  <aside class="nav-rail">
+    <div class="brand"><i class="fa-solid fa-comment-dots"></i></div>
+    <nav>
+      <button class="nav-item active" data-view="chats"><i class="fa-solid fa-comment"></i>トーク</button>
+      <button class="nav-item" data-view="friends"><i class="fa-solid fa-user-group"></i>友だち</button>
+      <button class="nav-item" data-view="stickers"><i class="fa-solid fa-icons"></i>スタンプ</button>
+    </nav>
+    <img id="navAvatar" class="me-avatar" data-view="profile" title="マイページ" alt="自分のアイコン">
+  </aside>
 
-function json(data, status, origin) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...corsHeaders(origin) },
-  });
-}
+  <!-- ============ List panel (left column) ============ -->
+  <section class="list-panel" id="chatsView">
+    <div class="panel-header">
+      <h2>トーク</h2>
+      <button class="icon-btn" id="newChatBtn" title="新しいトーク"><i class="fa-solid fa-pen"></i></button>
+    </div>
+    <div class="scroll-list" id="chatList"></div>
+  </section>
 
-function validTable(name) { return /^[A-Za-z0-9_-]{1,64}$/.test(name); }
-function tableKey(name) { return TABLE_PREFIX + name; }
+  <section class="list-panel" id="friendsView" style="display:none;">
+    <div class="panel-header">
+      <h2>友だち</h2>
+      <div style="display:flex;gap:8px;">
+        <button class="icon-btn" id="showMyQrBtn" title="マイQRコード"><i class="fa-solid fa-qrcode"></i></button>
+        <button class="icon-btn" id="scanQrBtn" title="QRコードで友だち追加"><i class="fa-solid fa-camera"></i></button>
+      </div>
+    </div>
+    <div class="search-box">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input id="friendSearchInput" type="text" placeholder="IDで友だちを検索">
+    </div>
+    <div class="scroll-list" id="friendSearchResult"></div>
+    <div class="section-label">友だちリスト</div>
+    <div class="scroll-list" id="friendList"></div>
+  </section>
 
-async function readTable(env, name) {
-  const raw = await env.BLUETALK_KV.get(tableKey(name));
-  if (!raw) return [];
-  try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
-}
+  <section class="list-panel sticker-shop" id="stickersView" style="display:none;">
+    <h2>スタンプ</h2>
+    <div class="add-sticker-card">
+      <label style="font-size:12px;color:var(--bt-text-light);font-weight:600;">LINEスタンプのURLを登録</label>
+      <div class="row" style="margin-top:8px;">
+        <input id="stickerUrlInput" type="text" placeholder="https://store.line.me/stickershop/... の画像URL">
+        <button class="btn-primary" style="width:auto;padding:0 18px;" id="addStickerBtn">追加</button>
+      </div>
+      <p class="hint">LINEスタンプストアのページを開き、スタンプ画像を右クリック→「画像アドレスをコピー」して貼り付けると、無料でBlueTalk内で使えるようになります。（画像URL直リンクに対応）</p>
+    </div>
+    <div class="add-sticker-card">
+      <label style="font-size:12px;color:var(--bt-text-light);font-weight:600;">端末の画像ファイルからスタンプを作成（複数選択可）</label>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px;">
+        <input id="stickerPackName" type="text" placeholder="スタンプ帳の名前" value="マイスタンプ">
+        <input id="stickerFilesInput" type="file" accept="image/*" multiple>
+        <button class="btn-primary" style="width:auto;padding:0 18px;" id="importStickerFilesBtn">取り込む</button>
+      </div>
+      <p class="hint">自分が利用する権利を持つ画像だけ登録してください（1枚5MBまで）。</p>
+    </div>
+    <div class="sticker-grid" id="stickerGrid"></div>
+  </section>
 
-async function writeTable(env, name, rows) {
-  await env.BLUETALK_KV.put(tableKey(name), JSON.stringify(rows));
-}
+  <section class="list-panel profile-panel" id="profileView" style="display:none;">
+    <h2>マイページ</h2>
+    <div class="profile-card">
+      <div class="avatar-row">
+        <img id="profileAvatar" alt="自分のアイコン">
+        <div>
+          <div id="profileName" style="font-weight:700;font-size:18px;"></div>
+          <div class="uid" id="profileUsername"></div>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label>アイコン画像をアップロード</label>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn-secondary" type="button" id="uploadAvatarBtn" style="width:auto;padding:9px 16px;"><i class="fa-solid fa-upload"></i> 画像を選ぶ</button>
+          <input type="file" id="avatarFileInput" accept="image/*" style="display:none;">
+          <button class="mini-btn" type="button" id="randomAvatarBtn">ランダム画像にする</button>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label>ひとこと</label>
+        <input id="profileStatusInput" type="text" placeholder="ひとことステータス">
+      </div>
+      <button class="btn-primary" id="saveProfileBtn" style="width:100%;">保存する</button>
+      <button class="btn-secondary" id="logoutBtn" style="width:100%;margin-top:10px;">ログアウト</button>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--bt-border);display:grid;gap:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:13px;font-weight:600;"><i class="fa-solid fa-moon"></i> ダークモード</span>
+          <label class="switch">
+            <input type="checkbox" id="darkModeToggle">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+        <button class="btn-secondary" id="requestNotifyBtn" type="button"><i class="fa-regular fa-bell"></i> 通知を許可する</button>
+        <button class="btn-secondary" id="deleteAccountBtn" type="button" style="color:var(--bt-danger);"><i class="fa-solid fa-trash"></i> アカウントを削除する</button>
+        <small style="color:var(--bt-text-light);">アカウントを削除すると、ログイン情報が失われ再利用できなくなります。</small>
+      </div>
+    </div>
+  </section>
 
-async function sha256(value) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((n) => n.toString(16).padStart(2, '0')).join('');
-}
+  <!-- ============ Main panel (right column) ============ -->
+  <section class="main-panel" id="mainPanel">
+    <div class="empty-state" id="emptyState">
+      <i class="fa-regular fa-comments"></i>
+      <p>トークを選択してください</p>
+    </div>
+    <div class="chat-room" id="chatRoom" style="display:none;">
+      <header class="chat-header">
+        <button class="round-btn back-btn" id="backToListBtn" style="display:none;"><i class="fa-solid fa-arrow-left"></i></button>
+        <img id="chatHeaderAvatar" alt="">
+        <div class="title" id="chatHeaderTitle"></div>
+        <div class="actions">
+          <button id="voiceCallBtn" title="音声通話"><i class="fa-solid fa-phone"></i></button>
+          <button id="videoCallBtn" title="ビデオ通話"><i class="fa-solid fa-video"></i></button>
+        </div>
+      </header>
+      <div class="messages" id="messagesArea"></div>
+      <div class="chat-input-bar">
+        <button class="round-btn" id="openStickerPickerBtn" title="スタンプ"><i class="fa-solid fa-icons"></i></button>
+        <div class="sticker-picker" id="stickerPicker"></div>
+        <button class="round-btn" id="attachMediaBtn" title="画像・動画を送る"><i class="fa-solid fa-image"></i></button>
+        <input type="file" id="mediaFileInput" accept="image/*,video/*" style="display:none;">
+        <button class="round-btn" id="attachFileBtn" title="ファイルを送る"><i class="fa-solid fa-paperclip"></i></button>
+        <input type="file" id="genericFileInput" style="display:none;">
+        <textarea id="messageInput" rows="1" placeholder="メッセージを入力"></textarea>
+        <button class="round-btn send" id="sendMessageBtn" title="送信"><i class="fa-solid fa-paper-plane"></i></button>
+      </div>
+    </div>
+  </section>
+</div>
 
-function adminTokenIdentity(request) {
-  const token = requestAdminToken(request) || '';
-  return token ? token.slice(0, 8) : '';
-}
+<!-- Incoming call toast -->
+<div class="incoming-call-toast" id="incomingCallToast">
+  <img id="incomingCallAvatar" alt="">
+  <div class="info">
+    <div class="name" id="incomingCallName"></div>
+    <div class="sub" id="incomingCallSub">音声通話の着信</div>
+  </div>
+  <div class="actions">
+    <button class="reject" id="rejectCallBtn"><i class="fa-solid fa-phone-slash"></i></button>
+    <button class="accept" id="acceptCallBtn"><i class="fa-solid fa-phone"></i></button>
+  </div>
+</div>
 
-function requestAdminToken(request) {
-  const auth = request.headers.get('Authorization') || '';
-  return auth.startsWith('Bearer ') ? auth.slice(7) : request.headers.get('X-Admin-Token') || '';
-}
+<!-- Call overlay -->
+<div class="call-overlay" id="callOverlay">
+  <img class="call-avatar" id="callOverlayAvatar" alt="">
+  <div class="call-name" id="callOverlayName"></div>
+  <div class="call-status" id="callOverlayStatus">発信中...</div>
+  <video id="remoteVideo" autoplay playsinline style="display:none;"></video>
+  <video id="localVideo" autoplay playsinline muted style="display:none;"></video>
+  <div class="call-controls">
+    <button id="toggleMuteBtn" title="ミュート"><i class="fa-solid fa-microphone"></i></button>
+    <button id="toggleVideoBtn" title="ビデオ切替"><i class="fa-solid fa-video"></i></button>
+    <button class="end-call" id="endCallBtn" title="終了"><i class="fa-solid fa-phone-slash"></i></button>
+  </div>
+</div>
 
-async function isAdmin(request, env) {
-  const token = requestAdminToken(request);
-  return Boolean(token && await env.BLUETALK_KV.get(SESSION_PREFIX + token));
-}
+<!-- New chat modal -->
+<div class="modal-backdrop" id="newChatModal">
+  <div class="modal-box">
+    <button class="close-x" id="closeNewChatModal"><i class="fa-solid fa-xmark"></i></button>
+    <h3>トークを始める</h3>
+    <div id="newChatFriendList"></div>
+  </div>
+</div>
 
-async function handleBtMedia(request, env, url) {
-  const store = /^(?:\/bt-media)(?:\/([A-Za-z0-9-]+))(?:\/(\d+)|\/complete)?/.exec(url.pathname);
-  if (!store) return null;
-  const id = store[1];
-  if (!id) return json({ ok: false, error: 'missing id' }, 400, url ? undefined : undefined);
-  if (request.method === 'PUT' && store[2] !== undefined) {
-    const key = `bluetalk:media:${id}:${store[2]}`;
-    const ctype = String(request.headers.get('Content-Type') || '').toLowerCase();
-    if (ctype.indexOf('application/octet-stream') === 0) {
-      // 生バイナリ経路: ストリームのまま KV へ（メモリ・CPU を消費しない）
-      const len = Number(request.headers.get('Content-Length') || 0);
-      if (!request.body) return json({ ok: false, error: 'missing chunk' }, 400, undefined);
-      if (len > KV_PART_BYTES) return json({ ok: false, error: 'chunk_too_large', maxChunkBytes: KV_PART_BYTES }, 413, undefined);
-      await env.BLUETALK_KV.put(key, request.body);
-      return json({ ok: true, bytes: len, encoding: 'binary' }, 200, undefined);
-    }
-    // 旧経路（base64 文字列）: 既存データとの互換のため残す
-    const body = await request.json().catch(() => ({}));
-    const data = String(body.data || '');
-    if (!data) return json({ ok: false, error: 'missing chunk' }, 400, undefined);
-    await env.BLUETALK_KV.put(key, data);
-    return json({ ok: true, encoding: 'base64' }, 200, undefined);
-  }
-  if (request.method === 'POST' && url.pathname.endsWith('/complete')) {
-    const body = await request.json().catch(() => ({}));
-    const total = Math.max(1, Number(body.totalChunks || 1));
-    const mime = String(body.mimeType || 'application/octet-stream').slice(0, 120);
-    const encoding = body.encoding === 'binary' ? 'binary' : 'base64';
-    const sizeBytes = Number(body.sizeBytes || 0);
-    const limitCfg = await readSettings(env);
-    if (sizeBytes > limitCfg.maxFileBytes) return json({ ok: false, error: 'too_large', maxFileBytes: limitCfg.maxFileBytes }, 413, origin);
-    const chunkBytes = Number(body.chunkBytes || 0) || (encoding === 'binary' ? KV_PART_BYTES : 0);
-    const metaObj = { totalChunks: total, mimeType: mime, sizeBytes, chunkBytes, encoding, created_at: Date.now() };
-    await env.BLUETALK_KV.put(`bluetalk:media:${id}:meta`, JSON.stringify(metaObj), { metadata: { sizeBytes, mimeType: mime.slice(0, 60), encoding } });
-    return json({ ok: true, url: `/bt-media/${id}` }, 201, undefined);
-  }
-  if (request.method === 'GET' && !url.pathname.endsWith('/complete') && store[2] === undefined) {
-    const metaRaw = await env.BLUETALK_KV.get(`bluetalk:media:${id}:meta`);
-    if (!metaRaw) return new Response('Not found', { status: 404 });
-    const meta = JSON.parse(metaRaw);
-    const headers0 = { 'Content-Type': meta.mimeType, 'Cache-Control': 'public, max-age=31536000, immutable', 'Accept-Ranges': 'bytes' };
-    const binary = meta.encoding === 'binary';
-    const totalBytes = Number(meta.sizeBytes || 0);
-    const chunkBytes = Number(meta.chunkBytes || 0) || (binary ? KV_PART_BYTES : 0);
-    if (!totalBytes || !chunkBytes) {
-      const parts = [];
-      for (let i = 0; i < meta.totalChunks; i++) {
-        const c = await env.BLUETALK_KV.get(`bluetalk:media:${id}:${i}`);
-        if (c === null) return new Response('Not found', { status: 404 });
-        parts.push(c);
-      }
-      const data = parts.join('');
-      const comma = data.indexOf(',');
-      const encoded = comma >= 0 ? data.slice(comma + 1) : '';
-      const bytes = data.slice(0, comma).includes(';base64') ? Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(encoded));
-      return new Response(bytes, { headers: headers0 });
-    }
-    const getChunk = async (i) => {
-      for (let t = 0; t < 3; t++) {
-        const c = binary
-          ? await env.BLUETALK_KV.get(`bluetalk:media:${id}:${i}`, 'arrayBuffer')
-          : await env.BLUETALK_KV.get(`bluetalk:media:${id}:${i}`);
-        if (c !== null) return c;
-        await new Promise((r) => setTimeout(r, 400));
-      }
-      return null;
-    };
-    const decodeChunk = (raw0) => {
-      let s = raw0;
-      if (s.charCodeAt(0) === 100 && s.indexOf('data:') === 0) { const cm = s.indexOf(','); if (cm >= 0) s = s.slice(cm + 1); }
-      const bin = atob(s);
-      const u = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-      return u;
-    };
-    const asBytes = (raw0) => (binary ? new Uint8Array(raw0) : decodeChunk(raw0));
-    let start = 0, end = totalBytes - 1, partial = false;
-    const range = request.headers.get('Range');
-    const rm = range ? /bytes=(\d*)-(\d*)/.exec(range) : null;
-    if (rm) {
-      if (rm[1] === '' && rm[2]) { start = Math.max(0, totalBytes - Number(rm[2])); end = totalBytes - 1; }
-      else { start = Number(rm[1] || 0); end = rm[2] ? Math.min(Number(rm[2]), totalBytes - 1) : totalBytes - 1; }
-      if (Number.isNaN(start) || start > end || start >= totalBytes) return new Response('Range not satisfiable', { status: 416, headers: { 'Content-Range': `bytes */${totalBytes}` } });
-      partial = true;
-    }
-    const i0 = Math.floor(start / chunkBytes), iN = Math.floor(end / chunkBytes);
-    let chunkStart = i0 * chunkBytes, ci = i0;
-    // 生バイナリはチャンクが大きいので、1回の pull で抱えるメモリを抑える
-    const BATCH = binary ? 2 : 6;
-    const stream = new ReadableStream({
-      async pull(ctrl) {
-        for (let b = 0; b < BATCH; b++) {
-          if (ci > iN) { ctrl.close(); return; }
-          const raw0 = await getChunk(ci);
-          if (raw0 === null) { ctrl.error(new Error('media chunk missing')); return; }
-          let bytes = asBytes(raw0);
-          const cs = chunkStart; chunkStart += bytes.length; ci++;
-          if (partial) {
-            const s2 = Math.max(cs, start), e2 = Math.min(cs + bytes.length - 1, end);
-            if (e2 < s2) continue;
-            bytes = bytes.slice(s2 - cs, e2 - cs + 1);
-          }
-          ctrl.enqueue(bytes);
-        }
-      }
-    });
-    if (partial) { headers0['Content-Range'] = `bytes ${start}-${end}/${totalBytes}`; headers0['Content-Length'] = String(end - start + 1); }
-    else headers0['Content-Length'] = String(totalBytes);
-    return new Response(stream, { status: partial ? 206 : 200, headers: headers0 });
-  }
-  return null;
-}
+<!-- My QR code modal -->
+<div class="modal-backdrop" id="myQrModal">
+  <div class="modal-box" style="text-align:center;">
+    <button class="close-x" id="closeMyQrModal"><i class="fa-solid fa-xmark"></i></button>
+    <h3>マイQRコード</h3>
+    <p style="font-size:13px;color:var(--bt-text-light);margin-top:-8px;">友だちにこのQRコードを読み取ってもらいましょう</p>
+    <div id="myQrCanvas" style="display:flex;justify-content:center;margin:16px 0;"></div>
+    <div id="myQrName" style="font-weight:700;"></div>
+    <div id="myQrUsername" style="font-size:12px;color:var(--bt-text-light);"></div>
+  </div>
+</div>
 
-// ===== 大容量メディア（Cloudflare R2 マルチパート） =====
-// 8K・数分の動画は数GBになり、KV（値25MiB上限 / 無料枠1GB）には格納できない。
-// R2 バインディング BLUETALK_MEDIA があればマルチパートへ中継し、無ければ 503 を返す
-// （クライアントは従来の KV 経路へ自動フォールバックする）。
-const BIG_MAX_BYTES = 6 * 1024 * 1024 * 1024;
-const BIG_PART_BYTES = 32 * 1024 * 1024;
-// KV 経路: 値サイズ上限 25MiB に対し余裕をみて 8MiB。
-// 生バイナリで格納するため base64 の 33% 膨張がなく、書き込み回数も大幅に減る。
-const KV_PART_BYTES = 8 * 1024 * 1024;
-const KV_FREE_STORAGE_BYTES = 1024 * 1024 * 1024;
+<!-- Scan QR modal -->
+<div class="modal-backdrop" id="scanQrModal">
+  <div class="modal-box" style="text-align:center;width:320px;">
+    <button class="close-x" id="closeScanQrModal"><i class="fa-solid fa-xmark"></i></button>
+    <h3>QRコードを読み取る</h3>
+    <p style="font-size:13px;color:var(--bt-text-light);margin-top:-8px;">友だちのマイQRコードをカメラにかざしてください</p>
+    <div id="qr-reader" style="width:100%;margin-top:10px;"></div>
+    <p class="form-msg" id="scanQrMsg"></p>
+  </div>
+</div>
 
-const SETTINGS_KEY = 'bluetalk:settings';
-const GIB = 1024 * 1024 * 1024;
-const MIN_FILE_BYTES = 8 * 1024 * 1024;
-const HARD_MAX_BYTES = 100 * GIB;
+<!-- Media (image/video) full viewer -->
+<div class="modal-backdrop media-viewer-overlay" id="mediaViewerOverlay" onclick="closeMediaViewer()">
+  <div id="mediaViewerContent" onclick="event.stopPropagation()"></div>
+</div>
 
-// 上限は管理画面（/admin.html）から設定でき、KV に保存して即時反映する。
-// 未設定のときは Worker 変数（BT_MAX_FILE_BYTES / BT_MAX_TRANSFER_BYTES）、
-// それも無ければ既定値を使う。
-let BT_SETTINGS_CACHE = { at: 0, value: null };
-async function readSettingsCached(env) {
-  const now = Date.now();
-  if (BT_SETTINGS_CACHE.value && now - BT_SETTINGS_CACHE.at < 15000) return BT_SETTINGS_CACHE.value;
-  const value = await readSettings(env);
-  BT_SETTINGS_CACHE = { at: now, value };
-  return value;
-}
-async function readSettings(env) {
-  let stored = {};
-  try {
-    const raw = await env.BLUETALK_KV.get(SETTINGS_KEY);
-    if (raw) stored = JSON.parse(raw) || {};
-  } catch (e) { stored = {}; }
-  const pick = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
-  const envFile = Number((env && env.BT_MAX_FILE_BYTES) || 0);
-  const envTransfer = Number((env && env.BT_MAX_TRANSFER_BYTES) || 0);
-  const fallbackFile = envFile > 0 ? envFile : (bigMediaEnabled(env) ? BIG_MAX_BYTES : 900 * 1024 * 1024);
-  const clamp = (n) => Math.max(MIN_FILE_BYTES, Math.min(HARD_MAX_BYTES, n));
-  const maxFileBytes = clamp(pick(stored.maxFileBytes, fallbackFile));
-  let maxTransferBytes = pick(stored.maxTransferBytes, 0);
-  if (Number(stored.maxTransferBytes) === 0) maxTransferBytes = 0;
-  if (envTransfer > 0 && !Number(stored.maxTransferBytes)) maxTransferBytes = envTransfer;
-  maxTransferBytes = Math.max(0, Math.min(HARD_MAX_BYTES, maxTransferBytes));
-  return {
-    maxFileBytes,
-    maxTransferBytes,
-    kvPartBytes: KV_PART_BYTES,
-    kvStorageBytes: KV_FREE_STORAGE_BYTES,
-    adsEnabled: stored.adsEnabled === true,
-    updated_at: Number(stored.updated_at || 0),
-    updated_by: String(stored.updated_by || '')
-  };
-}
+<div class="toast-msg" id="toastMsg"></div>
 
-// メディア使用量（KV list のメタデータ利用。旧データのみ値を読んで補完）
-async function mediaUsage(env) {
-  const out = { files: 0, bytes: 0, listing_capped: false, kvStorageBytes: KV_FREE_STORAGE_BYTES };
-  try {
-    let cursor;
-    let guard = 0;
-    const metaKeys = [];
-    do {
-      const page = await env.BLUETALK_KV.list({ prefix: 'bluetalk:media:', cursor });
-      for (const k of page.keys) if (k.name.endsWith(':meta')) metaKeys.push(k);
-      cursor = page.list_complete ? undefined : page.cursor;
-      guard++;
-    } while (cursor && guard < 5);
-    if (cursor) out.listing_capped = true;
-    let fallbackReads = 0;
-    for (const k of metaKeys) {
-      let size = Number((k.metadata && k.metadata.sizeBytes) || 0);
-      if (!size && fallbackReads < 200) {
-        fallbackReads++;
-        const raw = await env.BLUETALK_KV.get(k.name);
-        if (raw) { try { size = Number(JSON.parse(raw).sizeBytes || 0); } catch (e) { size = 0; } }
-      }
-      if (size > 0) { out.files++; out.bytes += size; }
-    }
-  } catch (e) { /* 集計できなくても管理画面は動かす */ }
-  return out;
-}
+<audio id="ringtoneAudio" loop preload="auto">
+  <source src="https://cdn.jsdelivr.net/gh/naptha/sound-assets/ringtone.mp3" type="audio/mpeg">
+</audio>
 
-function bigMediaEnabled(env) { return Boolean(env && env.BLUETALK_MEDIA); }
-
-function bigRangeHeader(range, size) {
-  if (!range) return null;
-  if (typeof range.suffix === 'number') {
-    const start = Math.max(0, size - range.suffix);
-    return { header: 'bytes ' + start + '-' + (size - 1) + '/' + size, length: size - start };
-  }
-  const start = Number(range.offset || 0);
-  const length = Number(range.length || (size - start));
-  return { header: 'bytes ' + start + '-' + (start + length - 1) + '/' + size, length };
-}
-
-async function handleBtBig(request, env, url, origin) {
-  if (url.pathname === '/bt-big/config') {
-    const cfg = await readSettings(env);
-    const base = { ok: true, enabled: bigMediaEnabled(env), partSize: BIG_PART_BYTES, minPartBytes: 5 * 1024 * 1024, maxBytes: BIG_MAX_BYTES, kvPartBytes: KV_PART_BYTES, kvStorageBytes: KV_FREE_STORAGE_BYTES, maxFileBytes: cfg.maxFileBytes, maxTransferBytes: cfg.maxTransferBytes, kvReadOnly: false };
-    if (url.searchParams.get('usage') === '1') {
-      const u = await mediaUsage(env);
-      const used = Number(u.bytes || 0);
-      return json(Object.assign(base, { usedBytes: used, remainingBytes: Math.max(0, KV_FREE_STORAGE_BYTES - used) }), 200, origin);
-    }
-    return json(base, 200, origin);
-  }
-  const m = /^\/bt-big\/([A-Za-z0-9-]{6,64})(?:\/(init|complete|abort)|\/part\/(\d+))?$/.exec(url.pathname);
-  if (!m) return null;
-  const id = m[1];
-  const action = m[2] || '';
-  const partNo = m[3] ? Number(m[3]) : 0;
-  const metaKey = 'bluetalk:big:' + id + ':meta';
-  if (!bigMediaEnabled(env)) return json({ ok: false, error: 'r2_disabled' }, 503, origin);
-  const bucket = env.BLUETALK_MEDIA;
-
-  if (request.method === 'POST' && action === 'init') {
-    const body = await request.json().catch(() => ({}));
-    const mime = String(body.mimeType || 'application/octet-stream').slice(0, 120);
-    const name = String(body.name || '').slice(0, 200);
-    const sizeBytes = Math.max(0, Number(body.sizeBytes || 0));
-    if (sizeBytes > BIG_MAX_BYTES) return json({ ok: false, error: 'too_large', maxBytes: BIG_MAX_BYTES }, 413, origin);
-    const mp = await bucket.createMultipartUpload('media/' + id, { httpMetadata: { contentType: mime } });
-    await env.BLUETALK_KV.put(metaKey, JSON.stringify({ uploadId: mp.uploadId, key: 'media/' + id, mime, name, sizeBytes, done: false, created_at: Date.now() }));
-    return json({ ok: true, uploadId: mp.uploadId, partSize: BIG_PART_BYTES, minPartBytes: 5 * 1024 * 1024, maxBytes: BIG_MAX_BYTES }, 201, origin);
-  }
-
-  const metaRaw = await env.BLUETALK_KV.get(metaKey);
-  if (!metaRaw) return json({ ok: false, error: 'not_found' }, 404, origin);
-  const meta = JSON.parse(metaRaw);
-
-  if (request.method === 'PUT' && action === 'part' && partNo >= 1 && partNo <= 10000) {
-    if (!request.body) return json({ ok: false, error: 'empty_part' }, 400, origin);
-    const mp = bucket.resumeMultipartUpload(meta.key, meta.uploadId);
-    const uploaded = await mp.uploadPart(partNo, request.body);
-    return json({ ok: true, partNumber: partNo, etag: uploaded.etag }, 200, origin);
-  }
-
-  if (request.method === 'POST' && action === 'complete') {
-    const body = await request.json().catch(() => ({}));
-    const parts = (Array.isArray(body.parts) ? body.parts : [])
-      .map((p) => ({ partNumber: Number(p.partNumber || p.n || 0), etag: String(p.etag || '') }))
-      .filter((p) => p.partNumber >= 1 && p.etag);
-    if (!parts.length) return json({ ok: false, error: 'no_parts' }, 400, origin);
-    parts.sort((a, b) => a.partNumber - b.partNumber);
-    const mp = bucket.resumeMultipartUpload(meta.key, meta.uploadId);
-    const obj = await mp.complete(parts);
-    meta.done = true;
-    meta.parts = parts.length;
-    meta.sizeBytes = Number(body.sizeBytes || meta.sizeBytes || (obj && obj.size) || 0);
-    meta.completed_at = Date.now();
-    await env.BLUETALK_KV.put(metaKey, JSON.stringify(meta));
-    return json({ ok: true, url: '/bt-big/' + id, sizeBytes: meta.sizeBytes, parts: parts.length }, 201, origin);
-  }
-
-  if (request.method === 'POST' && action === 'abort') {
-    try { await bucket.resumeMultipartUpload(meta.key, meta.uploadId).abort(); } catch (e) {}
-    await env.BLUETALK_KV.delete(metaKey);
-    return json({ ok: true }, 200, origin);
-  }
-
-  if (request.method === 'DELETE' && !action) {
-    if (!await isAdmin(request, env)) return json({ ok: false, error: 'forbidden' }, 403, origin);
-    try { await bucket.delete(meta.key); } catch (e) {}
-    await env.BLUETALK_KV.delete(metaKey);
-    return json({ ok: true }, 200, origin);
-  }
-
-  if (request.method === 'GET' && !action && meta.done) {
-    const obj = await bucket.get(meta.key, { range: request.headers.get('Range') ? request.headers : undefined });
-    if (!obj) return new Response('Not found', { status: 404 });
-    const headers = new Headers();
-    obj.writeHttpMetadata(headers);
-    if (!headers.get('Content-Type')) headers.set('Content-Type', meta.mime || 'application/octet-stream');
-    headers.set('ETag', obj.httpEtag);
-    headers.set('Accept-Ranges', 'bytes');
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-    const r = bigRangeHeader(obj.range, obj.size);
-    if (r) {
-      headers.set('Content-Range', r.header);
-      headers.set('Content-Length', String(r.length));
-      return new Response(obj.body, { status: 206, headers });
-    }
-    headers.set('Content-Length', String(obj.size));
-    return new Response(obj.body, { status: 200, headers });
-  }
-  return null;
-}
-
-async function cascadeDeleteUserData(env, id) {
-  const [friendships, conversations, messages, stickers, calls, signals, appeals] = await Promise.all([
-    readTable(env, 'friendships'), readTable(env, 'conversations'), readTable(env, 'messages'),
-    readTable(env, 'stickers'), readTable(env, 'calls'), readTable(env, 'call_signals'), readTable(env, 'appeals')
-  ]);
-  const removedConversationIds = new Set(conversations.filter((c) => Array.isArray(c.member_ids) && c.member_ids.includes(id)).map((c) => c.id));
-  await Promise.all([
-    writeTable(env, 'friendships', friendships.filter((r) => r.user_id !== id && r.friend_id !== id)),
-    writeTable(env, 'conversations', conversations.filter((c) => !removedConversationIds.has(c.id))),
-    writeTable(env, 'messages', messages.filter((m) => m.sender_id !== id && !removedConversationIds.has(m.conversation_id))),
-    writeTable(env, 'stickers', stickers.filter((s) => s.user_id !== id)),
-    writeTable(env, 'calls', calls.filter((c) => c.caller_id !== id && c.callee_id !== id)),
-    writeTable(env, 'call_signals', signals.filter((s) => s.from_user_id !== id && s.to_user_id !== id)),
-    writeTable(env, 'appeals', appeals.filter((a) => a.user_id !== id))
-  ]);
-}
-
-async function handleTables(request, env, url, origin) {
-  const parts = url.pathname.replace(/^\/tables\/?/, '').split('/').filter(Boolean);
-  const table = parts[0] || '';
-  const id = parts[1] || '';
-  if (!validTable(table)) return json({ error: 'invalid table' }, 400, origin);
-  const rows = await readTable(env, table);
-    const __btLight = (t2, rs) => { if (t2 !== 'messages') return rs; if (url.searchParams.get('bt_light') !== '1') return rs; for (let i = 0; i < rs.length; i++) { const r = rs[i]; if (!r) continue; if (r.media_data) { r.bt_media_len = String(r.media_data).length; r.bt_pending = 1; r.media_data = ''; } if (r.attachment_url && String(r.attachment_url).length > 2048) { r.bt_pending = 1; r.attachment_url = ''; } if (r.sticker_url && String(r.sticker_url).indexOf('data:') === 0 && String(r.sticker_url).length > 2048) { r.bt_pending = 1; r.sticker_url = ''; } } return rs; };
-
-  if (request.method === 'GET' && !id) {
-    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 100), 1), 1000);
-    const page = Math.max(Number(url.searchParams.get('page') || 1), 1);
-    const start = (page - 1) * limit;
-    let base = rows;
-    const btConv = table === 'messages' ? url.searchParams.get('bt_conv') : null;
-    if (btConv) base = rows.filter((item) => String(item.conversation_id) === btConv);
-    const visibleRows = table === 'users' ? base.filter((item) => !item.banned) : base;
-    let __tail = 0;
-    if (table === 'messages') { const v = Number(url.searchParams.get('bt_tail') || 0); if (v > 0) __tail = Math.min(v, 500); }
-    if (__tail && visibleRows.length > __tail) {
-      const sorted = visibleRows.slice().sort((a, b) => ((a.created_at || a.sent_at || 0) - (b.created_at || b.sent_at || 0)));
-      const tail = sorted.slice(sorted.length - __tail);
-      return json({ data: __btLight(table, tail), total: sorted.length, page: 1, limit: __tail }, 200, origin);
-    }
-    return json({ data: __btLight(table, visibleRows.slice(start, start + limit)), total: visibleRows.length, page, limit }, 200, origin);
-  }
-  if (request.method === 'GET' && id) {
-    const row = rows.find((item) => String(item.id) === id);
-    if (!row) return json({ error: 'not found' }, 404, origin);
-    if (table === 'users' && (row.banned || row.deleted)) return json({ ...row, password: '' }, 200, origin);
-    return json(row, 200, origin);
-  }
-  if (request.method === 'POST' && !id) {
-    const body = await request.json().catch(() => ({}));
-    const row = { ...body, id: body.id || crypto.randomUUID(), created_at: body.created_at || Date.now() };
-    rows.push(row); await writeTable(env, table, rows);
-    if (table === 'messages' && row.conversation_id) {
-      const convs = await readTable(env, 'conversations');
-      const ci = convs.findIndex((c) => String(c.id) === String(row.conversation_id));
-      if (ci >= 0 && Array.isArray(convs[ci].hidden_for) && convs[ci].hidden_for.length) {
-        convs[ci] = { ...convs[ci], hidden_for: [], updated_at: Date.now() };
-        await writeTable(env, 'conversations', convs);
-      }
-    }
-    return json(row, 201, origin);
-  }
-  if ((request.method === 'PATCH' || request.method === 'PUT') && id) {
-    const index = rows.findIndex((item) => String(item.id) === id);
-    if (index < 0) return json({ error: 'not found' }, 404, origin);
-    const body = await request.json().catch(() => ({}));
-    if (table === 'users' && !body.admin_override) {
-      ['ads_off', 'adsEnabled', 'verified', 'pro', 'banned', 'title', 'ban_reason', 'ban_message', 'ban_appeal_message'].forEach((k) => { delete body[k]; });
-    }
-    if (table === 'users' && !body.admin_override && (Object.prototype.hasOwnProperty.call(body, 'display_name') || Object.prototype.hasOwnProperty.call(body, 'username'))) {
-      const last = Number(rows[index].profile_changed_at || 0);
-      if (last && Date.now() - last < 30 * 24 * 60 * 60 * 1000) {
-        return json({ error: 'profile changes are limited to once every 30 days', nextChangeAt: last + 30 * 24 * 60 * 60 * 1000 }, 429, origin);
-      }
-      body.profile_changed_at = Date.now();
-    }
-    rows[index] = { ...rows[index], ...body, id: rows[index].id, updated_at: Date.now() };
-    await writeTable(env, table, rows); return json(rows[index], 200, origin);
-  }
-  if (request.method === 'DELETE' && id) {
-    if (table === 'users') {
-      const index = rows.findIndex((item) => String(item.id) === id);
-      if (index >= 0) {
-        rows[index] = { ...rows[index], deleted: true, banned: true, password: '', ban_reason: rows[index].ban_reason || 'self', deleted_at: Date.now() };
-        await writeTable(env, 'users', rows);
-        await cascadeDeleteUserData(env, id);
-      }
-      return new Response(null, { status: 204, headers: corsHeaders(origin) });
-    }
-    await writeTable(env, table, rows.filter((item) => String(item.id) !== id));
-    if (table === 'conversations') {
-      const messages = await readTable(env, 'messages');
-      await writeTable(env, 'messages', messages.filter((m) => String(m.conversation_id) !== id));
-    }
-    return new Response(null, { status: 204, headers: corsHeaders(origin) });
-  }
-  return json({ error: 'method not allowed' }, 405, origin);
-}
-
-async function handleAdmin(request, env, url, origin) {
-  if (url.pathname === '/api/admin/login' && request.method === 'POST') {
-    const body = await request.json().catch(() => ({}));
-    if ((await sha256(String(body.password || ''))) !== ADMIN_PASSWORD_SHA256) return json({ ok: false, error: 'invalid credentials' }, 401, origin);
-    const token = crypto.randomUUID() + crypto.randomUUID().replaceAll('-', '');
-    await env.BLUETALK_KV.put(SESSION_PREFIX + token, 'super', { expirationTtl: ADMIN_SESSION_TTL });
-    return json({ ok: true, token, expiresIn: ADMIN_SESSION_TTL }, 200, origin);
-  }
-  if (!(await isAdmin(request, env))) return json({ ok: false, error: 'forbidden' }, 403, origin);
-  if (url.pathname === '/api/admin/users' && request.method === 'GET') return json({ ok: true, users: (await readTable(env, 'users')).filter((item) => !item.deleted) }, 200, origin);
-  if (url.pathname === '/api/admin/conversations' && request.method === 'GET') {
-    const [conversations, messages, users] = await Promise.all([readTable(env, 'conversations'), readTable(env, 'messages'), readTable(env, 'users')]);
-    return json({ ok: true, conversations, messages, users }, 200, origin);
-  }
-  const match = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
-  if (match && request.method === 'PATCH') {
-    const rows = await readTable(env, 'users'); const index = rows.findIndex((item) => String(item.id) === match[1]);
-    if (index < 0) return json({ ok: false, error: 'not found' }, 404, origin);
-    rows[index] = { ...rows[index], ...(await request.json().catch(() => ({}))), id: rows[index].id, updated_at: Date.now() };
-    await writeTable(env, 'users', rows); return json({ ok: true, user: rows[index] }, 200, origin);
-  }
-  if (url.pathname === '/api/admin/appeals' && request.method === 'GET') return json({ ok: true, appeals: await readTable(env, 'appeals') }, 200, origin);
-  if (url.pathname === '/api/admin/settings' && request.method === 'GET') {
-    return json({ ok: true, settings: await readSettings(env), storage: await mediaUsage(env) }, 200, origin);
-  }
-  if (url.pathname === '/api/admin/settings' && request.method === 'POST') {
-    const body = await request.json().catch(() => ({}));
-    const cur = await readSettings(env);
-    const toBytes = (v) => Math.round(Number(v) * GIB);
-    const clamp = (n) => Math.max(MIN_FILE_BYTES, Math.min(HARD_MAX_BYTES, n));
-    let maxFileBytes = cur.maxFileBytes;
-    let maxTransferBytes = cur.maxTransferBytes;
-    if (body.maxFileBytesGb !== undefined && body.maxFileBytesGb !== '') {
-      const n = toBytes(body.maxFileBytesGb);
-      if (!Number.isFinite(n) || n <= 0) return json({ ok: false, error: 'invalid_max_file' }, 400, origin);
-      maxFileBytes = clamp(n);
-    }
-    if (body.maxTransferBytesGb !== undefined && body.maxTransferBytesGb !== '') {
-      const n = toBytes(body.maxTransferBytesGb);
-      if (!Number.isFinite(n) || n < 0) return json({ ok: false, error: 'invalid_max_transfer' }, 400, origin);
-      maxTransferBytes = n === 0 ? 0 : Math.min(HARD_MAX_BYTES, n);
-    }
-    let adsEnabled = cur.adsEnabled === true;
-    if (body.adsEnabled !== undefined) adsEnabled = (body.adsEnabled === true || body.adsEnabled === 'true' || body.adsEnabled === 1);
-    const payload = { maxFileBytes, maxTransferBytes, adsEnabled, updated_at: Date.now(), updated_by: adminTokenIdentity(request) };
-    await env.BLUETALK_KV.put(SETTINGS_KEY, JSON.stringify(payload));
-    BT_SETTINGS_CACHE = { at: 0, value: null };
-    return json({ ok: true, settings: await readSettings(env), storage: await mediaUsage(env) }, 200, origin);
-  }
-  if (url.pathname === '/api/admin/storage' && request.method === 'GET') {
-    return json({ ok: true, storage: await mediaUsage(env), settings: await readSettings(env) }, 200, origin);
-  }
-  const appealMatch = url.pathname.match(/^\/api\/admin\/appeals\/([^/]+)$/);
-  if (appealMatch && request.method === 'PATCH') {
-    const rows = await readTable(env, 'appeals'); const index = rows.findIndex((item) => String(item.id) === appealMatch[1]);
-    if (index < 0) return json({ ok: false, error: 'not found' }, 404, origin);
-    rows[index] = { ...rows[index], ...(await request.json().catch(() => ({}))), id: rows[index].id, updated_at: Date.now() };
-    await writeTable(env, 'appeals', rows); return json({ ok: true, appeal: rows[index] }, 200, origin);
-  }
-  const userDelMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
-  if (userDelMatch && request.method === 'DELETE') {
-    const rows = await readTable(env, 'users'); const index = rows.findIndex((item) => String(item.id) === userDelMatch[1]);
-    if (index < 0) return json({ ok: false, error: 'not found' }, 404, origin);
-    rows[index] = { ...rows[index], deleted: true, banned: true, password: '', ban_reason: rows[index].ban_reason || 'violation', deleted_at: Date.now() };
-    await writeTable(env, 'users', rows);
-    await cascadeDeleteUserData(env, userDelMatch[1]);
-    return json({ ok: true }, 200, origin);
-  }
-  return json({ ok: false, error: 'not found' }, 404, origin);
-}
-
-async function handleAccountStatus(request, env, url, origin) {
-  const match = url.pathname.match(/^\/api\/account-status\/([A-Za-z0-9-]+)$/);
-  if (!match || request.method !== 'GET') return null;
-  const users = await readTable(env, 'users');
-  const user = users.find((item) => String(item.id) === match[1]);
-  if (!user) return json({ ok: false, error: 'not found' }, 404, origin);
-  return json({
-    ok: true,
-    banned: Boolean(user.banned || user.deleted),
-    deleted: Boolean(user.deleted),
-    selfDeleted: Boolean(user.deleted && user.ban_reason === 'self'),
-    reason: String(user.ban_reason || ''),
-    message: String(user.ban_message || ''),
-    appealMessage: String(user.ban_appeal_message || ''),
-    updatedAt: Number(user.updated_at || 0),
-  }, 200, origin);
-}
-
-async function handleTurnCredentials(request, env, url, origin) {
-  if (url.pathname !== '/api/turn-credentials' || request.method !== 'GET') return null;
-  const btTurnUrls = String((env && env.TURN_URLS) || "").trim();
-  if (btTurnUrls) {
-    try {
-      const btUser = String((env && env.TURN_USERNAME) || "").trim();
-      const btPass = String((env && env.TURN_CREDENTIAL) || "").trim();
-      const btOut = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
-      btTurnUrls.split(",").map((x) => x.trim()).filter(Boolean).forEach((u) => {
-        btOut.push(btUser ? { urls: u, username: btUser, credential: btPass } : { urls: u });
-      });
-      return new Response(JSON.stringify({ ok: true, configured: true, shared: false, source: "env", iceServers: btOut }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": (request.headers.get("Origin") || "*") }
-      });
-    } catch (e) {
-      return new Response(JSON.stringify({ ok: true, configured: false, shared: true, source: "env_error", message: String(e).slice(0, 120), iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": (request.headers.get("Origin") || "*") }
-      });
-    }
-  }
-  const endpoint = String(env.METERED_TURN_ENDPOINT || '').trim();
-  const apiKey = String(env.METERED_TURN_API_KEY || '').trim();
-  // Metered Open Relay publishes a shared, card-free fallback for testing.
-  // Prefer account-scoped short-lived credentials whenever the secrets exist.
-  if (!endpoint || !apiKey) return json({
-    ok: true,
-    configured: false,
-    shared: true,
-    iceServers: [
-      { urls: 'stun:openrelay.metered.ca:80' },
-      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-    ],
-  }, 200, origin);
-  let upstream;
-  try {
-    upstream = new URL(endpoint);
-    if (upstream.protocol !== 'https:' || !upstream.hostname.endsWith('.metered.live')) {
-      return json({ ok: false, error: 'TURN endpoint is invalid' }, 500, origin);
-    }
-    upstream.searchParams.set('apiKey', apiKey);
-  } catch {
-    return json({ ok: false, error: 'TURN endpoint is invalid' }, 500, origin);
-  }
-  try {
-    const response = await fetch(upstream.toString(), { headers: { Accept: 'application/json' } });
-    if (!response.ok) return json({ ok: false, error: 'TURN credentials are unavailable' }, 502, origin);
-    const iceServers = await response.json();
-    if (!Array.isArray(iceServers)) return json({ ok: false, error: 'TURN response is invalid' }, 502, origin);
-    const safeServers = iceServers
-      .filter((item) => item && typeof item === 'object' && item.urls)
-      .slice(0, 16)
-      .map((item) => ({ urls: item.urls, username: String(item.username || ''), credential: String(item.credential || '') }));
-    return json({ ok: true, configured: true, iceServers: safeServers }, 200, origin);
-  } catch {
-    return json({ ok: false, error: 'TURN credentials are unavailable' }, 502, origin);
-  }
-}
-
-function pwaManifest() {
-  return new Response(JSON.stringify({ name: 'BlueTalk', short_name: 'BlueTalk', start_url: '/index.html', display: 'standalone', background_color: '#fff', theme_color: '#1877f2', icons: [{ src: 'https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2', sizes: 'any', type: 'image/svg+xml' }] }), { headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-store' } });
-}
-
-function serviceWorker() {
-  const heal = "self.addEventListener('install',e=>{self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil((async()=>{try{const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)))}catch(x){}try{await self.registration.unregister()}catch(x){}try{const cs=await self.clients.matchAll({type:'window'});cs.forEach(c=>c.navigate(c.url))}catch(x){}})())});self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>cs[0]?.focus()||clients.openWindow('/app.html')))});";
-  return new Response(heal, { headers: { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' } });
-}
-
-async function handleMedia(request, env, url, origin) {
-  if (url.pathname === '/api/media' && request.method === 'POST') {
-    const body = await request.json().catch(() => ({}));
-    const data = String(body.data || '');
-    const mimeType = String(body.mimeType || 'application/octet-stream').slice(0, 120);
-    if (!data.startsWith('data:') || data.length > 12 * 1024 * 1024) return json({ ok: false, error: 'file is missing or too large (8MB max)' }, 413, origin);
-    const uploadId = crypto.randomUUID();
-    const chunkSize = 180000;
-    const totalChunks = Math.ceil(data.length / chunkSize);
-    for (let i = 0; i < totalChunks; i++) {
-      const r = await fetch(`${MEDIA_ORIGIN}/api/media/chunk/${uploadId}/${i}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Origin: 'https://bluetalk.by-youhei.workers.dev' }, body: JSON.stringify({ data: data.slice(i * chunkSize, (i + 1) * chunkSize) }) });
-      if (!r.ok) return json({ ok: false, error: 'media chunk upload failed' }, 502, origin);
-    }
-    const done = await fetch(`${MEDIA_ORIGIN}/api/media/chunk/${uploadId}/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://bluetalk.by-youhei.workers.dev' }, body: JSON.stringify({ totalChunks, mimeType }) });
-    if (!done.ok) return json({ ok: false, error: 'media upload could not be completed' }, 502, origin);
-    return json({ ok: true, uploadId, url: `/media/${uploadId}`, name: String(body.name || 'file').slice(0, 160), mimeType }, 201, origin);
-  }
-  const mediaMatch = url.pathname.match(/^\/media\/([A-Za-z0-9-]+)$/);
-  if (mediaMatch && request.method === 'GET') {
-    const upstream = await fetch(`${MEDIA_ORIGIN}/api/media/blob/${mediaMatch[1]}`, { headers: { Origin: 'https://bluetalk.by-youhei.workers.dev' } });
-    if (!upstream.ok) return new Response('Not found', { status: 404, headers: corsHeaders(origin) });
-    const payload = await upstream.json().catch(() => null);
-    const data = String(payload?.data || '');
-    const mimeType = payload?.mimeType || 'application/octet-stream';
-    if (!data.startsWith('data:')) return new Response('Invalid media', { status: 502, headers: corsHeaders(origin) });
-    const comma = data.indexOf(',');
-    const encoded = comma >= 0 ? data.slice(comma + 1) : '';
-    const bytes = data.slice(0, comma).includes(';base64')
-      ? Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))
-      : new TextEncoder().encode(decodeURIComponent(encoded));
-    return new Response(bytes, { headers: { 'Content-Type': mimeType, 'Cache-Control': 'public, max-age=31536000, immutable', ...corsHeaders(origin) } });
-  }
-  return null;
-}
-
-async function handleLineStickers(request, env, url, origin) {
-  const m = url.pathname.match(/^\/api\/line-stickers\/(\d{4,12})$/);
-  if (!m) return null;
-  const pid = m[1];
-  const cacheKey = `bluetalk:linepack:v3:${pid}`;
-  const cached = await env.BLUETALK_KV.get(cacheKey);
-  if (cached) return json(JSON.parse(cached), 200, origin);
-  const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36', 'Accept-Language': 'ja,en;q=0.8' };
-  let html = '';
-  try {
-    const r = await fetch(`https://store.line.me/stickershop/product/${pid}/ja`, { headers });
-    if (r.ok) html = await r.text();
-  } catch {}
-  if (!html) {
-    try {
-      const r = await fetch(`https://store.line.me/stickershop/product/${pid}/en`, { headers });
-      if (r.ok) html = await r.text();
-    } catch {}
-  }
-  if (!html) return json({ ok: false, error: 'page_unreachable' }, 502, origin);
-  const t = html.match(/<title>([^<]*?)\s*[-|]\s*LINE/);
-  const title = t ? t[1].replace(/&amp;/g, '&').slice(0, 60) : 'LINEスタンプ';
-  const ids = []; const seen = new Set();
-  const re = /stickershop\.line-scdn\.net\/stickershop\/v1\/sticker\/(\d+)\//g;
-  let mm;
-  while ((mm = re.exec(html)) !== null) {
-    if (!seen.has(mm[1])) { seen.add(mm[1]); ids.push(mm[1]); }
-    if (ids.length >= 60) break;
-  }
-  if (!ids.length) {
-    let coverOk = false;
-    try { const c = await fetch(`https://stickershop.line-scdn.net/stickershop/v1/product/${pid}/LINEStorePC/main.png?v=1`, { method: 'HEAD', headers }); coverOk = c.ok; } catch (e) {}
-    return json({ ok: false, error: coverOk ? 'pack_no_list' : 'sticker_pack_not_found' }, 404, origin);
-  }
-  let animated = false;
-  try {
-    const probeUrl = `https://stickershop.line-scdn.net/stickershop/v1/sticker/${ids[0]}/iphone/sticker_animation@2x.png?v=1`;
-    const head = await fetch(probeUrl, { method: 'HEAD', headers });
-    if (head.ok) animated = true;
-    else if (head.status === 405 || head.status === 501) {
-      const g = await fetch(probeUrl, { headers });
-      animated = g.ok;
-    }
-  } catch (e) { animated = false; }
-  let sound = false;
-  try {
-    const soundUrl = `https://stickershop.line-scdn.net/stickershop/v1/sticker/${ids[0]}/iphone/sticker_sound.m4a?v=1`;
-    const sh = await fetch(soundUrl, { method: 'HEAD', headers });
-    if (sh.ok) sound = true;
-    else if (sh.status === 405 || sh.status === 501) { const g = await fetch(soundUrl, { headers }); sound = g.ok; }
-  } catch (e) { sound = false; }
-  const variant = animated ? 'iphone/sticker_animation.png' : 'android/sticker.png';
-  const stickers = ids.map((sid) => `https://stickershop.line-scdn.net/stickershop/v1/sticker/${sid}/${variant}?v=1`);
-  const sounds = sound ? ids.map((sid) => `https://stickershop.line-scdn.net/stickershop/v1/sticker/${sid}/iphone/sticker_sound.m4a?v=1`) : null;
-  const payload = { ok: true, title, productId: pid, animated, sound, stickers, sounds };
-  await env.BLUETALK_KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: 86400 });
-  return json(payload, 200, origin);
-}
-
-async function handleCallGateway(request, url, origin) {
-  const signalMatch = url.pathname.match(/^\/api\/call-gateway\/signals?\/?([^/]*)$/);
-  if (!signalMatch) return null;
-  const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
-  const mode = String(body.mode || url.searchParams.get('mode') || 'voice') === 'video' ? 'video' : 'voice';
-  const key = String(body.call_id || url.searchParams.get('call_id') || body.to || signalMatch[1] || '0');
-  const servers = mode === 'video' ? VIDEO_SERVERS : CALL_SERVERS;
-  let hash = 0; for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  const target = servers[hash % servers.length];
-  if (request.method === 'POST' && url.pathname === '/api/call-gateway/signal') {
-    const upstream = await fetch(`${target}/api/call/signal`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://bluetalk.by-youhei.workers.dev' }, body: JSON.stringify({
-      to: body.to, from: body.from, call_id: body.call_id, type: body.signal_type, sdp: body.payload, timestamp: Date.now()
-    }) });
-    return new Response(upstream.body, { status: upstream.status, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) } });
-  }
-  if (request.method === 'GET' && signalMatch[1]) {
-    const upstream = await fetch(`${target}/api/call/signals/${encodeURIComponent(signalMatch[1])}${url.search}`, { headers: { Origin: 'https://bluetalk.by-youhei.workers.dev' } });
-    return new Response(upstream.body, { status: upstream.status, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) } });
-  }
-  return json({ ok: false, error: 'method not allowed' }, 405, origin);
-}
-
-function adminPage() {
-  const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BlueTalk 管理画面</title><style>body{margin:0;background:#f2f6fb;color:#24344d;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:24px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 8px 28px #2341  }.row{display:flex;gap:10px 8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e5edf7;padding:12px 0}.row>*{min-width:0}.row>button{flex:0 0 auto}.row b,.row>span{overflow-wrap:anywhere}.row input[data-title]{flex:1 1 130px;min-width:0;max-width:100%}button{border:0;border-radius:10px;padding:9px 13px;background:#1877f2;color:#fff;font-weight:700;cursor:pointer}button.gray{background:#e8eef7;color:#24344d}input{padding:10px;border:1px solid #c7d9ee;border-radius:9px}small{color:#687b96}.danger{color:#a52828}#btConvModal{position:fixed;inset:0;z-index:9999;background:rgba(10,16,28,.72);display:flex;align-items:center;justify-content:center;padding:14px}.bt-cm-card{background:#fff;border-radius:16px;width:min(560px,96vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.45)}.bt-cm-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;background:#1877f2;color:#fff}.bt-cm-head button{background:#fff!important;color:#1877f2!important;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:700}.bt-cm-msgs{overflow:auto;padding:14px;background:#eef3fa;flex:1}.bt-cm-row{display:flex;gap:8px;margin-bottom:10px;align-items:flex-end}.bt-cm-row.bt-me{flex-direction:row-reverse}.bt-cm-ava{width:30px;height:30px;border-radius:50%;flex:none}.bt-cm-col{max-width:78%;display:flex;flex-direction:column;gap:2px}.bt-cm-row.bt-me .bt-cm-col{align-items:flex-end}.bt-cm-name{font-size:11px;color:#5b6b81}.bt-cm-bubble{background:#fff;color:#24344d;border-radius:12px;padding:8px 12px;font-size:13.5px;line-height:1.5;word-break:break-word;box-shadow:0 1px 2px rgba(0,0,0,.08)}.bt-cm-row.bt-me .bt-cm-bubble{background:#1877f2;color:#fff}.bt-cm-time{font-size:10px;color:#8296ad}.bt-cm-media{max-width:220px;max-height:200px;border-radius:8px;display:block}.bt-cm-empty{color:#5b6b81}.bt-sw{position:relative;display:inline-block;width:51px;height:31px;border-radius:16px;background:rgba(120,120,128,.32);cursor:pointer;flex:0 0 auto;transition:background .22s ease;overflow:hidden;vertical-align:middle}
-.bt-sw-k{position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 3px 8px rgba(0,0,0,.15),0 1px 1px rgba(0,0,0,.16);transition:left .25s cubic-bezier(.22,.61,.36,1),width .15s ease}
-.bt-sw-on{background:#34c759}
-.bt-sw-on .bt-sw-k{left:22px}
-.bt-sw:active .bt-sw-k{width:30px}
-.bt-sw-on:active .bt-sw-k{left:19px}
-.bt-swrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.bt-swrow input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
-.bt-swrow #adsState{font:700 14px system-ui,-apple-system,sans-serif;min-width:2.4em;color:#7b8794}
-.bt-adwrap{display:inline-flex;align-items:center;gap:6px}
-.bt-adslab{font-size:11px;color:#5b6b7e}
-.bt-sw.sm{width:40px;height:24px;border-radius:12px}.bt-sw.sm .bt-sw-k{width:20px;height:20px}.bt-sw.sm.bt-sw-on .bt-sw-k{left:18px}.bt-sw.sm:active .bt-sw-k{width:24px}.bt-sw.sm.bt-sw-on:active .bt-sw-k{left:14px}
-</style></head><body><main class="wrap"><div id="root"></div></main><script>
-  const root=document.getElementById('root'), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  function login(){root.innerHTML='<section class="card"><h1>BlueTalk 管理画面</h1><p>管理者コードを入力してください。</p><input id="pw" type="password" placeholder="管理者コード"><button id="go">ログイン</button><p id="msg" class="danger"></p></section>';document.getElementById('go').onclick=async()=>{const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});const j=await r.json();if(!r.ok){document.getElementById('msg').textContent='認証に失敗しました';return}localStorage.setItem('bluetalk_admin_token',j.token);dashboard()}}
-  async function dashboard(){const t=localStorage.getItem('bluetalk_admin_token');if(!t)return login();const h={Authorization:'Bearer '+t};const [ur,cr,ar]=await Promise.all([fetch('/api/admin/users',{headers:h}),fetch('/api/admin/conversations',{headers:h}),fetch('/api/admin/appeals',{headers:h}).catch(function(){return {ok:false}})]);if(!ur.ok||!cr.ok||!ar.ok){localStorage.removeItem('bluetalk_admin_token');return login()}const u=(await ur.json()).users||[], c=await cr.json(), ap=ar.ok?((await ar.json()).appeals||[]):[], names=Object.fromEntries(u.map(x=>[x.id,x.display_name||x.username]));root.innerHTML='<h1>BlueTalk 管理画面</h1><p><button id="logout" class="gray">管理者ログアウト</button>　<small>会話監視は利用規約に基づく安全・規約違反調査のために使用してください。</small></p><section class="card"><h2>アカウント管理・Ban情報</h2><p><small>Ban時は理由と利用者への案内文を保存します。解除時も誤Banについての案内文を登録できます。</small></p><div id="users"></div></section><section class="card"><h2>会話監視</h2><div id="convs"></div></section><section class="card"><h2>誤Ban申し立て（利用者から管理者へ）</h2><div id="appeals"></div></section><section class="card"><h2>アップロード上限設定</h2><div id="limitsCard">読み込み中...</div></section>';document.getElementById('logout').onclick=()=>{localStorage.removeItem('bluetalk_admin_token');login()};limits();document.getElementById('users').innerHTML=u.map(x=>'<div class="row"><b>'+esc(x.display_name)+'</b><span>@'+esc(x.username)+'</span>'+(x.verified?' <span style="color:#d7a600;font-size:18px">✓</span>':'')+(x.title?' <span style="color:#b8860b">'+esc(x.title)+'</span>':'')+(x.banned?' <span class="danger">停止中</span>':'')+'<button data-act="verify" data-id="'+esc(x.id)+'">'+(x.verified?'認証解除':'Premium認証')+'</button><button data-act="pro" data-id="'+esc(x.id)+'">'+(x.pro?'Pro解除':'Pro付与')+'</button><button data-act="ban" data-id="'+esc(x.id)+'">'+(x.banned?'Ban解除':'Ban')+'</button><input data-title="'+esc(x.id)+'" placeholder="ゴールド称号" value="'+esc(x.title||'')+'"><button data-act="title" data-id="'+esc(x.id)+'">称号を保存</button>'+(x.banned?'<small>理由: '+esc(x.ban_reason||'未登録')+'</small>':'')+'<span class="bt-adwrap"><span class="bt-sw sm'+(x.ads_off?'':' bt-sw-on')+'" data-act="ads" data-id="'+esc(x.id)+'" title="'+(x.ads_off?'この利用者には広告を出さない（押すと出す）':'この利用者に広告を出す（押すと出さない）')+'"><span class="bt-sw-k"></span></span><span class="bt-adslab" style="color:'+(x.ads_off?'#c0392b':'#1a9e46')+'>'+(x.ads_off?'広告なし':'広告あり')+'</span></span>'+'<button data-act="pass" data-id="'+esc(x.id)+'">パスワード変更</button><button data-act="del" data-id="'+esc(x.id)+'">強制削除</button></div>').join('')||'アカウントはありません';document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{const id=b.dataset.id, one=u.find(x=>x.id===id);let body;if(b.dataset.act==='verify'){body={verified:!one.verified}}else if(b.dataset.act==='pro'){body={pro:!one.pro,admin_override:true}}else if(b.dataset.act==='ban'){if(one.banned){const appeal=prompt('誤Ban・解除に関する利用者へのメッセージ（任意）',one.ban_appeal_message||'');if(appeal===null)return;body={banned:false,ban_appeal_message:appeal}}else{const reason=prompt('Ban理由（利用規約のどの違反か）','');if(reason===null||!reason.trim())return;const message=prompt('利用者に表示する詳しい案内文（任意）','');if(message===null)return;body={banned:true,ban_reason:reason,ban_message:message,ban_appeal_message:''}}}else if(b.dataset.act==='ads'){const nn=!one.ads_off;try{const r=await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ads_off:nn,admin_override:true})});const tt=document.createElement('div');tt.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:99999;background:#0e1728;color:#e7eefb;border:1px solid #2a3d5c;padding:10px 18px;border-radius:12px;font:600 13px system-ui,sans-serif';tt.textContent=r.ok?((one.display_name||'利用者')+'さんを広告'+(nn?'なし':'あり')+'にしました'):'保存に失敗しました';document.body.appendChild(tt);setTimeout(function(){if(tt.parentNode)tt.remove()},2600)}catch(e){}dashboard();return}else if(b.dataset.act==='pass'){const np=prompt('このアカウントの新しいパスワードを入力してください（パスワードを強制変更）','');if(!np||!np.trim())return;body={password:np}}else if(b.dataset.act==='del'){if(!confirm('このアカウントを強制削除しますか？利用者の全データ（会話・メッセージ等）が削除され、元に戻せません。'))return;await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'DELETE',headers:h});dashboard();return}else{body={title:document.querySelector('[data-title="'+CSS.escape(id)+'"]').value,admin_override:true}}await fetch('/api/admin/users/'+encodeURIComponent(id),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(body)});dashboard()});const by={};(c.messages||[]).forEach(m=>(by[m.conversation_id]??=[]).push('<b>'+esc(names[m.sender_id]||m.sender_id)+'</b>: '+esc(m.content||'[スタンプ]')));document.getElementById('convs').innerHTML=(c.conversations||[]).map(x=>{const ids=(x.member_ids||[]);const title=x.type==='group'?('👥 '+(x.name||'グループ')+'（'+ids.length+'名・'+ids.map(i=>names[i]||i).slice(0,6).join('、')+'）'):ids.map(i=>names[i]||i).join(' ⇔ ');const ms=(c.messages||[]).filter(m=>m.conversation_id===x.id).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const last=ms.length?ms[ms.length-1]:null;const when=last?new Date(last.sent_at||last.created_at||0).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';return '<div class="row"><b>'+esc(title)+'</b><small>'+ms.length+'件'+(when?'・最終 '+when:'')+'</small><button data-conv="'+esc(x.id)+'">トークを見る</button></div>'}).join('')||'会話はありません';window.__btMon={convs:c.conversations||[],msgs:c.messages||[],names:names,users:u};document.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>openConv(b.dataset.conv));document.getElementById('appeals').innerHTML=ap.slice().reverse().map(x=>'<div class="row"><b>'+esc(names[x.user_id]||x.user_id)+'</b><span style="display:block;width:100%">'+esc(x.message)+'</span>'+(x.status==='resolved'?'<small>対応済み</small>':'')+'<button data-ap="resolve" data-aid="'+esc(x.id)+'">対応済みにする</button><button data-ap="reply" data-uid="'+esc(x.user_id)+'">返信する</button></div>').join('')||'申し立てはありません';document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=async()=>{if(b.dataset.ap==='resolve'){await fetch('/api/admin/appeals/'+encodeURIComponent(b.dataset.aid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({status:'resolved'})})}else{const msg=prompt('返信内容（利用者の削除通知画面に表示されます）','');if(msg===null)return;await fetch('/api/admin/users/'+encodeURIComponent(b.dataset.uid),{method:'PATCH',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({ban_appeal_message:msg,admin_override:true})})}dashboard()})}
-  async function limits(){
-    var t=localStorage.getItem('bluetalk_admin_token'),box=document.getElementById('limitsCard');
-    if(!t||!box)return;
-    var h={Authorization:'Bearer '+t};
-    function fmt(n){n=Number(n)||0;if(n>=1073741824)return (n/1073741824).toFixed(2)+'GB';if(n>=1048576)return (n/1048576).toFixed(1)+'MB';return n+'B'}
-    function gb(n){return ((Number(n)||0)/1073741824).toFixed(2)}
-    var s={},st={};
-    try{var r=await fetch('/api/admin/settings',{headers:h});if(!r.ok){box.innerHTML='<p class="danger">設定を取得できませんでした（ログインし直してください）</p>';return}var j=await r.json();s=j.settings||{};st=j.storage||{};(function(){var ub=document.getElementById('users');if(!ub)return;var wb=document.getElementById('adGlobalWarn');if(!wb){wb=document.createElement('div');wb.id='adGlobalWarn';ub.parentNode.insertBefore(wb,ub)}if(s.adsEnabled){wb.style.display='none'}else{wb.style.cssText='display:block;font:700 12px system-ui,sans-serif;padding:8px 10px;border-radius:8px;margin:0 0 8px;background:#fff7e6;border:1px solid #e8c26a;color:#8a6100';wb.textContent='⚠ 全体の広告配信がオフです。下のアップロード上限設定内の広告スイッチを先にオンにしてください（個別のオンオフは全体がオンのときだけ効果があります）'}})();if(!document.getElementById('adWrapCss')){var st2=document.createElement('style');st2.id='adWrapCss';st2.textContent='.bt-adwrap{flex:0 0 100% !important;display:flex !important;align-items:center;gap:8px;border:1.5px solid #b9c6dd;background:#eef4ff;border-radius:12px;padding:7px 12px;margin-top:2px;max-width:100%;box-sizing:border-box;order:50}.bt-adwrap .bt-sw{transform:none !important;margin:0 !important}.bt-adwrap .bt-adslab{font:700 12px system-ui,sans-serif}.bt-adslab{font-size:11px}';document.head.appendChild(st2)}}catch(e){box.innerHTML='<p class="danger">通信に失敗しました</p>';return}
-    var cap=Number(s.kvStorageBytes)||1073741824,the=Number(st.bytes)||0,pct=cap?Math.round(1000*the/cap)/10:0;
-    var warn=pct>=80?' style="color:#a52828"':'';
-    var inp='padding:10px;border:1px solid #c7d9ee;border-radius:9px;width:110px';
-    box.innerHTML='<p><small>ここで設定した上限は、保存するとすぐ全端末に反映されます（利用者が次に送信するときに適用）。</small></p>'
-      +'<div class="row"><b>1ファイルの上限</b><input id="maxFileGb" type="number" step="0.1" min="0.1" style="'+inp+'" value="'+gb(s.maxFileBytes)+'"><span>GB</span><small>現在 '+fmt(s.maxFileBytes)+'　（1回の送信で扱う1ファイルの最大サイズ）</small></div>'
-      +'<div class="row"><b>合計の上限</b><input id="maxTfGb" type="number" step="0.1" min="0" style="'+inp+'" value="'+gb(s.maxTransferBytes)+'"><span>GB</span><small>0 = 無制限　'+(Number(s.maxTransferBytes)?('現在 '+fmt(s.maxTransferBytes)):'現在 無制限')+'（分割して送る場合の総量の目安・超過時に警告）</small></div>'
-      +'<div class="row"><small>転送チャンク: '+fmt(s.kvPartBytes)+' 固定（Workers KV の値上限は 25MiB。チャンクを上げると書き込み回数が減ります）</small></div>'
-      +'<div class="row"><button id="saveLimits">上限を保存</button><small id="limMsg">'+(s.updated_at?('前回更新: '+new Date(s.updated_at).toLocaleString('ja-JP')):'未設定（既定値を使用中）')+'</small></div>'
-      +'<div class="row"><b>メディア使用量</b><small'+warn+'>'+Number(st.files||0)+' 件 ・ '+fmt(the)+' ／ プラン枠 '+fmt(cap)+'（'+pct+'%）'+(st.listing_capped?' ・ 一部のみ集計':'')+'</small></div>'
-      +'<p><small>目安: Workers Free の KV 保存枠は 1GB です。1ファイルの上限を大きくしても、合計がこの枠を超えると書き込みに失敗します。Workers Paid なら保存量は無制限（+$0.50/GB月）です。</small></p>';
-    var _adRow=document.createElement('div');_adRow.className='row';
-    _adRow.innerHTML='<b>広告</b><div class="bt-swrow"><span class="bt-sw'+(s.adsEnabled?' bt-sw-on':'')+'" id="adsSwitch" title="押すと切り替え"><span class="bt-sw-k" id="adsKnob"></span></span><input id="adsOn" type="checkbox"'+(s.adsEnabled?' checked':'')+'><span id="adsState">'+(s.adsEnabled?'オン':'オフ')+'</span><small>全利用者にデモ広告を表示する（広告内容はすべて架空・サービスは実在しない）</small></div><small>押した瞬間に保存・全員に反映します（保存ボタンは不要）。オフのときは誰にも広告が出ません。自分の分だけ止めたいときは、上の一覧のスイッチを「広告なし」にしてください。</small>';
-    box.appendChild(_adRow);
-    var _sw=document.getElementById('adsSwitch'),_cb=document.getElementById('adsOn'),_st=document.getElementById('adsState');
-    _sw.onclick=function(){
-      _cb.checked=!_cb.checked;_sw.className='bt-sw'+(_cb.checked?' bt-sw-on':'');_st.textContent=_cb.checked?'オン':'オフ';_st.style.color=_cb.checked?'#1a9e46':'#7b8794';_st.textContent='保存中...';
-      fetch('/api/admin/settings',{method:'POST',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({adsEnabled:_cb.checked})}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){
-        if(!j||!j.ok){_st.textContent='保存失敗';_st.style.color='#c0392b';return}
-        _st.textContent=_cb.checked?'オン':'オフ';_st.style.color=_cb.checked?'#1a9e46':'#7b8794';
-        var t=document.createElement('div');t.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:99999;background:#0e1728;color:#e7eefb;border:1px solid #2a3d5c;padding:10px 18px;border-radius:12px;font:600 13px system-ui,sans-serif';
-        t.textContent='広告を'+(_cb.checked?'オン':'オフ')+'にしました（全員に反映・アプリ開き直しで出ます）';document.body.appendChild(t);setTimeout(function(){if(t.parentNode)t.remove()},2600);
-      }).catch(function(){_st.textContent='保存失敗';_st.style.color='#c0392b'})
-    };
-    document.getElementById('saveLimits').onclick=async()=>{
-      var a=Number(document.getElementById('maxFileGb').value||0),b=Number(document.getElementById('maxTfGb').value||0),m=document.getElementById('limMsg'),NL=String.fromCharCode(10);
-      if(!(a>0)){m.textContent='1ファイルの上限は0より大きい値を入力してください';return}
-      if(b<0){m.textContent='合計の上限は0以上で入力してください';return}
-      if(a>100||b>100){m.textContent='100GB以下で入力してください';return}
-      if(!confirm('上限を変更します。'+NL+'1ファイル: '+a+'GB'+NL+'合計: '+(b>0?b+'GB':'無制限')+NL+NL+'保存しますか？'))return;
-      m.textContent='保存中...';
-      try{
-        var r2=await fetch('/api/admin/settings',{method:'POST',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({maxFileBytesGb:a,maxTransferBytesGb:b,adsEnabled:document.getElementById('adsOn').checked})});
-        var j2=await r2.json().catch(function(){return {}});
-        if(!r2.ok){m.textContent='保存に失敗しました: '+((j2&&j2.error)||r2.status);return}
-        m.textContent='保存しました（1ファイル '+fmt(j2.settings.maxFileBytes)+' ／ 合計 '+(Number(j2.settings.maxTransferBytes)?fmt(j2.settings.maxTransferBytes):'無制限')+'）';
-        limits();
-      }catch(e){m.textContent='通信に失敗しました'}
-    };
-  }
-  function openConv(cid){const M=window.__btMon;if(!M)return;const cv=M.convs.filter(x=>x.id===cid)[0];if(!cv)return;const ids=cv.member_ids||[];const title=cv.type==='group'?('👥 '+(cv.name||'グループ')+'（'+ids.length+'名）'):ids.map(i=>M.names[i]||i).join(' ⇔ ');const ms=M.msgs.filter(m=>m.conversation_id===cid).sort((a,b)=>(a.sent_at||a.created_at||0)-(b.sent_at||b.created_at||0));const ava=(uid)=>{const uu=(M.users||[]).filter(x=>x.id===uid)[0];return (uu&&uu.avatar_url)||'https://api.dicebear.com/7.x/thumbs/svg?seed='+encodeURIComponent(uid)};let h='<div class="bt-cm-head"><b>'+esc(title)+'</b><button id="btCmClose">閉じる</button></div><div class="bt-cm-msgs">';if(!ms.length)h+='<p class="bt-cm-empty">メッセージはまだありません</p>';ms.forEach(m=>{const left=cv.type==='group'||m.sender_id===ids[0];const name=M.names[m.sender_id]||m.sender_id;const t=(m.sent_at||m.created_at)?new Date(m.sent_at||m.created_at).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';let body='';if(m.type==='sticker'&&m.sticker_url)body='<img class="bt-cm-media" src="'+esc(m.sticker_url)+'">';else if(m.type==='image'&&m.media_data)body='<img class="bt-cm-media" src="'+esc(m.media_data)+'">';else if(m.type==='video'&&m.media_data)body='<video class="bt-cm-media" src="'+esc(m.media_data)+'" controls></video>';else if(m.type==='file'&&m.media_data)body='<a href="'+esc(m.media_data)+'" download="'+esc(m.file_name||'file')+'">📎 '+esc(m.file_name||'ファイル')+'</a>';else if(m.type==='call')body='<i>📞 通話</i>';else body=esc(m.content||'');if(!body&&m.media_data)body='<img class="bt-cm-media" src="'+esc(m.media_data)+'">';h+='<div class="bt-cm-row '+(left?'':'bt-me')+'">'+(left?'<img class="bt-cm-ava" src="'+esc(ava(m.sender_id))+'">':'')+'<div class="bt-cm-col"><span class="bt-cm-name">'+esc(name)+'</span><span class="bt-cm-bubble">'+body+'</span><span class="bt-cm-time">'+esc(t)+'</span></div></div>'});h+='</div>';let mo=document.getElementById('btConvModal');if(mo)mo.remove();mo=document.createElement('div');mo.id='btConvModal';mo.innerHTML='<div class="bt-cm-card">'+h+'</div>';mo.addEventListener('click',e=>{if(e.target===mo)mo.remove()});document.body.appendChild(mo);document.getElementById('btCmClose').onclick=()=>mo.remove()}
-if(localStorage.getItem('bluetalk_admin_token'))dashboard();else login();
-  </script></body></html>`;
-  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
-}
-
-const APP_ENHANCEMENTS = `<script>(function(){
-  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let keys='';let last=0;function adminTrigger(e){const now=Date.now();if(now-last>4000)keys='';last=now;keys+=(e.key||'');if(keys.length>40)keys=keys.slice(-40);if(keys.endsWith('d51-498go'))showAdminLogin()}
-  function showAdminLogin(){location.href='/admin.html'}
-  function applyBadges(){if(typeof allUsers==='undefined'||!allUsers.length)return;const byName=Object.fromEntries(allUsers.map(u=>[u.display_name,u]));document.querySelectorAll('.name,#profileName').forEach(el=>{if(el.dataset.btBadge)return;const u=byName[el.textContent.trim()];if(!u||(!u.verified&&!u.title&&!u.pro))return;el.dataset.btBadge='1';if(u.pro){const p=document.createElement('span');p.textContent='PRO';p.title='BlueTalkPro';p.style='display:inline-block;margin-left:5px;padding:1px 6px;border-radius:6px;background:#1877f2;color:#fff;font-size:9px;font-weight:900;letter-spacing:.5px;vertical-align:middle';el.appendChild(p)}if(u.verified){const v=document.createElement('span');v.textContent='\\u2713';v.title='BlueTalkPremium';v.style='display:inline-block;margin-left:5px;color:#d7a600;font-weight:900';el.appendChild(v)}if(u.title){const t=document.createElement('span');t.textContent=' '+u.title;t.style='margin-left:5px;color:#b8860b;font-weight:700';el.appendChild(t)}})}
-  function bindAdminName(){const n=document.querySelector('#profileName');if(!n||n.dataset.btAdminClick)return;n.dataset.btAdminClick='1';n.style.cursor='pointer';n.title='管理者メニュー';n.onclick=()=>{if(localStorage.getItem('bluetalk_admin_token'))location.href='/admin.html';else showAdminLogin()}}
-  function repairImages(){document.querySelectorAll('img').forEach(img=>{if(img.dataset.btFallback)return;img.dataset.btFallback='1';img.addEventListener('error',()=>{if(img.dataset.btBroken)return;img.dataset.btBroken='1';img.src='https://api.dicebear.com/7.x/thumbs/svg?seed=bluetalk-fallback'})})}
-  new MutationObserver(()=>{repairImages();applyBadges();bindAdminName()}).observe(document.documentElement,{childList:true,subtree:true});
-  document.addEventListener('keydown',adminTrigger);
-  document.addEventListener('DOMContentLoaded',()=>{repairImages();applyBadges();bindAdminName();if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{})});
-})();
-</script>`;
-
-const BUILD_CHIP = `<script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-O';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script>`;
-const EARLY_THEME = `<script>try{var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')localStorage.setItem('bt_dark_mode',q==='dark'?'1':'0');if(localStorage.getItem('bt_dark_mode')===null)localStorage.setItem('bt_dark_mode','1');document.documentElement.setAttribute('data-bt-theme',localStorage.getItem('bt_dark_mode')==='1'?'dark':'light')}catch(e){}</script>`;
-const DARK_CSS = `<style>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script src="js/call.js"></script>
+<script>window.__btAdOn=true;</script><style>
 html[data-bt-theme="dark"]{--bt-bg:#05070c;--bt-white:#0e1421;--bt-text:#ffffff;--bt-text-light:#d5dee9;--bt-border:#42536a;--bt-bubble-me:#1a3a5f;--bt-bubble-other:#141d2b;--bt-primary-light:#1c3350;color-scheme:dark}
 html[data-bt-theme="dark"] body,html[data-bt-theme="dark"] .app-shell{background:var(--bt-bg)!important;color:#fff!important}
 html[data-bt-theme="dark"] .nav-rail,html[data-bt-theme="dark"] .list-panel,html[data-bt-theme="dark"] .main-panel,html[data-bt-theme="dark"] .chat-room{background:var(--bt-bg)!important;color:#fff!important}
@@ -858,8 +254,7 @@ html[data-bt-theme="dark"] .round-btn,html[data-bt-theme="dark"] .mini-btn{point
 html[data-bt-theme="dark"] ::-webkit-scrollbar{width:8px;height:8px}
 html[data-bt-theme="dark"] ::-webkit-scrollbar-thumb{background:#42536a;border-radius:8px}
 html[data-bt-theme="dark"] ::-webkit-scrollbar-track{background:transparent}
-</style>`;
-const GLASS_CSS = `<style id="btGlass">
+</style><style id="btGlass">
 html{--g-accent:#4fa3ff;--g-accent2:#2f7cf6;--g-ink:#04101f;--g-bg:#050914;--g-text:#eef4ff;--g-sub:#8e9cae;--g-glass:rgba(30,44,70,.26);--g-glass2:rgba(20,32,54,.45);--g-line:rgba(255,255,255,.18);--g-hi:inset 0 1px 0 rgba(255,255,255,.35),inset 0 -1px 0 rgba(255,255,255,.04);--g-shadow:0 10px 30px rgba(0,0,0,.35);--g-blur:blur(22px) saturate(170%)}
 html:not([data-bt-theme="dark"]){--g-bg:#e9f0fa;--g-text:#0f1c2e;--g-sub:#5d6f88;--g-glass:rgba(255,255,255,.55);--g-glass2:rgba(255,255,255,.7);--g-line:rgba(15,40,80,.12);--g-hi:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(255,255,255,.3);--g-shadow:0 10px 30px rgba(30,60,110,.14)}
 html:is([data-bt-theme],:not([data-bt-theme])) body{background:radial-gradient(1100px 800px at 0% 0%,rgba(79,163,255,.55),transparent 65%),radial-gradient(700px 500px at 110% 20%,rgba(160,90,255,.45),transparent 60%),radial-gradient(1000px 700px at 30% 110%,rgba(40,210,190,.38),transparent 65%),var(--g-bg)!important;background-attachment:fixed!important;color:var(--g-text)!important}
@@ -907,8 +302,220 @@ html:is([data-bt-theme],:not([data-bt-theme])) .chat-row .info .preview{color:#b
 html:not([data-bt-theme="dark"]) .chat-row .info .preview{color:#4a5c75!important}
 html:is([data-bt-theme],:not([data-bt-theme])) .app-shell{height:100vh!important;height:100dvh!important}
 html:is([data-bt-theme],:not([data-bt-theme])) .nav-rail .me-avatar{overflow:hidden!important;background:rgba(255,255,255,.12)!important;color:transparent!important;font-size:0!important}
-</style>`;
-const MESSAGE_SHIM = `<script>(function(){
+</style><script>(function(){
+  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let keys='';let last=0;function adminTrigger(e){const now=Date.now();if(now-last>4000)keys='';last=now;keys+=(e.key||'');if(keys.length>40)keys=keys.slice(-40);if(keys.endsWith('d51-498go'))showAdminLogin()}
+  function showAdminLogin(){location.href='/admin.html'}
+  function applyBadges(){if(typeof allUsers==='undefined'||!allUsers.length)return;const byName=Object.fromEntries(allUsers.map(u=>[u.display_name,u]));document.querySelectorAll('.name,#profileName').forEach(el=>{if(el.dataset.btBadge)return;const u=byName[el.textContent.trim()];if(!u||(!u.verified&&!u.title&&!u.pro))return;el.dataset.btBadge='1';if(u.pro){const p=document.createElement('span');p.textContent='PRO';p.title='BlueTalkPro';p.style='display:inline-block;margin-left:5px;padding:1px 6px;border-radius:6px;background:#1877f2;color:#fff;font-size:9px;font-weight:900;letter-spacing:.5px;vertical-align:middle';el.appendChild(p)}if(u.verified){const v=document.createElement('span');v.textContent='\u2713';v.title='BlueTalkPremium';v.style='display:inline-block;margin-left:5px;color:#d7a600;font-weight:900';el.appendChild(v)}if(u.title){const t=document.createElement('span');t.textContent=' '+u.title;t.style='margin-left:5px;color:#b8860b;font-weight:700';el.appendChild(t)}})}
+  function bindAdminName(){const n=document.querySelector('#profileName');if(!n||n.dataset.btAdminClick)return;n.dataset.btAdminClick='1';n.style.cursor='pointer';n.title='管理者メニュー';n.onclick=()=>{if(localStorage.getItem('bluetalk_admin_token'))location.href='/admin.html';else showAdminLogin()}}
+  function repairImages(){document.querySelectorAll('img').forEach(img=>{if(img.dataset.btFallback)return;img.dataset.btFallback='1';img.addEventListener('error',()=>{if(img.dataset.btBroken)return;img.dataset.btBroken='1';img.src='https://api.dicebear.com/7.x/thumbs/svg?seed=bluetalk-fallback'})})}
+  new MutationObserver(()=>{repairImages();applyBadges();bindAdminName()}).observe(document.documentElement,{childList:true,subtree:true});
+  document.addEventListener('keydown',adminTrigger);
+  document.addEventListener('DOMContentLoaded',()=>{repairImages();applyBadges();bindAdminName();if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{})});
+})();
+</script><script>(function(){
+  if(window.__btKeep)return;window.__btKeep=1;
+  var TABLE='keep_memos';
+  var TERMS_KEY='bluetalk_keep_terms_v1';
+  var TERMS=[
+    '本規約は、BlueTalk（以下「本サービス」）が提供する「Keepメモ」（以下「本機能」）の利用条件を定めるものです。',
+    '本機能は、利用者本人が自分用のメモやリンク、画像などを保存し、あとから取り出せる非公開の機能です。保存した内容は本人のアカウントに紐づき、他の利用者には表示されません。',
+    '保存できる内容は、テキストメモ、URL、および画像・動画・ファイルなどの添付です。添付の容量は本サービスのアップロード上限設定に従います。',
+    '次の内容を保存しないでください。法令に違反する内容、第三者の著作権・肖像権・プライバシー等の権利を侵害する内容、本サービスの運営を妨げる内容。本機能は非公開ですが、禁止内容が確認された場合は管理者が削除することがあります。',
+    '保存容量は本サービス全体の保存枠を共有します。上限に達すると新しく保存できなくなります。',
+    'メモは暗号化されずに保存されます。パスワードやカード番号などの機密情報の保存は推奨しません。',
+    '本機能に自動バックアップはありません。利用者が削除したメモ、およびアカウント削除に伴うメモは復元できません。',
+    '本機能の利用により生じた損害について、運営は故意または重大な過失がある場合を除き、責任を負いません。',
+    '運営は、本機能の内容を変更し、または提供を終了することがあります。重要な変更は本サービス上で告知します。',
+    '本規約に同意いただけない場合、本機能をご利用いただけません。'
+  ];
+  function q(id){return document.getElementById(id)}
+  function myid(){try{return (typeof myId==='function')?myId():''}catch(e){return ''}}
+  function esc2(v){var d=document.createElement('div');d.textContent=(v==null?'':String(v));return d.innerHTML}
+  function toast2(m){try{if(typeof toast==='function'){toast(m);return}}catch(e){}try{var t=q('toastMsg');if(t){t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2600)}}catch(e){}}
+  var css=document.createElement('style');
+  css.textContent='#btKeepRow .bt-keep-av{width:48px;height:48px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex:none}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepModal{position:fixed;inset:0;z-index:2147483000;background:rgba(3,6,12,.78);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepModal .bt-keep-card{background:#141b26;color:#fff;width:520px;max-width:96vw;max-height:86vh;border-radius:18px;padding:16px;display:flex;flex-direction:column;box-shadow:0 16px 60px rgba(0,0,0,.6)}#btKeepModal h3{margin:0 0 4px;font-size:17px}#btKeepModal .bt-keep-sub{color:#9fb2c9;font-size:12px;margin:0 0 12px}#btKeepModal textarea{width:100%;box-sizing:border-box;min-height:96px;background:#05070c;color:#fff;border:2px solid #42536a;border-radius:12px;padding:10px;font-size:14px;resize:vertical}#btKeepModal .bt-keep-actions{display:flex;gap:8px;margin:10px 0 4px}#btKeepModal .bt-keep-actions button{flex:1;border-radius:12px;padding:11px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepModal .bt-keep-save{background:#1877f2!important;border-color:#1877f2!important}#btKeepModal .bt-keep-close{background:#223047!important;border:none!important}#btKeepModal .bt-keep-list{overflow:auto;margin-top:12px}#btKeepModal .bt-keep-item{background:#101827;border:1px solid #2a3950;border-radius:12px;padding:10px;margin-bottom:8px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}#btKeepModal .bt-keep-meta{color:#9fb2c9;font-size:11px;margin-top:6px;display:flex;justify-content:space-between;align-items:center}#btKeepModal .bt-keep-del{background:#3a1f26;border:none;color:#ff9d9d;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}#btKeepTerms{position:fixed;inset:0;z-index:2147483001;background:rgba(3,6,12,.85);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepTerms .bt-keep-tcard{background:#141b26;color:#fff;width:560px;max-width:96vw;max-height:88vh;border-radius:18px;padding:18px;display:flex;flex-direction:column}#btKeepTerms h3{margin:0 0 8px;font-size:17px}#btKeepTerms ol{overflow:auto;padding-left:20px;margin:0 0 12px;font-size:13px;line-height:1.75;color:#dfe8f3}#btKeepTerms li{margin-bottom:8px}#btKeepTerms .bt-keep-tactions{display:flex;gap:8px}#btKeepTerms button{flex:1;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepTerms .bt-keep-agree{background:#1877f2!important;border-color:#1877f2!important}';
+  document.head.appendChild(css);
+  var css2=document.createElement('style');css2.textContent='#btKeepRow{cursor:pointer}#btKeepRow .bt-keep-av{width:44px;height:44px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex:none;margin-right:10px}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepRow .name,#btKeepRow .list-name{font-weight:600}';document.head.appendChild(css2);
+  /* ===== 友達リスト: 削除ボタン ===== */
+  function meId(){try{if(typeof ME==='object'&&ME&&ME.id)return ME.id}catch(e){}return myid()}
+  function decorate(){
+    try{
+      var list=listEl();if(!list)return;
+      var rs=list.querySelectorAll('.friend-row');
+      for(var i=0;i<rs.length;i++){
+        var row=rs[i];
+        if(row.id==='btKeepRow'||row.__btDel)continue;
+        var act=row.querySelector('.row-actions');if(!act)continue;
+        var btn=row.querySelector('[data-chat]');var uid=btn?btn.getAttribute('data-chat'):null;
+        if(!uid)continue;
+        row.__btDel=1;
+        var d=document.createElement('button');
+        d.className='mini-btn danger';d.title='友達を削除';d.setAttribute('data-btunfriend',uid);
+        d.innerHTML='<i class="fa-solid fa-user-minus"></i>';
+        act.appendChild(d);
+      }
+    }catch(e){}
+  }
+  async function btUnfriend(uid){
+    var nm='';try{var u=(allUsers||[]).filter(function(x){return String(x.id)===String(uid)})[0];nm=u?(u.display_name||u.username||''):''}catch(e){}
+    if(!confirm('「'+(nm||uid)+'」を友達から削除しますか？\nトーク履歴は残ります（トーク一覧から開けます）。'))return;
+    try{
+      var my=meId();
+      var rels=await API.listAll('friendships');
+      var tg=rels.filter(function(r){
+        return (String(r.user_id)===String(my)&&String(r.friend_id)===String(uid))||(String(r.user_id)===String(uid)&&String(r.friend_id)===String(my));
+      });
+      var n=0;
+      for(var i=0;i<tg.length;i++){try{if(await API.remove('friendships',tg[i].id))n++}catch(e){}}
+      toast2(n?'友達から削除しました':'削除できませんでした');
+      if(typeof refreshFriends==='function')await refreshFriends();
+      decorate();
+    }catch(e){toast2('削除に失敗しました')}
+  }
+  document.addEventListener('click',function(e){
+    var t=e.target&&e.target.closest?e.target.closest('[data-btunfriend]'):null;if(!t)return;
+    e.preventDefault();e.stopImmediatePropagation();
+    btUnfriend(t.getAttribute('data-btunfriend'));
+  },true);
+  window.__btUnfriend=btUnfriend;
+  function listEl(){
+    var ids=['friendList','friend-list','friendsList','friends-list','friend_list'];
+    for(var i=0;i<ids.length;i++){var el=q(ids[i]);if(el)return el}
+    var r=document.querySelector('.friend-row');if(r&&r.parentNode)return r.parentNode;
+    return null;
+  }
+  function ensureRow(){
+    var list=listEl();if(!list)return false;
+    if(q('btKeepRow'))return true;
+    var item=document.createElement('div');item.id='btKeepRow';
+    var nat=(list.id==='friendList'||list.id==='friendsList'||!!list.querySelector('.friend-row'));
+    if(nat){item.className='friend-row';item.innerHTML='<div class="bt-keep-av">📝</div><div class="info"><div class="name">Keepメモ <span class="bt-keep-badge">自分用</span></div><div class="status">通話以外の全機能が使えます（自分専用）</div></div>'}
+    else{item.className='list-item';item.innerHTML='<div class="bt-keep-av">📝</div><div class="list-info"><div class="list-name">Keepメモ<span class="bt-keep-badge">自分用</span></div><div class="list-preview">通話以外の全機能が使えます（自分専用）</div></div>'}
+    item.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();enterKeep()},true);
+    list.insertBefore(item,list.firstChild);
+    return true;
+  }
+  var tries=0;
+  var iv=setInterval(function(){tries++;try{ensureRow();decorate()}catch(e){}if(tries>600)clearInterval(iv)},500);
+  try{new MutationObserver(function(){try{ensureRow();decorate()}catch(e){}}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
+  function agreed(){try{return localStorage.getItem(TERMS_KEY)==='1'}catch(e){return false}}
+  function showTerms(cb){
+    var old=q('btKeepTerms');if(old)old.remove();
+    var mo=document.createElement('div');mo.id='btKeepTerms';
+    var ol='';for(var i=0;i<TERMS.length;i++){ol+='<li>'+esc2(TERMS[i])+'</li>'}
+    mo.innerHTML='<div class="bt-keep-tcard"><h3>Keepメモ 利用規約</h3><p class="bt-keep-sub">はじめてお使いになる前に、以下の内容をご確認ください。</p><ol>'+ol+'</ol><div class="bt-keep-tactions"><button class="bt-keep-agree" id="btKeepAgree">同意して始める</button><button id="btKeepDeny">同意しない</button></div></div>';
+    document.body.appendChild(mo);
+    q('btKeepAgree').addEventListener('click',function(){try{localStorage.setItem(TERMS_KEY,'1')}catch(e){}mo.remove();if(cb)cb()});
+    q('btKeepDeny').addEventListener('click',function(){mo.remove();toast2('利用規約に同意しないとKeepメモは利用できません')});
+  }
+  async function loadMemos(){
+    var uid=myid();var out=[];
+    try{
+      var r=await fetch('/tables/'+TABLE+'?limit=500',{cache:'no-store'});var j=await r.json();
+      var rows=(j&&j.data)?j.data:(Array.isArray(j)?j:[]);
+      for(var i=0;i<rows.length;i++){if(!uid||String(rows[i].user_id)===String(uid))out.push(rows[i])}
+    }catch(e){}
+    out.sort(function(a,b){return (Number(b.created_at)||0)-(Number(a.created_at)||0)});
+    return out;
+  }
+  async function saveMemo(text){
+    var r=await fetch('/tables/'+TABLE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:myid(),text:text,created_at:Date.now()})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return await r.json();
+  }
+  async function delMemo(id){
+    var r=await fetch('/tables/'+TABLE+'/'+encodeURIComponent(id),{method:'DELETE'});
+    if(!r.ok&&r.status!==204)throw new Error('HTTP '+r.status);
+  }
+  async function openKeep(){
+    if(!agreed()){showTerms(function(){openKeep()});return}
+    var old=q('btKeepModal');if(old)old.remove();
+    var mo=document.createElement('div');mo.id='btKeepModal';
+    mo.innerHTML='<div class="bt-keep-card"><h3>Keepメモ</h3><p class="bt-keep-sub">自分だけが見られるメモです。URLや画像のリンクも貼り付けられます。</p><textarea id="btKeepText" placeholder="メモを入力"></textarea><div class="bt-keep-actions"><button class="bt-keep-save" id="btKeepSave">保存</button><button class="bt-keep-close" id="btKeepClose">閉じる</button></div><div class="bt-keep-list" id="btKeepList">読み込み中...</div></div>';
+    mo.addEventListener('click',function(e){if(e.target===mo)mo.remove()});
+    document.body.appendChild(mo);
+    q('btKeepClose').addEventListener('click',function(){mo.remove()});
+    async function render(){
+      var listEl=q('btKeepList');if(!listEl)return;
+      var mrows=await loadMemos();
+      if(!mrows.length){listEl.innerHTML='<p class="bt-keep-sub">まだメモはありません。</p>';return}
+      listEl.innerHTML='';
+      for(var i=0;i<mrows.length;i++){
+        var m=mrows[i];var d=document.createElement('div');d.className='bt-keep-item';
+        var body=document.createElement('div');body.textContent=String(m.text||'');d.appendChild(body);
+        var meta=document.createElement('div');meta.className='bt-keep-meta';
+        var when=document.createElement('span');when.textContent=new Date(Number(m.created_at)||Date.now()).toLocaleString('ja-JP');
+        var b=document.createElement('button');b.className='bt-keep-del';b.textContent='削除';
+        meta.appendChild(when);meta.appendChild(b);d.appendChild(meta);listEl.appendChild(d);
+        (function(id,node){b.addEventListener('click',async function(){if(!confirm('このメモを削除しますか？'))return;try{await delMemo(id);node.remove();toast2('メモを削除しました')}catch(e){toast2('削除に失敗しました')}})})(m.id,d);
+      }
+    }
+    q('btKeepSave').addEventListener('click',async function(){
+      var ta=q('btKeepText');var v=ta?ta.value.trim():'';
+      if(!v){toast2('メモを入力してください');return}
+      var btn=q('btKeepSave');btn.disabled=true;btn.textContent='保存中...';
+      try{await saveMemo(v);if(ta)ta.value='';await render();toast2('メモを保存しました')}
+      catch(e){toast2('保存に失敗しました')}
+      btn.disabled=false;btn.textContent='保存';
+    });
+    await render();
+  }
+  window.__btOpenKeep=openKeep;
+  /* ===== Keepメモ: 自分専用トーク（通話以外の全機能） ===== */
+  function isKeepConv(c){return !!c&&c.type==='self'}
+  function keepConvOf(list){try{return (list||[]).filter(function(c){return c&&c.type==='self'&&Array.isArray(c.member_ids)&&c.member_ids.length===1&&String(c.member_ids[0])===String(ME.id)})[0]||null}catch(e){return null}}
+  async function ensureKeepConv(){
+    var all=[];try{all=await API.listAll('conversations')}catch(e){}
+    var c=keepConvOf(all);if(c)return c;
+    return await API.create('conversations',{type:'self',name:'Keepメモ',member_ids:[ME.id],last_message:'',last_message_at:Date.now()});
+  }
+  function setCall(show){['voiceCallBtn','videoCallBtn'].forEach(function(id){var b=q(id);if(b)b.style.display=show?'':'none'})}
+  function keepHeader(){
+    var t=q('chatHeaderTitle'),a=q('chatHeaderAvatar');
+    if(t)t.textContent='Keepメモ';
+    if(a)a.src='https://api.dicebear.com/7.x/thumbs/svg?seed=keepmemo';
+    setCall(false);
+  }
+  function wrapApp(){
+    if(typeof window.openConversation==='function'&&!window.__btOpenConvWrap){
+      var orig=window.openConversation;
+      window.openConversation=async function(convId){
+        var r=await orig.apply(this,arguments);
+        var c=null;try{c=(conversations||[]).filter(function(x){return x.id===convId})[0]||null}catch(e){}
+        if(!c){try{c=await API.get('conversations',convId)}catch(e){}}
+        if(isKeepConv(c))keepHeader();else setCall(true);
+        return r;
+      };
+      window.__btOpenConvWrap=1;
+    }
+    if(typeof window.renderChatList==='function'&&!window.__btRenderListWrap){
+      var orl=window.renderChatList;
+      window.renderChatList=function(){
+        var saved=null;
+        try{saved=conversations;conversations=(conversations||[]).filter(function(c){return !isKeepConv(c)})}catch(e){}
+        var r=orl.apply(this,arguments);
+        try{if(saved)conversations=saved}catch(e){}
+        return r;
+      };
+      window.__btRenderListWrap=1;
+    }
+  }
+  wrapApp();
+  document.addEventListener('DOMContentLoaded',function(){wrapApp();setTimeout(wrapApp,600)});
+  async function openKeepChat(){
+    try{
+      if(typeof showView==='function')showView('chats');
+      var c=await ensureKeepConv();
+      if(typeof openConversation!=='function'){toast2('画面の準備中です。少し待ってからもう一度お試しください');return}
+      await openConversation(c.id);
+      keepHeader();
+      setInterval(function(){try{if(String(activeConversationId)===String(c.id))keepHeader()}catch(e){}},1200);
+    }catch(e){toast2('Keepメモを開けませんでした: '+(e&&e.message?e.message:''))}
+  }
+  function enterKeep(){if(!agreed()){showTerms(function(){openKeepChat()});return}openKeepChat()}
+  window.__btOpenKeep=enterKeep;window.__btEnterKeep=enterKeep;try{decorate()}catch(e){}
+})();</script><script>(function(){
   if(window.__btMsg)return;window.__btMsg=1;
   var CACHE={};
   function cid(){try{return window.activeConversationId||null}catch(e){return null}}
@@ -960,9 +567,7 @@ const MESSAGE_SHIM = `<script>(function(){
   var n=0,iv=setInterval(function(){n++;if(install()||n>40)clearInterval(iv)},300);install();
   try{new MutationObserver(function(){fill()}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
   setInterval(fill,1200);
-})();</script>`;
-
-const MEDIA_SHIM = `<script>(function(){
+})();</script><script>(function(){
   if(window.__btMediaShim)return;window.__btMediaShim=1;
   var raw=window.fetch.bind(window);
   var MAX_CHUNK=150000,IMAGE_CAP=30*1024*1024,SLICE=1536*1024;
@@ -988,8 +593,8 @@ const MEDIA_SHIM = `<script>(function(){
     return BIG;
   };
   BIG.ready=(async function(){await BIG.sync();return BIG})();
-  function isVideoFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('video/')===0)||/\\.(mp4|mov|m4v|webm|mkv|avi|3gp|mts|m2ts)$/i.test(f.name||''))}
-  function isImageFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('image/')===0)||/\\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(f.name||''))}
+  function isVideoFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('video/')===0)||/\.(mp4|mov|m4v|webm|mkv|avi|3gp|mts|m2ts)$/i.test(f.name||''))}
+  function isImageFile(f){return Boolean(f)&&((f.type&&f.type.indexOf('image/')===0)||/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(f.name||''))}
   async function uploadKVDataUrl(d){
     await BIG.sync();
     if(d.length>4*1024*1024){
@@ -1189,7 +794,7 @@ const MEDIA_SHIM = `<script>(function(){
       await Promise.race([stopped,new Promise(function(r){setTimeout(r,15000)})]);
       if(!chunks.length)throw new Error('圧縮結果が空でした');
       var out=new Blob(chunks,{type:mime.indexOf('mp4')>=0?'video/mp4':'video/webm'});
-      try{out.name=String(file.name||'video').replace(/\\.[^.]+$/,'')+(mime.indexOf('mp4')>=0?'.mp4':'.webm')}catch(e){}
+      try{out.name=String(file.name||'video').replace(/\.[^.]+$/,'')+(mime.indexOf('mp4')>=0?'.mp4':'.webm')}catch(e){}
       return out;
     }finally{
       try{if(rec&&rec.state!=='inactive')rec.stop()}catch(e){}
@@ -1212,7 +817,7 @@ const MEDIA_SHIM = `<script>(function(){
     var target=dur*6000000/8>MAX_SEND*0.9?720:1080;
     var est=dur*(target>=1080?6000000:3000000)/8;
     var mins=Math.ceil(dur/60);
-    var ok=window.confirm(label+'が大きすぎます（'+fmtMB(file.size)+'／上限'+fmtMB(MAX_SEND)+'）。\\n\\n端末内で'+target+'pに圧縮してから送信します。\\n・推定サイズ: 約'+fmtMB(est)+'\\n・所要時間: 動画と同じ長さ（約'+mins+'分）\\n\\nこのまま圧縮を開始しますか？\\n（「キャンセル」で送信を中止します）');
+    var ok=window.confirm(label+'が大きすぎます（'+fmtMB(file.size)+'／上限'+fmtMB(MAX_SEND)+'）。\n\n端末内で'+target+'pに圧縮してから送信します。\n・推定サイズ: 約'+fmtMB(est)+'\n・所要時間: 動画と同じ長さ（約'+mins+'分）\n\nこのまま圧縮を開始しますか？\n（「キャンセル」で送信を中止します）');
     if(!ok){toast('送信を中止しました');return null}
     btProg('圧縮中',0,'動画と同じ長さの時間がかかります（約'+mins+'分）・画面を開いたままお待ちください');
     var out=null;
@@ -1242,7 +847,7 @@ const MEDIA_SHIM = `<script>(function(){
       if(!t||!t.tid||!t.parts||!t.parts.length)return null;
       if(XFER.list[t.tid])return XFER.list[t.tid];
       XFER.list[t.tid]=t;
-      t.parts.forEach(function(p){if(p&&p.u){var m=/^\\/bt-media\\/([A-Za-z0-9-]+)$/.exec(p.u);if(m)XFER.byPart[m[1]]=t}});
+      t.parts.forEach(function(p){if(p&&p.u){var m=/^\/bt-media\/([A-Za-z0-9-]+)$/.exec(p.u);if(m)XFER.byPart[m[1]]=t}});
       xferNotify(t);
       return t;
     }catch(e){return null}
@@ -1324,7 +929,7 @@ const MEDIA_SHIM = `<script>(function(){
     var PART_MAX=Math.max(8*1024*1024,Math.floor(MAX_SEND*0.98));
     var nparts=Math.max(1,Math.ceil(file.size/PART_MAX));
     if(BIG.maxTransferBytes>0&&file.size>BIG.maxTransferBytes){
-      var go=window.confirm('合計 '+fmtMB(file.size)+' は、このアカウントの保存枠（'+fmtMB(BIG.maxTransferBytes)+'）を超えます。\\n保存枠を超えるとアップロードが途中で失敗します。続けますか？');
+      var go=window.confirm('合計 '+fmtMB(file.size)+' は、このアカウントの保存枠（'+fmtMB(BIG.maxTransferBytes)+'）を超えます。\n保存枠を超えるとアップロードが途中で失敗します。続けますか？');
       if(!go)return null;
     }
     var kvRemain=0;
@@ -1399,7 +1004,7 @@ const MEDIA_SHIM = `<script>(function(){
     try{
       var a=(e.target&&e.target.closest)?e.target.closest('a[href]'):null;
       if(!a)return;
-      var m=/^\\/bt-media\\/([A-Za-z0-9-]+)$/.exec(a.getAttribute('href')||'');
+      var m=/^\/bt-media\/([A-Za-z0-9-]+)$/.exec(a.getAttribute('href')||'');
       if(!m)return;
       var t=XFER.byPart[m[1]];
       if(!t)return;
@@ -1463,7 +1068,7 @@ const MEDIA_SHIM = `<script>(function(){
       }else if(isVideoFile(file)){
         var vsend=file;
         if(file.size>MAX_SEND){
-          var how=await btChoice('動画が上限を超えています','サイズ: '+fmtMB(file.size)+' ／ 上限: '+fmtMB(MAX_SEND)+'\\n送信方法を選んでください。',[
+          var how=await btChoice('動画が上限を超えています','サイズ: '+fmtMB(file.size)+' ／ 上限: '+fmtMB(MAX_SEND)+'\n送信方法を選んでください。',[
             {label:'圧縮して送る（1080p・容量を大幅に削減）',value:'zip',primary:true},
             {label:'分割してそのまま送る（無劣化・'+Math.ceil(file.size/(MAX_SEND*0.98))+'分割）',value:'split'},
             {label:'キャンセル',value:null}
@@ -1497,7 +1102,7 @@ const MEDIA_SHIM = `<script>(function(){
         if(!fsend)return;
         file=fsend;
       }else{
-        var howg=await btChoice('ファイルが上限を超えています','サイズ: '+fmtMB(file.size)+' ／ 上限: '+fmtMB(MAX_SEND)+'\\n分割して送信し、受信側で1つのファイルに自動結合できます。',[
+        var howg=await btChoice('ファイルが上限を超えています','サイズ: '+fmtMB(file.size)+' ／ 上限: '+fmtMB(MAX_SEND)+'\n分割して送信し、受信側で1つのファイルに自動結合できます。',[
           {label:'分割して送る（'+Math.ceil(file.size/(MAX_SEND*0.98))+'分割・圧縮できる形式は自動で圧縮）',value:'split',primary:true},
           {label:'キャンセル',value:null}
         ]);
@@ -1530,8 +1135,7 @@ const MEDIA_SHIM = `<script>(function(){
       else if(t.id==='stickerFilesInput'){e.stopImmediatePropagation();e.preventDefault();var fs=[].slice.call(t.files);var pn=(document.getElementById('stickerPackName')||{value:''}).value||'マイスタンプ';t.value='';importStickers(fs,pn)}
     }catch(err){console.error(err)}
   },true);
-})();</script>`;
-const CALL_SCRIPT = `<script>(function(){
+})();</script><script>(function(){
   if(window.__btCall)return;window.__btCall=1;
   var VOICE=["https://bluechat-voice-1.by-youhei.workers.dev", "https://bluechat-voice-2.by-youhei.workers.dev", "https://bluechat-voice-3.by-youhei.workers.dev", "https://bluechat-voice-4.by-youhei.workers.dev", "https://bluechat-voice-5.by-youhei.workers.dev", "https://bluechat-voice-6.by-youhei.workers.dev", "https://bluechat-voice-7.by-youhei.workers.dev", "https://bluechat-voice-8.by-youhei.workers.dev", "https://bluechat-voice-9.by-youhei.workers.dev", "https://bluechat-voice-10.by-youhei.workers.dev", "https://bluechat-voice-11.by-youhei.workers.dev", "https://bluechat-voice-12.by-youhei.workers.dev", "https://bluechat-voice-13.by-youhei.workers.dev", "https://bluechat-voice-14.by-youhei.workers.dev", "https://bluechat-voice-15.by-youhei.workers.dev", "https://bluechat-voice-16.by-youhei.workers.dev", "https://bluechat-voice-17.by-youhei.workers.dev", "https://bluechat-voice-18.by-youhei.workers.dev", "https://bluechat-voice-19.by-youhei.workers.dev", "https://bluechat-voice-20.by-youhei.workers.dev", "https://bluechat-call-1.by-youhei.workers.dev", "https://bluechat-call-2.by-youhei.workers.dev", "https://bluechat-call-3.by-youhei.workers.dev"];
   var VIDEO=["https://bluechat-video-1.by-youhei.workers.dev", "https://bluechat-video-2.by-youhei.workers.dev", "https://bluechat-video-3.by-youhei.workers.dev", "https://bluechat-video-4.by-youhei.workers.dev", "https://bluechat-video-5.by-youhei.workers.dev", "https://bluechat-video-6.by-youhei.workers.dev", "https://bluechat-video-7.by-youhei.workers.dev", "https://bluechat-video-8.by-youhei.workers.dev", "https://bluechat-video-9.by-youhei.workers.dev", "https://bluechat-video-10.by-youhei.workers.dev", "https://bluechat-video-11.by-youhei.workers.dev", "https://bluechat-video-12.by-youhei.workers.dev", "https://bluechat-video-13.by-youhei.workers.dev", "https://bluechat-video-14.by-youhei.workers.dev", "https://bluechat-video-15.by-youhei.workers.dev", "https://bluechat-video-16.by-youhei.workers.dev", "https://bluechat-video-17.by-youhei.workers.dev", "https://bluechat-video-18.by-youhei.workers.dev", "https://bluechat-video-19.by-youhei.workers.dev", "https://bluechat-video-20.by-youhei.workers.dev", "https://bluechat-video-21.by-youhei.workers.dev", "https://bluechat-video-22.by-youhei.workers.dev", "https://bluechat-video-23.by-youhei.workers.dev", "https://bluechat-video-24.by-youhei.workers.dev", "https://bluechat-video-25.by-youhei.workers.dev", "https://bluechat-video-26.by-youhei.workers.dev", "https://bluechat-video-27.by-youhei.workers.dev", "https://bluechat-video-28.by-youhei.workers.dev", "https://bluechat-video-29.by-youhei.workers.dev", "https://bluechat-video-30.by-youhei.workers.dev", "https://bluechat-video-31.by-youhei.workers.dev", "https://bluechat-video-32.by-youhei.workers.dev", "https://bluechat-video-33.by-youhei.workers.dev", "https://bluechat-video-34.by-youhei.workers.dev", "https://bluechat-video-35.by-youhei.workers.dev", "https://bluechat-video-36.by-youhei.workers.dev", "https://bluechat-video-37.by-youhei.workers.dev", "https://bluechat-video-38.by-youhei.workers.dev", "https://bluechat-video-39.by-youhei.workers.dev", "https://bluechat-video-40.by-youhei.workers.dev", "https://bluechat-call-1.by-youhei.workers.dev", "https://bluechat-call-2.by-youhei.workers.dev", "https://bluechat-call-3.by-youhei.workers.dev"];
@@ -1555,7 +1159,7 @@ const CALL_SCRIPT = `<script>(function(){
   function flushIce(){if(!pc||!remoteSet||!iceWait.length)return;var w=iceWait.slice();iceWait=[];w.forEach(function(c){try{pc.addIceCandidate(c)}catch(e){}})}
   function dg(m,c){return m+'（診断'+c+'）'}
   function failCall(m){toastMsg(m);try{hangup()}catch(e){}}
-  function armIce(){if(iceTimer){clearInterval(iceTimer);iceTimer=null}var t0=Date.now(),restarted=false;iceTimer=setInterval(function(){if(!pc){clearInterval(iceTimer);iceTimer=null;return}var cs=pc.connectionState,is=pc.iceConnectionState;if(cs==='connected'||is==='connected'||is==='completed'){clearInterval(iceTimer);iceTimer=null;return}var el=Date.now()-t0;var st=q('callOverlayStatus');if(el>24000){clearInterval(iceTimer);iceTimer=null;var rid=callRow&&callRow.id;if(remoteSet){failCall(dg('\u56DE\u7DDA\u304C\u4E2D\u7D99\u30B5\u30FC\u30D0\u30FC\u3092\u5FC5\u8981\u3068\u3057\u3066\u3044\u307E\u3059','D'));return}(async function(){var an=false;try{var cs2=await API.listAll('calls');var r0=(cs2||[]).filter(function(x){return x.id===rid})[0];an=!!(r0&&r0.status==='answered')}catch(e){}failCall(an?dg('\u76F8\u624B\u306E\u5FDC\u7B54\u30C7\u30FC\u30BF\u3092\u53D7\u3051\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F','E'):dg('\u76F8\u624B\u306B\u547C\u3073\u51FA\u3057\u304C\u5C4A\u3044\u3066\u3044\u307E\u305B\u3093','A'));})();return}if(el>12000&&!restarted){restarted=true;try{if(pc.restartIce)pc.restartIce()}catch(e){}if(st)st.textContent='\u63A5\u7D9A\u3092\u518D\u8A66\u884C\u4E2D\u2026';return}if(el>5000&&st&&st.textContent.indexOf('\u63A5\u7D9A')===0){st.textContent='\u63A5\u7D9A\u4E2D\u2026\uFF08\u56DE\u7DDA\u3092\u78BA\u8A8D\u3057\u3066\u3044\u307E\u3059\uFF09'}},1000)}
+  function armIce(){if(iceTimer){clearInterval(iceTimer);iceTimer=null}var t0=Date.now(),restarted=false;iceTimer=setInterval(function(){if(!pc){clearInterval(iceTimer);iceTimer=null;return}var cs=pc.connectionState,is=pc.iceConnectionState;if(cs==='connected'||is==='connected'||is==='completed'){clearInterval(iceTimer);iceTimer=null;return}var el=Date.now()-t0;var st=q('callOverlayStatus');if(el>24000){clearInterval(iceTimer);iceTimer=null;var rid=callRow&&callRow.id;if(remoteSet){failCall(dg('回線が中継サーバーを必要としています','D'));return}(async function(){var an=false;try{var cs2=await API.listAll('calls');var r0=(cs2||[]).filter(function(x){return x.id===rid})[0];an=!!(r0&&r0.status==='answered')}catch(e){}failCall(an?dg('相手の応答データを受け取れませんでした','E'):dg('相手に呼び出しが届いていません','A'));})();return}if(el>12000&&!restarted){restarted=true;try{if(pc.restartIce)pc.restartIce()}catch(e){}if(st)st.textContent='接続を再試行中…';return}if(el>5000&&st&&st.textContent.indexOf('接続')===0){st.textContent='接続中…（回線を確認しています）'}},1000)}
   function newPC(){var p=new RTCPeerConnection({iceServers:ICE,iceCandidatePoolSize:4});p.onicecandidate=function(e){if(e.candidate)sig('candidate',e.candidate.toJSON?e.candidate.toJSON():e.candidate)};p.ontrack=function(e){var s=e.streams&&e.streams[0];if(!s)return;var rv=q('remoteVideo');if(rv){rv.srcObject=s;rv.style.display=callRow&&callRow.call_type==='video'?'block':'none'}q('callOverlayStatus').textContent='通話中'};p.oniceconnectionstatechange=function(){if(!pc)return;var s=q('callOverlayStatus');if(p.iceConnectionState==='connected'||p.iceConnectionState==='completed'){answered=true;if(s)s.textContent='通話中'}};p.onconnectionstatechange=function(){if(!pc)return;if(p.connectionState==='connected'){answered=true;q('callOverlayStatus').textContent='通話中'}else if(p.connectionState==='failed'){failCall('接続に失敗しました')}};return p}
   function startSigPoll(){if(sigTimer)clearInterval(sigTimer);sigTimer=setInterval(pollSignals,350);pollSignals()}
   async function fetchSignals(c){return await getAll(c,'/api/call/signals/'+encodeURIComponent(ME.id)+'?call_id='+encodeURIComponent(c.id))}
@@ -1607,9 +1211,7 @@ const CALL_SCRIPT = `<script>(function(){
   function boot(){window.__btCallDiag=diag;bind();setInterval(checkIncoming,800);setInterval(bind,4000)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
-</script>`;
-
-const GROUP_SCRIPT = `<script>(function(){
+</script><script>(function(){
   if(window.__btGroup)return;window.__btGroup=1;
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
   function q(id){return document.getElementById(id)}
@@ -1743,14 +1345,12 @@ const GROUP_SCRIPT = `<script>(function(){
   setInterval(function(){try{updateHeaderBtn()}catch(e){}},4000);
   window.__btDebug={openSheet:openSheet,openMembers:openMembers,addGroupUi:addGroupUi,leaveGroup:leaveGroup,deleteDirect:deleteDirect};
 })();
-</script>`;
-
-const STICKER_SHIM = `<script>(function(){
+</script><script>(function(){
   if(window.__btStickerShim)return;window.__btStickerShim=1;
   function toast(s){try{if(typeof showToast==='function')showToast(s)}catch(e){}}
   function myId(){return(typeof ME!=='undefined'&&ME)?ME.id:''}
-  function lineProduct(v){var m=v.match(/store\\.line\\.me\\/stickershop\\/product\\/(\\d+)/)||v.match(/line\\.me\\/S?\\/sticker\\/(\\d+)/)||v.match(/^\\s*(\\d{6,12})\\s*$/);return m?m[1]:null}
-  function lineSingle(v){var m=v.match(/stickershop\\.line-scdn\\.net\\/stickershop\\/v1\\/sticker\\/(\\d+)\\//);return m?{url:v,name:'LINEスタンプ'}:null}
+  function lineProduct(v){var m=v.match(/store\.line\.me\/stickershop\/product\/(\d+)/)||v.match(/line\.me\/S?\/sticker\/(\d+)/)||v.match(/^\s*(\d{6,12})\s*$/);return m?m[1]:null}
+  function lineSingle(v){var m=v.match(/stickershop\.line-scdn\.net\/stickershop\/v1\/sticker\/(\d+)\//);return m?{url:v,name:'LINEスタンプ'}:null}
   function rows(){try{return(typeof myStickers!=='undefined'&&Array.isArray(myStickers))?myStickers:[]}catch(e){return[]}}
   function packOf(row){return row&&Array.isArray(row.pack_stickers)?row:null}
   async function importProduct(pid){
@@ -1767,7 +1367,7 @@ const STICKER_SHIM = `<script>(function(){
       var main='https://stickershop.line-scdn.net/stickershop/v1/product/'+pid+'/LINEStorePC/main.png?v=1';
       var dup=null;rows().forEach(function(x){if(x&&String(x.pack_id||'')===String(pid))dup=x});
       if(dup){
-        if(!confirm('「'+(j.title||'LINEスタンプ')+'」はすでに取り込んでいます。\\n上書き（更新）しますか？')){toast('取り込みを中止しました');return}
+        if(!confirm('「'+(j.title||'LINEスタンプ')+'」はすでに取り込んでいます。\n上書き（更新）しますか？')){toast('取り込みを中止しました');return}
         await API.update('stickers',dup.id,{image_url:main,name:j.title||'LINEスタンプ',pack_stickers:j.stickers,animated:!!j.animated,pack_sounds:j.sounds||null});
         await btRefreshStickers();
         toast((j.title||'スタンプ')+'（'+j.stickers.length+'枚）を更新しました');
@@ -1821,7 +1421,7 @@ const STICKER_SHIM = `<script>(function(){
   async function btDeleteSticker(row){
     if(!row||!row.id)return;
     var label=(row.name||'スタンプ')+(row.pack_stickers?('（'+row.pack_stickers.length+'枚）'):'');
-    if(!confirm('「'+label+'」を削除しますか？\\nこの端末のスタンプ一覧から消えます。'))return;
+    if(!confirm('「'+label+'」を削除しますか？\nこの端末のスタンプ一覧から消えます。'))return;
     try{await API.remove('stickers',row.id);await btRefreshStickers();toast('スタンプを削除しました')}
     catch(e){toast('削除に失敗しました: '+(e&&e.message?e.message:''))}
   }
@@ -1837,7 +1437,7 @@ const STICKER_SHIM = `<script>(function(){
     document.body.appendChild(mo);
     document.getElementById('btPkClose').addEventListener('click',function(){mo.remove()});
     document.getElementById('btPkDel').addEventListener('click',async function(){
-      if(!confirm('「'+(row.name||'LINEスタンプ')+'」を削除しますか？\\nこのパック（'+row.pack_stickers.length+'枚）が一覧から消えます。'))return;
+      if(!confirm('「'+(row.name||'LINEスタンプ')+'」を削除しますか？\nこのパック（'+row.pack_stickers.length+'枚）が一覧から消えます。'))return;
       try{await API.remove('stickers',row.id);mo.remove();await btRefreshStickers();toast('スタンプを削除しました')}
       catch(e){toast('削除に失敗しました')}
     });
@@ -1889,7 +1489,7 @@ const STICKER_SHIM = `<script>(function(){
       e.preventDefault();e.stopPropagation();
       var img=document.createElement('img');
       img.setAttribute('src',t.__btAnimUrl);img.setAttribute('alt','スタンプ');
-      img.className=String(t.className||'').replace('bt-anim-canvas','').replace(/\s+/g,' ').trim();
+      img.className=String(t.className||'').replace('bt-anim-canvas','').replace(/s+/g,' ').trim();
       if(t.parentNode)t.parentNode.replaceChild(img,t);
       arm(img,REPLAY_MS);
     },true);
@@ -1931,9 +1531,7 @@ const STICKER_SHIM = `<script>(function(){
   if(document.readyState!=='loading')enhance();else document.addEventListener('DOMContentLoaded',enhance);
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 })();
-</script>`;
-
-const BAN_SCRIPT = `<script>(function(){
+</script><script>(function(){
   if(window.__btBan)return;window.__btBan=1;
   var CACHE_KEY='bt_ban_active';
   function myId(){try{return localStorage.getItem('bt_current_user')}catch(e){return null}}
@@ -1988,22 +1586,7 @@ const BAN_SCRIPT = `<script>(function(){
   var t=null;function boot(){if(t)clearInterval(t);check();t=setInterval(check,45000)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
-</script>`;
-
-// 上流（Genspark UI）のHTMLに古い世代の注入スクリプトが残っていると、
-// 二重注入や壊れたスクリプトの実行でアプリ全体がエラーになる。
-// 現行版を注入する前に、定義済みマーカーを持つ古い <script> を取り除く。
-const STALE_MARKERS = ['if(window.__btMsg)return', 'if(window.__btKeep)return', 'if(window.__btMediaShim)return', 'if(window.__btCall)return', 'if(window.__btGroup)return', 'if(window.__btStickerShim)return', 'if(window.__btBan)return', 'BT 0925-', 'BT 0926-'];
-function stripStaleInjection(html) {
-  try {
-    return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (block) => {
-      for (const m of STALE_MARKERS) if (block.indexOf(m) >= 0) return '';
-      return block;
-    });
-  } catch (e) { return html; }
-}
-
-const ADS_SHIM = `<script>(function(){
+</script><script>(function(){
 if(window.__btAds)return;window.__btAds=1;
 var SKIP=10;
 var ADS=[
@@ -2149,252 +1732,5 @@ start();
 }catch(e){}
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
-})();</script>`;
-const KEEP_SHIM = `<script>(function(){
-  if(window.__btKeep)return;window.__btKeep=1;
-  var TABLE='keep_memos';
-  var TERMS_KEY='bluetalk_keep_terms_v1';
-  var TERMS=[
-    '本規約は、BlueTalk（以下「本サービス」）が提供する「Keepメモ」（以下「本機能」）の利用条件を定めるものです。',
-    '本機能は、利用者本人が自分用のメモやリンク、画像などを保存し、あとから取り出せる非公開の機能です。保存した内容は本人のアカウントに紐づき、他の利用者には表示されません。',
-    '保存できる内容は、テキストメモ、URL、および画像・動画・ファイルなどの添付です。添付の容量は本サービスのアップロード上限設定に従います。',
-    '次の内容を保存しないでください。法令に違反する内容、第三者の著作権・肖像権・プライバシー等の権利を侵害する内容、本サービスの運営を妨げる内容。本機能は非公開ですが、禁止内容が確認された場合は管理者が削除することがあります。',
-    '保存容量は本サービス全体の保存枠を共有します。上限に達すると新しく保存できなくなります。',
-    'メモは暗号化されずに保存されます。パスワードやカード番号などの機密情報の保存は推奨しません。',
-    '本機能に自動バックアップはありません。利用者が削除したメモ、およびアカウント削除に伴うメモは復元できません。',
-    '本機能の利用により生じた損害について、運営は故意または重大な過失がある場合を除き、責任を負いません。',
-    '運営は、本機能の内容を変更し、または提供を終了することがあります。重要な変更は本サービス上で告知します。',
-    '本規約に同意いただけない場合、本機能をご利用いただけません。'
-  ];
-  function q(id){return document.getElementById(id)}
-  function myid(){try{return (typeof myId==='function')?myId():''}catch(e){return ''}}
-  function esc2(v){var d=document.createElement('div');d.textContent=(v==null?'':String(v));return d.innerHTML}
-  function toast2(m){try{if(typeof toast==='function'){toast(m);return}}catch(e){}try{var t=q('toastMsg');if(t){t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2600)}}catch(e){}}
-  var css=document.createElement('style');
-  css.textContent='#btKeepRow .bt-keep-av{width:48px;height:48px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;flex:none}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepModal{position:fixed;inset:0;z-index:2147483000;background:rgba(3,6,12,.78);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepModal .bt-keep-card{background:#141b26;color:#fff;width:520px;max-width:96vw;max-height:86vh;border-radius:18px;padding:16px;display:flex;flex-direction:column;box-shadow:0 16px 60px rgba(0,0,0,.6)}#btKeepModal h3{margin:0 0 4px;font-size:17px}#btKeepModal .bt-keep-sub{color:#9fb2c9;font-size:12px;margin:0 0 12px}#btKeepModal textarea{width:100%;box-sizing:border-box;min-height:96px;background:#05070c;color:#fff;border:2px solid #42536a;border-radius:12px;padding:10px;font-size:14px;resize:vertical}#btKeepModal .bt-keep-actions{display:flex;gap:8px;margin:10px 0 4px}#btKeepModal .bt-keep-actions button{flex:1;border-radius:12px;padding:11px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepModal .bt-keep-save{background:#1877f2!important;border-color:#1877f2!important}#btKeepModal .bt-keep-close{background:#223047!important;border:none!important}#btKeepModal .bt-keep-list{overflow:auto;margin-top:12px}#btKeepModal .bt-keep-item{background:#101827;border:1px solid #2a3950;border-radius:12px;padding:10px;margin-bottom:8px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}#btKeepModal .bt-keep-meta{color:#9fb2c9;font-size:11px;margin-top:6px;display:flex;justify-content:space-between;align-items:center}#btKeepModal .bt-keep-del{background:#3a1f26;border:none;color:#ff9d9d;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}#btKeepTerms{position:fixed;inset:0;z-index:2147483001;background:rgba(3,6,12,.85);display:flex;align-items:center;justify-content:center;padding:14px}#btKeepTerms .bt-keep-tcard{background:#141b26;color:#fff;width:560px;max-width:96vw;max-height:88vh;border-radius:18px;padding:18px;display:flex;flex-direction:column}#btKeepTerms h3{margin:0 0 8px;font-size:17px}#btKeepTerms ol{overflow:auto;padding-left:20px;margin:0 0 12px;font-size:13px;line-height:1.75;color:#dfe8f3}#btKeepTerms li{margin-bottom:8px}#btKeepTerms .bt-keep-tactions{display:flex;gap:8px}#btKeepTerms button{flex:1;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;border:2px solid #fff;background:#000;color:#fff}#btKeepTerms .bt-keep-agree{background:#1877f2!important;border-color:#1877f2!important}';
-  document.head.appendChild(css);
-  var css2=document.createElement('style');css2.textContent='#btKeepRow{cursor:pointer}#btKeepRow .bt-keep-av{width:44px;height:44px;border-radius:50%;background:#1877f2;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex:none;margin-right:10px}#btKeepRow .bt-keep-badge{background:#1877f2;color:#fff;border-radius:8px;font-size:10px;padding:2px 6px;margin-left:6px;vertical-align:middle}#btKeepRow .name,#btKeepRow .list-name{font-weight:600}';document.head.appendChild(css2);
-  /* ===== 友達リスト: 削除ボタン ===== */
-  function meId(){try{if(typeof ME==='object'&&ME&&ME.id)return ME.id}catch(e){}return myid()}
-  function decorate(){
-    try{
-      var list=listEl();if(!list)return;
-      var rs=list.querySelectorAll('.friend-row');
-      for(var i=0;i<rs.length;i++){
-        var row=rs[i];
-        if(row.id==='btKeepRow'||row.__btDel)continue;
-        var act=row.querySelector('.row-actions');if(!act)continue;
-        var btn=row.querySelector('[data-chat]');var uid=btn?btn.getAttribute('data-chat'):null;
-        if(!uid)continue;
-        row.__btDel=1;
-        var d=document.createElement('button');
-        d.className='mini-btn danger';d.title='友達を削除';d.setAttribute('data-btunfriend',uid);
-        d.innerHTML='<i class="fa-solid fa-user-minus"></i>';
-        act.appendChild(d);
-      }
-    }catch(e){}
-  }
-  async function btUnfriend(uid){
-    var nm='';try{var u=(allUsers||[]).filter(function(x){return String(x.id)===String(uid)})[0];nm=u?(u.display_name||u.username||''):''}catch(e){}
-    if(!confirm('「'+(nm||uid)+'」を友達から削除しますか？\\nトーク履歴は残ります（トーク一覧から開けます）。'))return;
-    try{
-      var my=meId();
-      var rels=await API.listAll('friendships');
-      var tg=rels.filter(function(r){
-        return (String(r.user_id)===String(my)&&String(r.friend_id)===String(uid))||(String(r.user_id)===String(uid)&&String(r.friend_id)===String(my));
-      });
-      var n=0;
-      for(var i=0;i<tg.length;i++){try{if(await API.remove('friendships',tg[i].id))n++}catch(e){}}
-      toast2(n?'友達から削除しました':'削除できませんでした');
-      if(typeof refreshFriends==='function')await refreshFriends();
-      decorate();
-    }catch(e){toast2('削除に失敗しました')}
-  }
-  document.addEventListener('click',function(e){
-    var t=e.target&&e.target.closest?e.target.closest('[data-btunfriend]'):null;if(!t)return;
-    e.preventDefault();e.stopImmediatePropagation();
-    btUnfriend(t.getAttribute('data-btunfriend'));
-  },true);
-  window.__btUnfriend=btUnfriend;
-  function listEl(){
-    var ids=['friendList','friend-list','friendsList','friends-list','friend_list'];
-    for(var i=0;i<ids.length;i++){var el=q(ids[i]);if(el)return el}
-    var r=document.querySelector('.friend-row');if(r&&r.parentNode)return r.parentNode;
-    return null;
-  }
-  function ensureRow(){
-    var list=listEl();if(!list)return false;
-    if(q('btKeepRow'))return true;
-    var item=document.createElement('div');item.id='btKeepRow';
-    var nat=(list.id==='friendList'||list.id==='friendsList'||!!list.querySelector('.friend-row'));
-    if(nat){item.className='friend-row';item.innerHTML='<div class="bt-keep-av">📝</div><div class="info"><div class="name">Keepメモ <span class="bt-keep-badge">自分用</span></div><div class="status">通話以外の全機能が使えます（自分専用）</div></div>'}
-    else{item.className='list-item';item.innerHTML='<div class="bt-keep-av">📝</div><div class="list-info"><div class="list-name">Keepメモ<span class="bt-keep-badge">自分用</span></div><div class="list-preview">通話以外の全機能が使えます（自分専用）</div></div>'}
-    item.addEventListener('click',function(e){e.stopImmediatePropagation();e.preventDefault();enterKeep()},true);
-    list.insertBefore(item,list.firstChild);
-    return true;
-  }
-  var tries=0;
-  var iv=setInterval(function(){tries++;try{ensureRow();decorate()}catch(e){}if(tries>600)clearInterval(iv)},500);
-  try{new MutationObserver(function(){try{ensureRow();decorate()}catch(e){}}).observe(document.documentElement,{childList:true,subtree:true})}catch(e){}
-  function agreed(){try{return localStorage.getItem(TERMS_KEY)==='1'}catch(e){return false}}
-  function showTerms(cb){
-    var old=q('btKeepTerms');if(old)old.remove();
-    var mo=document.createElement('div');mo.id='btKeepTerms';
-    var ol='';for(var i=0;i<TERMS.length;i++){ol+='<li>'+esc2(TERMS[i])+'</li>'}
-    mo.innerHTML='<div class="bt-keep-tcard"><h3>Keepメモ 利用規約</h3><p class="bt-keep-sub">はじめてお使いになる前に、以下の内容をご確認ください。</p><ol>'+ol+'</ol><div class="bt-keep-tactions"><button class="bt-keep-agree" id="btKeepAgree">同意して始める</button><button id="btKeepDeny">同意しない</button></div></div>';
-    document.body.appendChild(mo);
-    q('btKeepAgree').addEventListener('click',function(){try{localStorage.setItem(TERMS_KEY,'1')}catch(e){}mo.remove();if(cb)cb()});
-    q('btKeepDeny').addEventListener('click',function(){mo.remove();toast2('利用規約に同意しないとKeepメモは利用できません')});
-  }
-  async function loadMemos(){
-    var uid=myid();var out=[];
-    try{
-      var r=await fetch('/tables/'+TABLE+'?limit=500',{cache:'no-store'});var j=await r.json();
-      var rows=(j&&j.data)?j.data:(Array.isArray(j)?j:[]);
-      for(var i=0;i<rows.length;i++){if(!uid||String(rows[i].user_id)===String(uid))out.push(rows[i])}
-    }catch(e){}
-    out.sort(function(a,b){return (Number(b.created_at)||0)-(Number(a.created_at)||0)});
-    return out;
-  }
-  async function saveMemo(text){
-    var r=await fetch('/tables/'+TABLE,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:myid(),text:text,created_at:Date.now()})});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    return await r.json();
-  }
-  async function delMemo(id){
-    var r=await fetch('/tables/'+TABLE+'/'+encodeURIComponent(id),{method:'DELETE'});
-    if(!r.ok&&r.status!==204)throw new Error('HTTP '+r.status);
-  }
-  async function openKeep(){
-    if(!agreed()){showTerms(function(){openKeep()});return}
-    var old=q('btKeepModal');if(old)old.remove();
-    var mo=document.createElement('div');mo.id='btKeepModal';
-    mo.innerHTML='<div class="bt-keep-card"><h3>Keepメモ</h3><p class="bt-keep-sub">自分だけが見られるメモです。URLや画像のリンクも貼り付けられます。</p><textarea id="btKeepText" placeholder="メモを入力"></textarea><div class="bt-keep-actions"><button class="bt-keep-save" id="btKeepSave">保存</button><button class="bt-keep-close" id="btKeepClose">閉じる</button></div><div class="bt-keep-list" id="btKeepList">読み込み中...</div></div>';
-    mo.addEventListener('click',function(e){if(e.target===mo)mo.remove()});
-    document.body.appendChild(mo);
-    q('btKeepClose').addEventListener('click',function(){mo.remove()});
-    async function render(){
-      var listEl=q('btKeepList');if(!listEl)return;
-      var mrows=await loadMemos();
-      if(!mrows.length){listEl.innerHTML='<p class="bt-keep-sub">まだメモはありません。</p>';return}
-      listEl.innerHTML='';
-      for(var i=0;i<mrows.length;i++){
-        var m=mrows[i];var d=document.createElement('div');d.className='bt-keep-item';
-        var body=document.createElement('div');body.textContent=String(m.text||'');d.appendChild(body);
-        var meta=document.createElement('div');meta.className='bt-keep-meta';
-        var when=document.createElement('span');when.textContent=new Date(Number(m.created_at)||Date.now()).toLocaleString('ja-JP');
-        var b=document.createElement('button');b.className='bt-keep-del';b.textContent='削除';
-        meta.appendChild(when);meta.appendChild(b);d.appendChild(meta);listEl.appendChild(d);
-        (function(id,node){b.addEventListener('click',async function(){if(!confirm('このメモを削除しますか？'))return;try{await delMemo(id);node.remove();toast2('メモを削除しました')}catch(e){toast2('削除に失敗しました')}})})(m.id,d);
-      }
-    }
-    q('btKeepSave').addEventListener('click',async function(){
-      var ta=q('btKeepText');var v=ta?ta.value.trim():'';
-      if(!v){toast2('メモを入力してください');return}
-      var btn=q('btKeepSave');btn.disabled=true;btn.textContent='保存中...';
-      try{await saveMemo(v);if(ta)ta.value='';await render();toast2('メモを保存しました')}
-      catch(e){toast2('保存に失敗しました')}
-      btn.disabled=false;btn.textContent='保存';
-    });
-    await render();
-  }
-  window.__btOpenKeep=openKeep;
-  /* ===== Keepメモ: 自分専用トーク（通話以外の全機能） ===== */
-  function isKeepConv(c){return !!c&&c.type==='self'}
-  function keepConvOf(list){try{return (list||[]).filter(function(c){return c&&c.type==='self'&&Array.isArray(c.member_ids)&&c.member_ids.length===1&&String(c.member_ids[0])===String(ME.id)})[0]||null}catch(e){return null}}
-  async function ensureKeepConv(){
-    var all=[];try{all=await API.listAll('conversations')}catch(e){}
-    var c=keepConvOf(all);if(c)return c;
-    return await API.create('conversations',{type:'self',name:'Keepメモ',member_ids:[ME.id],last_message:'',last_message_at:Date.now()});
-  }
-  function setCall(show){['voiceCallBtn','videoCallBtn'].forEach(function(id){var b=q(id);if(b)b.style.display=show?'':'none'})}
-  function keepHeader(){
-    var t=q('chatHeaderTitle'),a=q('chatHeaderAvatar');
-    if(t)t.textContent='Keepメモ';
-    if(a)a.src='https://api.dicebear.com/7.x/thumbs/svg?seed=keepmemo';
-    setCall(false);
-  }
-  function wrapApp(){
-    if(typeof window.openConversation==='function'&&!window.__btOpenConvWrap){
-      var orig=window.openConversation;
-      window.openConversation=async function(convId){
-        var r=await orig.apply(this,arguments);
-        var c=null;try{c=(conversations||[]).filter(function(x){return x.id===convId})[0]||null}catch(e){}
-        if(!c){try{c=await API.get('conversations',convId)}catch(e){}}
-        if(isKeepConv(c))keepHeader();else setCall(true);
-        return r;
-      };
-      window.__btOpenConvWrap=1;
-    }
-    if(typeof window.renderChatList==='function'&&!window.__btRenderListWrap){
-      var orl=window.renderChatList;
-      window.renderChatList=function(){
-        var saved=null;
-        try{saved=conversations;conversations=(conversations||[]).filter(function(c){return !isKeepConv(c)})}catch(e){}
-        var r=orl.apply(this,arguments);
-        try{if(saved)conversations=saved}catch(e){}
-        return r;
-      };
-      window.__btRenderListWrap=1;
-    }
-  }
-  wrapApp();
-  document.addEventListener('DOMContentLoaded',function(){wrapApp();setTimeout(wrapApp,600)});
-  async function openKeepChat(){
-    try{
-      if(typeof showView==='function')showView('chats');
-      var c=await ensureKeepConv();
-      if(typeof openConversation!=='function'){toast2('画面の準備中です。少し待ってからもう一度お試しください');return}
-      await openConversation(c.id);
-      keepHeader();
-      setInterval(function(){try{if(String(activeConversationId)===String(c.id))keepHeader()}catch(e){}},1200);
-    }catch(e){toast2('Keepメモを開けませんでした: '+(e&&e.message?e.message:''))}
-  }
-  function enterKeep(){if(!agreed()){showTerms(function(){openKeepChat()});return}openKeepChat()}
-  window.__btOpenKeep=enterKeep;window.__btEnterKeep=enterKeep;try{decorate()}catch(e){}
-})();</script>`;
-async function enhanceHtml(response, env) {
-  const type = response.headers.get('content-type') || ''; if (!type.includes('text/html')) return response;
-  const text = stripStaleInjection(await response.text());
-  let adOn = false;
-  try { adOn = (await readSettingsCached(env)).adsEnabled === true; } catch (e) {}
-  const withManifest = text.includes('</head>') ? text.replace('</head>', EARLY_THEME + '<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://stickershop.line-scdn.net" crossorigin><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="https://api.iconify.design/ic:baseline-chat-bubble.svg?color=%231877f2"></head>') : text;
-  return new Response(withManifest.replace('</body>', '<scr' + 'ipt>window.__btAdOn=' + (adOn ? 'true' : 'false') + ';</scr' + 'ipt>' + DARK_CSS + GLASS_CSS + APP_ENHANCEMENTS + KEEP_SHIM + MESSAGE_SHIM + MEDIA_SHIM + CALL_SCRIPT + GROUP_SCRIPT + STICKER_SHIM + BAN_SCRIPT + ADS_SHIM + BUILD_CHIP + '</body>'), { status: response.status, headers: { ...Object.fromEntries(response.headers), 'Cache-Control': 'no-store', 'X-BlueTalk-Source': 'genspark-ui-cloudflare-kv' } });
-}
-
-const AD_PAGES = {};
-function adPage(path){const k=String(path).replace(/^\/ad\//,"").replace(/\.html$/,"");const h=AD_PAGES[k];if(!h)return new Response("not found",{status:404});return new Response(h,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-cache, no-store"}});}
-export default { async fetch(request, env) {
-  try {
-    return await handler(request, env);
-  } catch (e) {
-    try { return json({ error: 'internal error' }, 500, request.headers.get('Origin') || new URL(request.url).origin); } catch (e2) { return new Response('error', { status: 500 }); }
-  }
-} };
-
-async function handler(request, env) {
-  const incoming = new URL(request.url); const origin = request.headers.get('Origin') || incoming.origin;
-  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
-  if (incoming.pathname === '/manifest.webmanifest') return pwaManifest();
-  if (incoming.pathname === '/sw.js') return serviceWorker();
-  if (incoming.pathname === '/admin.html') return adminPage();
-  const callGateway = await handleCallGateway(request, incoming, origin);
-  if (callGateway) return callGateway;
-  const mediaResponse = await handleMedia(request, env, incoming, origin);
-  if (mediaResponse) return mediaResponse;
-  const lineStickers = await handleLineStickers(request, env, incoming, origin);
-  if (lineStickers) return lineStickers;
-  const accountStatus = await handleAccountStatus(request, env, incoming, origin);
-  if (accountStatus) return accountStatus;
-  const turnCredentials = await handleTurnCredentials(request, env, incoming, origin);
-  if (turnCredentials) return turnCredentials;
-  const btBig = await handleBtBig(request, env, incoming, origin);
-  if (btBig) return btBig;
-  const btMedia = await handleBtMedia(request, env, incoming);
-  if (btMedia) return btMedia;
-  if (incoming.pathname.startsWith('/tables/')) return handleTables(request, env, incoming, origin);
-  if (incoming.pathname.startsWith('/api/admin/')) return handleAdmin(request, env, incoming, origin);
-  if (incoming.pathname.startsWith('/ad/')) return adPage(incoming.pathname);
-  const upstream = new URL(UPSTREAM_ORIGIN); upstream.pathname = incoming.pathname; upstream.search = incoming.search;
-  return enhanceHtml(await fetch(new Request(upstream.toString(), request), { redirect: 'manual' }), env);;
-}
+})();</script><script>(function(){function c(){var d=document.createElement('div');d.id='btBuild';d.textContent='BT 0926-O';d.style.cssText='position:fixed;right:6px;bottom:4px;z-index:2147482000;font-size:10px;color:rgba(160,180,205,.55);pointer-events:none';(document.body||document.documentElement).appendChild(d)}if(document.readyState!=='loading')c();else document.addEventListener('DOMContentLoaded',c)})();</script></body>
+</html>
