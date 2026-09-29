@@ -28,25 +28,40 @@ function json(data, status, origin) {
 function validTable(name) { return /^[A-Za-z0-9_-]{1,64}$/.test(name); }
 function tableKey(name) { return TABLE_PREFIX + name; }
 
+const BT_TCACHE = new Map();
 async function readTable(env, name) {
+  const c = BT_TCACHE.get(name);
+  const now = Date.now();
+  if (c && now - c.at < 1500) return c.value;
   for (let a = 0; a < 3; a++) {
     try {
       const raw = await env.BLUETALK_KV.get(tableKey(name));
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) { if (a === 2) return []; await new Promise((r2) => setTimeout(r2, 120 * (a + 1))); }
+      let v = [];
+      if (raw) { try { const p = JSON.parse(raw); v = Array.isArray(p) ? p : []; } catch (e2) { v = (c && c.value) || []; } }
+      BT_TCACHE.set(name, { at: now, value: v });
+      return v;
+    } catch (e) { await new Promise((r2) => setTimeout(r2, 120 * (a + 1))); }
   }
-  return [];
+  return (c && c.value) || [];
 }
 
+const BT_TQ = new Map();
 async function writeTable(env, name, rows) {
-  let last = null;
-  for (let a = 0; a < 3; a++) {
-    try { await env.BLUETALK_KV.put(tableKey(name), JSON.stringify(rows)); return; }
-    catch (e) { last = e; await new Promise((r2) => setTimeout(r2, 150 * (a + 1))); }
-  }
-  throw last;
+  const run = async () => {
+    let last = null;
+    for (let a = 0; a < 4; a++) {
+      try {
+        await env.BLUETALK_KV.put(tableKey(name), JSON.stringify(rows));
+        BT_TCACHE.set(name, { at: Date.now(), value: rows });
+        return;
+      } catch (e) { last = e; await new Promise((r2) => setTimeout(r2, 350 * (a + 1))); }
+    }
+    throw last;
+  };
+  const prev = BT_TQ.get(name) || Promise.resolve();
+  const p = prev.then(run, run);
+  BT_TQ.set(name, p.catch(() => {}));
+  return p;
 }
 
 async function sha256(value) {
